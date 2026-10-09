@@ -70,6 +70,7 @@ export async function PUT(req: NextRequest) {
     delete data.payableId;
     delete data.createdAt;
     delete data.updatedAt;
+    delete data.periodId;
 
     const row = await prisma.transportJob.update({ where: { id }, data: data as never });
     const payableId = await ensurePayableForTransport(row.id);

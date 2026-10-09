@@ -59,6 +59,8 @@ const empty = {
   enteredBy: "",
   notes: "",
   otherName: "",
+  clientTotalPackage: "",
+  clientAmountPaid: "",
 };
 
 export function TransactionManager({
@@ -75,6 +77,9 @@ export function TransactionManager({
   const [form, setForm] = useState(empty);
   const [options, setOptions] = useState<Option[]>([]);
   const [showOther, setShowOther] = useState(false);
+
+  const isClientCategory =
+    form.category === "Client Receipt" || form.category === "Revenue";
 
   useEffect(() => {
     if (!open) return;
@@ -121,6 +126,8 @@ export function TransactionManager({
       enteredBy: t.enteredBy || "",
       notes: t.notes || "",
       otherName: "",
+      clientTotalPackage: "",
+      clientAmountPaid: "",
     });
     setShowOther(false);
     setOpen(true);
@@ -146,7 +153,8 @@ export function TransactionManager({
     setLoading(true);
     try {
       const party = showOther && form.otherName ? form.otherName : form.party;
-      const subCategory = showOther && form.otherName ? form.otherName : form.subCategory || party;
+      const subCategory =
+        showOther && form.otherName ? form.otherName : form.subCategory || party;
       const payload = {
         ...form,
         periodId,
@@ -154,6 +162,8 @@ export function TransactionManager({
         subCategory,
         debit: parseFloat(form.debit) || 0,
         credit: parseFloat(form.credit) || 0,
+        clientTotalPackage: parseFloat(form.clientTotalPackage) || 0,
+        clientAmountPaid: parseFloat(form.clientAmountPaid) || 0,
       };
       const res = await fetch("/api/transactions", {
         method: editing ? "PUT" : "POST",
@@ -305,6 +315,24 @@ export function TransactionManager({
               value={form.credit}
               onChange={(v) => setForm({ ...form, credit: v })}
             />
+
+            {isClientCategory && (
+              <>
+                <Field
+                  label="Client Total Package (PKR)"
+                  type="number"
+                  value={form.clientTotalPackage}
+                  onChange={(v) => setForm({ ...form, clientTotalPackage: v })}
+                />
+                <Field
+                  label="Client Amount Paid Now (PKR)"
+                  type="number"
+                  value={form.clientAmountPaid}
+                  onChange={(v) => setForm({ ...form, clientAmountPaid: v })}
+                />
+              </>
+            )}
+
             <Select
               label="Payment Method"
               value={form.paymentMethod}

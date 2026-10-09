@@ -68,10 +68,13 @@ export async function getDashboardData(periodId: string) {
   const overduePayables = payables
     .filter((p) => p.daysOverdue > 0)
     .reduce((s, p) => s + p.remaining, 0);
+
+  // NEW: salary payable = sum of outstanding (net − amountPaid)
   const salaryPayable = payroll.reduce(
     (s, p) => s + Math.max(0, p.netPayable - (p.amountPaid ?? 0)),
     0
   );
+
   const hotelRemaining = hotels.reduce((s, h) => s + (h.payable?.remaining ?? 0), 0);
   const commissionsRemaining = commissions
     .filter((c) => c.status === "Accrued")
@@ -113,7 +116,6 @@ export async function getDashboardData(periodId: string) {
   const ticketingCharged = ticketing.reduce((s, t) => s + t.chargedToClient, 0);
   const ticketingProfit = ticketing.reduce((s, t) => s + t.profit, 0);
 
-  // FIXED: Free Cash = Available − Committed
   const committed = totalWeOwe;
   const expectedCollections7d = receivables
     .filter((r) => {

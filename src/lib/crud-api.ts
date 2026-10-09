@@ -143,7 +143,6 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     else if ((settled as number) > 0) d.status = "Partial";
   }
 
-  // Date coercion
   for (const key of Object.keys(d)) {
     if (
       (key.toLowerCase().includes("date") ||
@@ -210,7 +209,7 @@ export function makeCrudHandlers(
       delete data.team;
       delete data.createdAt;
       delete data.updatedAt;
-      if (data.periodId === null) delete data.periodId;
+      delete data.periodId; // never move a record across periods on edit
       const row = await model.update({ where: { id }, data });
       return NextResponse.json(row);
     } catch (e) {

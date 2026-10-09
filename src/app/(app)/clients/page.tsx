@@ -65,7 +65,6 @@ export default async function ClientsPage({
     };
   });
 
-  // Also show receivable-only clients without client master
   for (const r of receivables) {
     if (r.clientId) continue;
     if (clients.some((c) => c.name === r.clientName)) continue;
@@ -122,8 +121,9 @@ export default async function ClientsPage({
                 return (
                   <tr
                     key={r.id}
-                    className={`border-b border-slate-100 ${clickable ? "hover:bg-emerald-50/50 cursor-pointer" : ""
-                      }`}
+                    className={`border-b border-slate-100 ${
+                      clickable ? "hover:bg-emerald-50/50" : ""
+                    }`}
                   >
                     <td className="px-3 py-3 font-medium text-slate-900">
                       {clickable ? (
@@ -143,26 +143,31 @@ export default async function ClientsPage({
                       {formatPKR(r.amountPaid)}
                     </td>
                     <td
-                      className={`px-3 py-3 text-right tabular-nums font-medium ${r.amountDue > 0 ? "text-red-600" : "text-slate-500"
-                        }`}
+                      className={`px-3 py-3 text-right tabular-nums font-medium ${
+                        r.amountDue > 0 ? "text-red-600" : "text-slate-500"
+                      }`}
                     >
                       {formatPKR(r.amountDue)}
                     </td>
                     <td className="px-3 py-3">
                       <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${r.status === "Completed" || r.status === "Settled"
+                        className={`text-xs px-2 py-0.5 rounded-full ${
+                          r.status === "Completed" || r.status === "Settled"
                             ? "bg-emerald-100 text-emerald-800"
                             : r.status === "Ongoing" || r.status === "Partial"
                               ? "bg-amber-100 text-amber-800"
                               : "bg-slate-100 text-slate-600"
-                          }`}
+                        }`}
                       >
                         {r.status}
                       </span>
                     </td>
                     <td className="px-3 py-3 text-right">
                       {clickable && (
-                        <Link href={href} className="inline-block text-slate-400 hover:text-emerald-600">
+                        <Link
+                          href={href}
+                          className="inline-block text-slate-400 hover:text-emerald-600"
+                        >
                           <ChevronRight size={16} />
                         </Link>
                       )}

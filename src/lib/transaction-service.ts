@@ -36,6 +36,8 @@ export type TxnInput = {
   relatedCommissionId?: string | null;
   relatedRefundId?: string | null;
   relatedAdvanceId?: string | null;
+  clientTotalPackage?: number;
+  clientAmountPaid?: number;
 };
 
 async function adjustBank(accountName: string | null | undefined, delta: number) {
@@ -65,10 +67,8 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
   const periodId = input.periodId;
 
-  // Explicit ID overrides
   if (input.relatedPayableId) {
     return applyPaymentToPayables(periodId, party, amount).then((links) => {
-      // ensure the explicit one is in the list
       if (!links.find((l) => l.entityId === input.relatedPayableId)) {
         links.unshift({
           entityType: "payable",
@@ -113,7 +113,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   }
 
   if (cat.includes("advance") && !cat.includes("employee")) {
-    // A new advance payment = create it
     if (input.credit > 0 && party) {
       const adv = await prisma.supplierAdvance.create({
         data: {
@@ -169,7 +168,6 @@ export async function postTransaction(input: TxnInput) {
     });
   }
 
-  // Auto-side-effects for expense-type categories
   const cat = (input.category || "").toLowerCase();
   const party = input.party || input.subCategory || "";
   const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
@@ -216,12 +214,12 @@ export async function postTransaction(input: TxnInput) {
       },
     });
   }
-  // Auto-create Client master row so it shows on /clients
-  const catLower = (input.category || "").toLowerCase();
+
+  // ---- CLIENT AUTO-CREATE / RECEIVABLE / LEDGER ----
   const isClientSide =
-    catLower.includes("receipt") ||
-    catLower.includes("client receipt") ||
-    catLower.includes("revenue");
+    cat.includes("receipt") ||
+    cat.includes("client receipt") ||
+    cat.includes("revenue");
 
   if (isClientSide && party) {
     let client = await prisma.client.findFirst({ where: { name: party } });
@@ -229,27 +227,106 @@ export async function postTransaction(input: TxnInput) {
       client = await prisma.client.create({ data: { name: party } });
     }
 
-    // Only create a receivable if none exists for this client in this period
-    const existingRecv = await prisma.receivable.findFirst({
-      where: { periodId: input.periodId, clientId: client.id },
-    });
-    if (!existingRecv) {
-      const total = input.debit > 0 ? input.debit : input.credit;
-      await prisma.receivable.create({
-        data: {
+    const paidNow =
+      input.clientAmountPaid && input.clientAmountPaid > 0
+        ? input.clientAmountPaid
+        : input.debit > 0
+          ? input.debit
+          : 0;
+
+    const totalPackage =
+      input.clientTotalPackage && input.clientTotalPackage > 0
+        ? input.clientTotalPackage
+        : paidNow;
+
+    if (totalPackage > 0) {
+      let recv = await prisma.receivable.findFirst({
+        where: {
           periodId: input.periodId,
           clientId: client.id,
+          status: { in: ["Open", "Partial", "Overdue"] },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (recv) {
+        const newReceived = recv.amountReceived + paidNow;
+        const newRemaining = Math.max(0, recv.totalPackage - newReceived);
+        await prisma.receivable.update({
+          where: { id: recv.id },
+          data: {
+            amountReceived: newReceived,
+            remainingAmount: newRemaining,
+            status:
+              newRemaining <= 0
+                ? "Settled"
+                : newReceived > 0
+                  ? "Partial"
+                  : "Open",
+          },
+        });
+      } else {
+        const remaining = Math.max(0, totalPackage - paidNow);
+        recv = await prisma.receivable.create({
+          data: {
+            periodId: input.periodId,
+            clientId: client.id,
+            clientName: client.name,
+            totalPackage,
+            amountToReceive: totalPackage,
+            amountReceived: paidNow,
+            remainingAmount: remaining,
+            status:
+              remaining <= 0
+                ? "Settled"
+                : paidNow > 0
+                  ? "Partial"
+                  : "Open",
+            notes: "Auto-created from transaction",
+          },
+        });
+      }
+
+      // Ledger — payment received
+      await prisma.clientLedger.create({
+        data: {
+          clientId: client.id,
           clientName: client.name,
-          totalPackage: total,
-          amountToReceive: total,
-          amountReceived: input.debit > 0 ? input.debit : 0,
-          remainingAmount: 0,
-          status: "Settled",
-          notes: "Auto-created from transaction",
+          tourDate: new Date(input.date),
+          description: input.description || "Client receipt",
+          category: input.category,
+          hotel: "Payment",
+          debit: paidNow,
+          credit: 0,
+          status: "Received",
+          receiptRef: input.notes || null,
+          enteredBy: input.enteredBy || null,
+          notes: "Auto-posted from transaction",
         },
       });
+
+      // Ledger — outstanding balance (if any)
+      const stillOwed = Math.max(0, totalPackage - paidNow);
+      if (stillOwed > 0) {
+        await prisma.clientLedger.create({
+          data: {
+            clientId: client.id,
+            clientName: client.name,
+            tourDate: new Date(input.date),
+            description: "Outstanding balance (advance owed by client)",
+            category: "Receivables",
+            hotel: "Receivables",
+            debit: stillOwed,
+            credit: 0,
+            status: "Open",
+            enteredBy: input.enteredBy || null,
+            notes: "Auto-created outstanding",
+          },
+        });
+      }
     }
   }
+
   return txn;
 }
 
@@ -257,7 +334,6 @@ export async function deleteTransaction(id: string) {
   const txn = await prisma.transaction.findUnique({ where: { id } });
   if (!txn) return null;
 
-  // Reverse the payment effects (best-effort: add back to remaining)
   const links = await prisma.transactionLink.findMany({ where: { transactionId: id } });
   for (const link of links) {
     await reverseLink(link);
@@ -309,7 +385,7 @@ async function reverseLink(link: {
   if (link.entityType === "payroll") {
     const p = await prisma.payrollEntry.findUnique({ where: { id: link.entityId } });
     if (!p) return;
-    const newPaid = Math.max(0, p.amountPaid - amt);
+    const newPaid = Math.max(0, (p.amountPaid ?? 0) - amt);
     const newRemaining = Math.max(0, p.netPayable - newPaid);
     await prisma.payrollEntry.update({
       where: { id: p.id },
@@ -320,6 +396,7 @@ async function reverseLink(link: {
       },
     });
   }
+
   if (link.entityType === "commission") {
     await prisma.commission.update({
       where: { id: link.entityId },
@@ -339,7 +416,6 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
   const old = await prisma.transaction.findUnique({ where: { id } });
   if (!old) return null;
 
-  // Reverse bank + links
   await adjustBank(old.bankAccount, -cashDelta(old.debit, old.credit));
   const links = await prisma.transactionLink.findMany({ where: { transactionId: id } });
   for (const link of links) await reverseLink(link);
