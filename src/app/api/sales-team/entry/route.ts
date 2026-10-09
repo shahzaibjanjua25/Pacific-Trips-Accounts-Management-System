@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
+import { syncPayrollForEmployee } from "@/lib/links-service";
 
 const RATE = 0.025; // 2.5%
 
-/** Recompute commission + payroll for one employee based on all their
- *  SalesPerformance entries in this period. */
 async function recompute(periodId: string, employeeName: string) {
   const emp = await prisma.employee.findFirst({ where: { name: employeeName } });
   if (!emp) return;
@@ -66,41 +65,9 @@ async function recompute(periodId: string, employeeName: string) {
     });
   }
 
-  // Upsert payroll row (Sales team only)
+  // ---- THE KEY FIX: sync the payroll row ----
   if (emp.role === "Sales") {
-    const existingPay = await prisma.payrollEntry.findFirst({
-      where: { periodId, employeeName },
-    });
-    const basic = isLead ? 0 : emp.basicSalary || 40000;
-    const tax = existingPay?.taxDeducted ?? 0;
-    const loan = existingPay?.loanInstallment ?? 0;
-    const other = existingPay?.otherDeductions ?? 0;
-    const paid = existingPay?.amountPaid ?? 0;
-    const netPayable = Math.max(0, basic + commission - tax - loan - other);
-    const remaining = Math.max(0, netPayable - paid);
-    const status = remaining <= 0 && paid > 0 ? "Paid" : paid > 0 ? "Partial" : "Pending";
-
-    if (existingPay) {
-      await prisma.payrollEntry.update({
-        where: { id: existingPay.id },
-        data: { basicSalary: basic, netPayable, remaining, status },
-      });
-    } else {
-      await prisma.payrollEntry.create({
-        data: {
-          periodId,
-          employeeId: emp.id,
-          employeeName,
-          basicSalary: basic,
-          netPayable,
-          remaining,
-          status,
-          notes: isLead
-            ? "Team Lead — 2.5% of team sales"
-            : "Sales — 40k + 2.5% of own sales",
-        },
-      });
-    }
+    await syncPayrollForEmployee(periodId, employeeName);
   }
 }
 
