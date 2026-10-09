@@ -1,23 +1,46 @@
-# syntax.ps1 - check project files for syntax errors
+# syntax.ps1 - TypeScript + Prisma + JSON validation (ASCII-safe)
 
 Write-Host "=== TypeScript check ===" -ForegroundColor Cyan
 npx tsc --noEmit
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "TypeScript: OK" -ForegroundColor Green
+} else {
+    Write-Host "TypeScript: FAILED" -ForegroundColor Red
+}
 
+Write-Host ""
 Write-Host "=== Prisma schema check ===" -ForegroundColor Cyan
 npx prisma validate
 
+Write-Host ""
 Write-Host "=== JSON check ===" -ForegroundColor Cyan
-Get-ChildItem -Recurse -Include *.json,*.jsonc -File |
-    Where-Object { $_.FullName -notmatch "node_modules|\.next|dist|build" } |
-    ForEach-Object {
-        try {
-            $content = Get-Content -LiteralPath $_.FullName -Raw
-            if ($_.Extension -eq ".jsonc") {
-                $content = $content -replace '(?m)^\s*//.*$','' -replace '(?m)/\*[\s\S]*?\*/',''
-            }
-            $null = $content | ConvertFrom-Json
-            Write-Host "OK: $($_.Name)" -ForegroundColor Green
-        } catch {
-            Write-Host "INVALID: $($_.Name) - $_" -ForegroundColor Red
-        }
+
+$skipPatterns = @(
+    "node_modules",
+    "\.next",
+    "package-lock\.json",
+    "pnpm-lock\.yaml",
+    "yarn\.lock"
+)
+
+Get-ChildItem -Recurse -Filter "*.json" | Where-Object {
+    $path = $_.FullName
+    $skip = $false
+    foreach ($pat in $skipPatterns) {
+        if ($path -match $pat) { $skip = $true; break }
     }
+    -not $skip
+} | ForEach-Object {
+    try {
+        $content = Get-Content $_.FullName -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($content)) {
+            Write-Host "EMPTY: $($_.FullName)" -ForegroundColor Yellow
+        } else {
+            $null = $content | ConvertFrom-Json -ErrorAction Stop
+            Write-Host "OK: $($_.FullName)" -ForegroundColor Green
+        }
+    } catch {
+        $msg = $_.Exception.Message
+        Write-Host "INVALID: $($_.FullName) - $msg" -ForegroundColor Red
+    }
+}
