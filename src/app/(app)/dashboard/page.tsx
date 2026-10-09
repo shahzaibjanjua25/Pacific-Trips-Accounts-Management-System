@@ -42,9 +42,15 @@ export default async function DashboardPage({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Section title="1. Cash & Bank" color="bg-emerald-500">
-          <Row label="HBL / Main Balance" value={data.cash.hbl} />
-          <Row label="Meezan / Faisal Balance" value={data.cash.meezan} />
-          <Row label="Total Bank Balance" value={data.cash.totalBank} bold />
+          <Row label="HBL / Main" value={data.cash.hbl} />
+          <Row label="Faisal Bank" value={data.cash.faisal} />
+          <Row label="Meezan Bank" value={data.cash.meezan} />
+          <Row label="UBL" value={data.cash.ubl} />
+          <Row label="Easypaisa" value={data.cash.easypaisa} />
+          <Row label="Jazzcash" value={data.cash.jazzcash} />
+          <div className="border-t pt-2 mt-2">
+            <Row label="TOTAL BANK BALANCE" value={data.cash.totalBank} bold />
+          </div>
           <Row label="Petty Cash Balance" value={data.cash.pettyCash} />
           <div className="border-t pt-2 mt-2">
             <Row label="TOTAL AVAILABLE CASH" value={data.cash.totalAvailable} bold green />
@@ -222,18 +228,17 @@ function Row({
   const display = isText
     ? value
     : isCount
-    ? String(value)
-    : typeof value === "number"
-    ? formatPKR(value)
-    : value;
+      ? String(value)
+      : typeof value === "number"
+        ? formatPKR(value)
+        : value;
 
   return (
     <div className="flex justify-between items-baseline gap-2">
       <span className="text-slate-600 truncate">{label}</span>
       <span
-        className={`tabular-nums shrink-0 ${bold ? "font-bold" : "font-medium"} ${
-          green ? "text-emerald-600" : danger ? "text-red-600" : "text-slate-900"
-        }`}
+        className={`tabular-nums shrink-0 ${bold ? "font-bold" : "font-medium"} ${green ? "text-emerald-600" : danger ? "text-red-600" : "text-slate-900"
+          }`}
       >
         {display}
       </span>

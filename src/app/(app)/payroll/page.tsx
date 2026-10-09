@@ -57,16 +57,17 @@ const fields: FieldDef[] = [
   },
   { key: "bonus", label: "Bonus", type: "number" as const, money: true },
   { key: "basicSalary", label: "Basic Salary", type: "number" as const, money: true },
+  { key: "commissionAmt", label: "Commission (2.5%)", type: "number" as const, money: true, readOnly: true },
   { key: "taxDeducted", label: "Tax Deducted", type: "number" as const, money: true },
-  { key: "loanInstallment", label: "Loan Installment", type: "number" as const, money: true },
+  { key: "loanInstallment", label: "Loan Installment (This Month)", type: "number" as const, money: true },
+  { key: "loanOriginal", label: "Loan Original", type: "number" as const, money: true, readOnly: true },
+  { key: "loanBalance", label: "Loan Balance (Total Owed)", type: "number" as const, money: true, readOnly: true },
   { key: "otherDeductions", label: "Other Deductions", type: "number" as const, money: true },
   { key: "netPayable", label: "Net Payable", type: "number" as const, money: true },
   { key: "amountPaid", label: "Amount Paid", type: "number" as const, money: true },
   { key: "remaining", label: "Remaining", type: "number" as const, money: true },
   { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Partial", "Paid"] },
   { key: "paidDate", label: "Paid Date", type: "date" as const },
-  { key: "loanInstallment", label: "Loan Installment", type: "number" as const, money: true },
-  { key: "loanBalance", label: "Loan Balance", type: "number" as const, money: true, showInTable: true },
   { key: "notes", label: "Notes", type: "textarea" as const },
 ];
 
@@ -112,12 +113,49 @@ export default async function Page({
     if (loan) loansByEmp[e.name] = loan.remainingAmount;
   }
 
+  // Build a lookup of loans by employee name
+  // Build a lookup of loans by employee name
+  const loanByEmp: Record<string, { originalAmount: number; remainingAmount: number }> = {};
+  for (const e of salesStaff) {
+    const loan = e.loans?.[0];
+    if (loan) {
+      loanByEmp[e.name] = {
+        originalAmount: loan.originalAmount,
+        remainingAmount: loan.remainingAmount,
+      };
+    }
+  }
+
+  // Non-Sales staff loans
+  const otherStaffIds = otherStaff.map((e) => e.id);
+  const otherLoans = otherStaffIds.length
+    ? await prisma.employeeLoan.findMany({
+      where: { employeeId: { in: otherStaffIds } },
+    })
+    : [];
+  for (const l of otherLoans) {
+    const emp = otherStaff.find((e) => e.id === l.employeeId);
+    if (emp && !loanByEmp[emp.name]) {
+      loanByEmp[emp.name] = {
+        originalAmount: l.originalAmount,
+        remainingAmount: l.remainingAmount,
+      };
+    }
+  }
+
+  // Commission lookup
+  const commissionByEmp: Record<string, number> = {};
+  for (const c of commissions) {
+    commissionByEmp[c.employeeName] = (commissionByEmp[c.employeeName] || 0) + c.commissionAmt;
+  }
+
   const enriched = rows.map((r) => ({
     ...r,
     team: teamLabel(r.employeeName, roleByName[r.employeeName]),
-    loanBalance: loansByEmp[r.employeeName] ?? 0,
+    commissionAmt: commissionByEmp[r.employeeName] ?? 0,
+    loanOriginal: loanByEmp[r.employeeName]?.originalAmount ?? 0,
+    loanBalance: loanByEmp[r.employeeName]?.remainingAmount ?? 0,
   }));
-
 
   const salesNames = new Set(salesStaff.map((e) => e.name));
   const salesPayroll = enriched.filter((r) => salesNames.has(r.employeeName));
@@ -213,7 +251,7 @@ export default async function Page({
         )}
       </div>
 
-      {commissions.length > 0 && (
+      {/* {commissions.length > 0 && (
         <div className="bg-white rounded-xl border p-4">
           <h3 className="font-semibold mb-2">Commissions (Sales only)</h3>
           <table className="w-full text-sm">
@@ -245,7 +283,7 @@ export default async function Page({
             </tbody>
           </table>
         </div>
-      )}
+      )} */}
 
       <div>
         <h2 className="text-lg font-semibold mb-2 text-slate-700">

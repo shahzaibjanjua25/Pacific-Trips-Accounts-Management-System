@@ -116,12 +116,14 @@ async function main() {
   });
 
   // ── Bank ──
-  const banks = [
-    { accountName: "UBL", balance: 0 },
-    { accountName: "Faisal / Meezan", balance: 370000 },
-    { accountName: "Easypaisa", balance: 282 },
-    { accountName: "Jazzcash", balance: 10472 },
-  ];
+ // scripts/seed.ts → replace the banks block
+const banks = [
+  { accountName: "UBL", balance: 0 },
+  { accountName: "Faisal Bank", balance: 370000 },
+  { accountName: "Meezan Bank", balance: 0 },
+  { accountName: "Easypaisa", balance: 282 },
+  { accountName: "Jazzcash", balance: 10472 },
+];
   for (const b of banks) {
     await prisma.bankBalance.create({ data: b });
   }

@@ -54,7 +54,8 @@ const empty = {
   debit: "",
   credit: "",
   paymentMethod: "Bank",
-  bankAccount: "Faisal / Meezan",
+  bankAccount: "Faisal Bank",  // was "Faisal / Meezan"
+
   status: "Completed",
   enteredBy: "",
   notes: "",
@@ -121,7 +122,7 @@ export function TransactionManager({
       debit: String(t.debit || 0),
       credit: String(t.credit || 0),
       paymentMethod: t.paymentMethod || "Bank",
-      bankAccount: t.bankAccount || "Faisal / Meezan",
+      bankAccount: t.bankAccount || "Faisal Bank",  // was "Faisal / Meezan"
       status: t.status || "Completed",
       enteredBy: t.enteredBy || "",
       notes: t.notes || "",
@@ -208,11 +209,10 @@ export function TransactionManager({
             Credits: <strong>{formatPKR(totalCredit)}</strong>
           </span>
           <span
-            className={`px-3 py-1.5 rounded-md ${
-              totalDebit - totalCredit === 0
-                ? "bg-emerald-100 text-emerald-800"
-                : "bg-amber-100 text-amber-800"
-            }`}
+            className={`px-3 py-1.5 rounded-md ${totalDebit - totalCredit === 0
+              ? "bg-emerald-100 text-emerald-800"
+              : "bg-amber-100 text-amber-800"
+              }`}
           >
             Balance (D−C): <strong>{formatPKR(totalDebit - totalCredit)}</strong>
           </span>
@@ -343,7 +343,7 @@ export function TransactionManager({
               label="Bank / Cash Account"
               value={form.bankAccount}
               onChange={(v) => setForm({ ...form, bankAccount: v })}
-              options={["UBL", "Faisal / Meezan", "Easypaisa", "Jazzcash", "Petty Cash", "HBL Main"]}
+              options={["UBL", "Faisal Bank", "Meezan Bank", "Easypaisa", "Jazzcash", "Petty Cash", "HBL Main"]}
             />
             <Select
               label="Status"
