@@ -216,7 +216,40 @@ export async function postTransaction(input: TxnInput) {
       },
     });
   }
+  // Auto-create Client master row so it shows on /clients
+  const catLower = (input.category || "").toLowerCase();
+  const isClientSide =
+    catLower.includes("receipt") ||
+    catLower.includes("client receipt") ||
+    catLower.includes("revenue");
 
+  if (isClientSide && party) {
+    let client = await prisma.client.findFirst({ where: { name: party } });
+    if (!client) {
+      client = await prisma.client.create({ data: { name: party } });
+    }
+
+    // Only create a receivable if none exists for this client in this period
+    const existingRecv = await prisma.receivable.findFirst({
+      where: { periodId: input.periodId, clientId: client.id },
+    });
+    if (!existingRecv) {
+      const total = input.debit > 0 ? input.debit : input.credit;
+      await prisma.receivable.create({
+        data: {
+          periodId: input.periodId,
+          clientId: client.id,
+          clientName: client.name,
+          totalPackage: total,
+          amountToReceive: total,
+          amountReceived: input.debit > 0 ? input.debit : 0,
+          remainingAmount: 0,
+          status: "Settled",
+          notes: "Auto-created from transaction",
+        },
+      });
+    }
+  }
   return txn;
 }
 
@@ -274,12 +307,19 @@ async function reverseLink(link: {
   }
 
   if (link.entityType === "payroll") {
+    const p = await prisma.payrollEntry.findUnique({ where: { id: link.entityId } });
+    if (!p) return;
+    const newPaid = Math.max(0, p.amountPaid - amt);
+    const newRemaining = Math.max(0, p.netPayable - newPaid);
     await prisma.payrollEntry.update({
-      where: { id: link.entityId },
-      data: { status: "Pending", paidDate: null },
+      where: { id: p.id },
+      data: {
+        amountPaid: newPaid,
+        status: newRemaining <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Pending",
+        paidDate: newRemaining <= 0 ? p.paidDate : null,
+      },
     });
   }
-
   if (link.entityType === "commission") {
     await prisma.commission.update({
       where: { id: link.entityId },
