@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, Suspense } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 
-type Mode = "login" | "reset" | "change";
+type Mode = "login" | "reset";
 
 function LoginInner() {
   const router = useRouter();
@@ -50,7 +51,9 @@ function LoginInner() {
       setError("Enter your username first");
       return;
     }
-    const res = await fetch(`/api/auth/questions?username=${encodeURIComponent(username)}`);
+    const res = await fetch(
+      `/api/auth/questions?username=${encodeURIComponent(username)}`
+    );
     const data = await res.json();
     if (!res.ok) {
       setError(data.error || "User not found");
@@ -69,7 +72,12 @@ function LoginInner() {
       const res = await fetch("/api/auth/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, answer1: a1, answer2: a2, newPassword }),
+        body: JSON.stringify({
+          username,
+          answer1: a1,
+          answer2: a2,
+          newPassword,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Reset failed");
@@ -90,8 +98,15 @@ function LoginInner() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 space-y-6">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-600 text-white mb-3">
-            <span className="text-2xl font-bold">PT</span>
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white border border-slate-200 overflow-hidden mb-3">
+            <Image
+              src="/logo.jpg"
+              alt="Pacific Trips"
+              width={80}
+              height={80}
+              priority
+              className="object-contain"
+            />
           </div>
           <h1 className="text-2xl font-bold text-slate-900">Pacific Trips</h1>
           <p className="text-sm text-slate-500">Accounting System · Lahore · PKR</p>

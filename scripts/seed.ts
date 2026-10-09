@@ -6,8 +6,15 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
+  const force = process.argv.includes("--force");
+  if (process.env.NODE_ENV === "production" && !force) {
+    console.error("❌ Refusing to seed in production without --force.");
+    process.exit(1);
+  }
+
   // Wipe
   const tables = [
+    "transactionLink",
     "clientLedger", "salesPerformance", "vadet", "ownerTxn", "liability", "asset",
     "bankTxn", "bankBalance", "pettyCashTxn", "marketingExpense", "officeExpense",
     "commission", "payrollEntry", "employeeLoan", "refund", "supplierAdvance",
@@ -27,7 +34,7 @@ async function main() {
   // ── Employees ──
   const empData = [
     { name: "Mr Ahsaan", role: "Sales", basicSalary: 40000 },
-    { name: "Amad Amjad", role: "Sales", basicSalary: 0 }, // Team Lead-Sales
+    { name: "Amad Amjad", role: "Sales", basicSalary: 0 },
     { name: "Maira", role: "Sales", basicSalary: 40000 },
     { name: "Zunaira", role: "Sales", basicSalary: 40000 },
     { name: "Awais", role: "Sales", basicSalary: 40000 },
@@ -43,32 +50,13 @@ async function main() {
     { name: "WAseem Akram", role: "Legal Team", basicSalary: 40000 },
     { name: "Nadeem", role: "Office Boy", basicSalary: 10000 },
   ];
-  // Designation labels for Team column (display)
-  const designation: Record<string, string> = {
-    "Mr Ahsaan": "Sales",
-    "Amad Amjad": "Team Lead-Sales",
-    "Maira": "Sales",
-    "Zunaira": "Sales",
-    "Awais": "Sales",
-    "Malika": "Sales",
-    "Talha": "Sales",
-    "Naimal": "Sales",
-    "Ashir": "Sales",
-    "Izza": "Sales",
-    "Ahmed": "Grapich Designer",
-    "Faisal": "meta marketing",
-    "Abdullah": "CEO",
-    "Kamran": "Acoountant",
-    "WAseem Akram": "Legal Team",
-    "Nadeem": "Office Boy",
-  };
   const employees: Record<string, string> = {};
   for (const e of empData) {
     const row = await prisma.employee.create({ data: e });
     employees[e.name] = row.id;
   }
 
-  // ── Loans (from Payroll sheet) ──
+  // ── Loans ──
   const loans = [
     { name: "Mr Ahsaan", original: 630000, remaining: 600000, installment: 30000 },
     { name: "Amad Amjad", original: 200000, remaining: 180000, installment: 20000 },
@@ -88,11 +76,10 @@ async function main() {
     });
   }
 
-  // ── Payroll (exact Net Salary from Excel) ──
-    // ── Payroll (exact Net Salary from Excel) ──
+  // ── Payroll ──
   const payroll = [
     { name: "Mr Ahsaan", basic: 40000, bonus: 0, loan: 30000, net: 10000, notes: "Loan 630k, installment 30k" },
-    { name: "Amad Amjad", basic: 0, bonus: 0, loan: 20000, net: 0, notes: "Team Lead — no basic; commission via Compute button" },
+    { name: "Amad Amjad", basic: 0, bonus: 0, loan: 20000, net: 0, notes: "Team Lead — commission via Compute button" },
     { name: "Maira", basic: 40000, bonus: 0, loan: 0, net: 40000 },
     { name: "Zunaira", basic: 40000, bonus: 0, loan: 0, net: 40000 },
     { name: "Awais", basic: 40000, bonus: 0, loan: 20000, net: 20000, notes: "Loan 110k, installment 20k" },
@@ -123,10 +110,9 @@ async function main() {
       },
     });
   }
-  // Store Ahmed bonus as negative otherDeductions doesn't work — net is already 63000
   await prisma.payrollEntry.updateMany({
     where: { periodId: period.id, employeeName: "Ahmed" },
-    data: { otherDeductions: -13000 }, // so basic - loan - other = 50k - 0 - (-13k) = 63k if recalculated
+    data: { otherDeductions: -13000 },
   });
 
   // ── Bank ──
@@ -140,26 +126,51 @@ async function main() {
     await prisma.bankBalance.create({ data: b });
   }
 
-  // ── Payables ──
-  const payables = [
-    { supplierName: "Hatopi Resort", category: "Hotel", originalAmount: 924000, amountPaid: 300000, remaining: 624000 },
-    { supplierName: "Alnoor", category: "Hotel", originalAmount: 700000, amountPaid: 300000, remaining: 400000 },
-    { supplierName: "Qayyam Hunza", category: "Hotel", originalAmount: 219000, amountPaid: 150000, remaining: 69000 },
-    { supplierName: "Himmel", category: "Hotel", originalAmount: 490000, amountPaid: 250000, remaining: 240000 },
-    { supplierName: "Qayyam Skardu", category: "Hotel", originalAmount: 403000, amountPaid: 250000, remaining: 153000 },
-    { supplierName: "Shahid", category: "Transport", originalAmount: 1079000, amountPaid: 600000, remaining: 479000 },
-    { supplierName: "Asad", category: "Transport", originalAmount: 291790, amountPaid: 150000, remaining: 141790 },
-    { supplierName: "Rivaaj", category: "Hotel", originalAmount: 314670, amountPaid: 150000, remaining: 164670 },
-    { supplierName: "Kisar Baltistan", category: "Hotel", originalAmount: 461900, amountPaid: 400000, remaining: 61900 },
+  // ── Payables — create + auto-link hotel/transport detail
+  const payablesData = [
+    { supplierName: "Hatopi Resort", category: "Hotel", originalAmount: 924000, amountPaid: 300000 },
+    { supplierName: "Alnoor", category: "Hotel", originalAmount: 700000, amountPaid: 300000 },
+    { supplierName: "Qayyam Hunza", category: "Hotel", originalAmount: 219000, amountPaid: 150000 },
+    { supplierName: "Himmel", category: "Hotel", originalAmount: 490000, amountPaid: 250000 },
+    { supplierName: "Qayyam Skardu", category: "Hotel", originalAmount: 403000, amountPaid: 250000 },
+    { supplierName: "Shahid", category: "Transport", originalAmount: 1079000, amountPaid: 600000 },
+    { supplierName: "Asad", category: "Transport", originalAmount: 291790, amountPaid: 150000 },
+    { supplierName: "Rivaaj", category: "Hotel", originalAmount: 314670, amountPaid: 150000 },
+    { supplierName: "Kisar Baltistan", category: "Hotel", originalAmount: 461900, amountPaid: 400000 },
   ];
-  for (const p of payables) {
-    await prisma.payable.create({
+  for (const p of payablesData) {
+    const remaining = Math.max(0, p.originalAmount - p.amountPaid);
+    const payable = await prisma.payable.create({
       data: {
         periodId: period.id,
-        ...p,
-        status: p.remaining > 0 ? "Partial" : "Paid",
+        supplierName: p.supplierName,
+        category: p.category,
+        originalAmount: p.originalAmount,
+        amountPaid: p.amountPaid,
+        remaining,
+        status: remaining <= 0 ? "Paid" : p.amountPaid > 0 ? "Partial" : "Open",
       },
     });
+
+    if (p.category === "Hotel") {
+      await prisma.hotelBooking.create({
+        data: {
+          periodId: period.id,
+          hotelName: p.supplierName,
+          status: remaining <= 0 ? "Paid" : p.amountPaid > 0 ? "Partial" : "Booked",
+          payableId: payable.id,
+        },
+      });
+    } else if (p.category === "Transport") {
+      await prisma.transportJob.create({
+        data: {
+          periodId: period.id,
+          driverName: p.supplierName,
+          status: remaining <= 0 ? "Settled" : p.amountPaid > 0 ? "Partial" : "Pending",
+          payableId: payable.id,
+        },
+      });
+    }
   }
 
   // ── Office expenses ──
@@ -216,9 +227,7 @@ async function main() {
     { assetName: "Misc", category: "Other", purchaseCost: 100000 },
   ];
   for (const a of assets) {
-    await prisma.asset.create({
-      data: { ...a, currentStatus: "In Use" },
-    });
+    await prisma.asset.create({ data: { ...a, currentStatus: "In Use" } });
   }
 
   // ── Vadets ──
@@ -233,7 +242,7 @@ async function main() {
     await prisma.vadet.create({ data: { periodId: period.id, ...v } });
   }
 
-  // ── Clients + Receivables + ledger from Client Data.xlsx ──
+  // ── Clients + Receivables ──
   const clientRows = [
     {
       name: "Mr Haris",
@@ -294,7 +303,6 @@ async function main() {
   for (const c of clientRows) {
     const client = await prisma.client.create({ data: { name: c.name } });
 
-    // Payment received
     await prisma.clientLedger.create({
       data: {
         clientId: client.id,
@@ -331,12 +339,11 @@ async function main() {
           clientName: c.name,
           hotel: "Receivables",
           debit: c.receivable,
-          credit: c.name === "Mr Bilal" ? c.receivable : 0,
+          credit: 0,
         },
       });
     }
 
-    // Receivable summary for Oct period (Family package 2.7M is aggregate received)
     const totalPkg = c.payment + (c.receivable || 0);
     const received = c.payment;
     const remaining = c.receivable || 0;
@@ -356,7 +363,6 @@ async function main() {
     });
   }
 
-  // Aggregate Family package received 2,700,000 noted on Receivables sheet
   await prisma.receivable.create({
     data: {
       periodId: period.id,
@@ -372,20 +378,8 @@ async function main() {
 
   console.log("Seed complete — Oct-2026 data from Excel loaded.");
 }
-  const force = process.argv.includes("--force");
-  if (process.env.NODE_ENV === "production" && !force) {
-    console.error("❌ Refusing to seed in production without --force.");
-    process.exit(1);
-  }
-  const existing = await prisma.period.count();
-  if (existing > 0 && !force) {
-    console.error(
-      `❌ DB already has ${existing} period(s). Pass --force to wipe & reseed.`
-    );
-    process.exit(1);
-  }
-main()
 
+main()
   .catch((e) => {
     console.error(e);
     process.exit(1);

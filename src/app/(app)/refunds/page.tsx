@@ -5,12 +5,12 @@ import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
   { key: "clientName", label: "Client Name", required: true },
-  { key: "amount", label: "Refund Amount", type: "number" as const, required: true, money: true },
+  { key: "amount", label: "Refund Amount", type: "number", required: true, money: true },
   { key: "reason", label: "Reason" },
-  { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Paid"] },
-  { key: "paidDate", label: "Paid Date", type: "date" as const },
+  { key: "status", label: "Status", type: "select", options: ["Pending", "Paid"] },
+  { key: "paidDate", label: "Paid Date", type: "date" },
   { key: "tripRef", label: "Trip / Booking Ref" },
-  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
+  { key: "notes", label: "Notes", type: "textarea", showInTable: false },
 ];
 
 export default async function Page({
@@ -50,6 +50,7 @@ export default async function Page({
         periodId={current.id}
         fields={fields}
         rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
+        linkedEntityType="refund"
       />
     </div>
   );

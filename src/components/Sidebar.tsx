@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ArrowLeftRight, Users, FileText, Plane, CreditCard,
   Building2, Truck, Ticket, Wallet, RotateCcw, UserCheck, Megaphone,
-  Building, Banknote, Landmark, TrendingUp, Package, Scale, User,
+  Banknote, Landmark, TrendingUp, Package, Scale, User,
   CalendarCheck, Settings, Menu, X, ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
@@ -70,15 +71,30 @@ export function Sidebar() {
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
-        <div className="p-5 border-b border-slate-700">
-          <h1 className="text-lg font-bold tracking-tight">Pacific Trips</h1>
-          <p className="text-xs text-slate-400 mt-0.5">Complete Accounting System</p>
-          <p className="text-[10px] text-slate-500 mt-1">Lahore · PKR · Confidential</p>
+        <div className="p-5 border-b border-slate-700 flex items-center gap-3">
+          <div className="w-11 h-11 rounded-lg bg-white overflow-hidden shrink-0 flex items-center justify-center">
+            <Image
+              src="/logo.jpg"
+              alt="Pacific Trips"
+              width={44}
+              height={44}
+              className="object-contain"
+            />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-base font-bold tracking-tight truncate">
+              Pacific Trips
+            </h1>
+            <p className="text-[10px] text-slate-400 truncate">
+              Lahore · PKR · Confidential
+            </p>
+          </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
           {nav.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            const active =
+              pathname === item.href || pathname.startsWith(item.href + "/");
             const Icon = item.icon;
             return (
               <Link

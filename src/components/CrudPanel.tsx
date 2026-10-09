@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatPKR } from "@/lib/utils";
-import { Pencil, Trash2, Plus, X } from "lucide-react";
+import { Pencil, Trash2, Plus, X, ChevronDown, ChevronRight } from "lucide-react";
+import { LinkedTransactions } from "./LinkedTransactions";
 
 export type FieldDef = {
   key: string;
@@ -12,8 +13,9 @@ export type FieldDef = {
   options?: string[];
   required?: boolean;
   money?: boolean;
-  /** show in table */
   showInTable?: boolean;
+  /** show in the form only, not persisted (used for hotel cost etc.) */
+  transient?: boolean;
 };
 
 type Row = Record<string, unknown> & { id: string };
@@ -25,6 +27,8 @@ export function CrudPanel({
   fields,
   rows,
   extraPayload,
+  /** Optional: show linked transactions under each row */
+  linkedEntityType,
 }: {
   title: string;
   apiPath: string;
@@ -32,14 +36,16 @@ export function CrudPanel({
   fields: FieldDef[];
   rows: Row[];
   extraPayload?: Record<string, unknown>;
+  linkedEntityType?: string; // "payable" | "hotel" | "transport" | ...
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const tableFields = fields.filter((f) => f.showInTable !== false);
+  const tableFields = fields.filter((f) => f.showInTable !== false && !f.transient);
 
   function openAdd() {
     setEditing(null);
@@ -120,6 +126,15 @@ export function CrudPanel({
     }
   }
 
+  function toggleExpand(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -141,7 +156,11 @@ export function CrudPanel({
             <h3 className="font-semibold text-slate-800">
               {editing ? "Edit Record" : "New Record"} (Yellow = Input)
             </h3>
-            <button type="button" onClick={() => setOpen(false)} className="text-slate-500">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-slate-500"
+            >
               <X size={18} />
             </button>
           </div>
@@ -152,7 +171,9 @@ export function CrudPanel({
                 {f.type === "select" ? (
                   <select
                     value={form[f.key] || ""}
-                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                    onChange={(e) =>
+                      setForm({ ...form, [f.key]: e.target.value })
+                    }
                     required={f.required}
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
@@ -165,7 +186,9 @@ export function CrudPanel({
                 ) : f.type === "textarea" ? (
                   <textarea
                     value={form[f.key] || ""}
-                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                    onChange={(e) =>
+                      setForm({ ...form, [f.key]: e.target.value })
+                    }
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     rows={2}
                   />
@@ -173,7 +196,9 @@ export function CrudPanel({
                   <input
                     type={f.type || "text"}
                     value={form[f.key] || ""}
-                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                    onChange={(e) =>
+                      setForm({ ...form, [f.key]: e.target.value })
+                    }
                     required={f.required}
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
@@ -201,6 +226,9 @@ export function CrudPanel({
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
+                  {linkedEntityType && (
+                    <th className="w-8 px-2 py-2.5"></th>
+                  )}
                   {tableFields.map((f) => (
                     <th
                       key={f.key}
@@ -215,44 +243,98 @@ export function CrudPanel({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/80">
-                    {tableFields.map((f) => {
-                      const v = row[f.key];
-                      let display: React.ReactNode = "—";
-                      if (v != null && v !== "") {
-                        if (f.money && typeof v === "number") display = formatPKR(v);
-                        else if (f.type === "date")
-                          display = new Date(v as string).toLocaleDateString("en-GB");
-                        else display = String(v);
-                      }
-                      return (
-                        <td
-                          key={f.key}
-                          className={`px-3 py-2 whitespace-nowrap ${f.money ? "text-right tabular-nums" : ""}`}
-                        >
-                          {display}
+                {rows.map((row) => {
+                  const isExpanded = expanded.has(row.id);
+                  const payableId =
+                    row.payableId ||
+                    (row.payable as { id?: string } | undefined)?.id;
+                  const linkId = linkedEntityType
+                    ? linkedEntityType === "hotel" ||
+                      linkedEntityType === "transport"
+                      ? (payableId as string) || row.id
+                      : row.id
+                    : null;
+                  const linkType =
+                    linkedEntityType === "hotel" ||
+                    linkedEntityType === "transport"
+                      ? "payable"
+                      : linkedEntityType;
+
+                  return (
+                    <>
+                      <tr
+                        key={row.id}
+                        className="border-b border-slate-100 hover:bg-slate-50/80"
+                      >
+                        {linkedEntityType && (
+                          <td className="px-2 py-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(row.id)}
+                              className="text-slate-400 hover:text-slate-700"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown size={14} />
+                              ) : (
+                                <ChevronRight size={14} />
+                              )}
+                            </button>
+                          </td>
+                        )}
+                        {tableFields.map((f) => {
+                          const v = row[f.key];
+                          let display: React.ReactNode = "—";
+                          if (v != null && v !== "") {
+                            if (f.money && typeof v === "number")
+                              display = formatPKR(v);
+                            else if (f.type === "date")
+                              display = new Date(v as string).toLocaleDateString(
+                                "en-GB"
+                              );
+                            else display = String(v);
+                          }
+                          return (
+                            <td
+                              key={f.key}
+                              className={`px-3 py-2 whitespace-nowrap ${
+                                f.money ? "text-right tabular-nums" : ""
+                              }`}
+                            >
+                              {display}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => openEdit(row)}
+                            className="inline-flex p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+                            title="Edit"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            onClick={() => remove(row.id)}
+                            className="inline-flex p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
+                            title="Delete"
+                          >
+                            <Trash2 size={15} />
+                          </button>
                         </td>
-                      );
-                    })}
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => openEdit(row)}
-                        className="inline-flex p-1.5 text-sky-600 hover:bg-sky-50 rounded"
-                        title="Edit"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        onClick={() => remove(row.id)}
-                        className="inline-flex p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
-                        title="Delete"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </tr>
+                      {isExpanded && linkId && linkType && (
+                        <tr key={`${row.id}-exp`} className="bg-slate-50/50">
+                          <td colSpan={tableFields.length + (linkedEntityType ? 2 : 1)} className="px-6 py-3">
+                            <LinkedTransactions
+                              entityType={linkType}
+                              entityId={String(linkId)}
+                              title="Payments linked to this record"
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
               </tbody>
             </table>
           </div>
