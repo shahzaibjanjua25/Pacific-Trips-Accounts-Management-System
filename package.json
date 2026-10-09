@@ -1,17 +1,18 @@
 {
   "name": "pacific-trips-app",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx scripts/seed.ts",
+    "db:reset": "tsx scripts/seed.ts --force",
     "db:studio": "prisma studio",
-    "setup": "prisma generate && prisma db push && tsx scripts/seed.ts"
+    "setup": "prisma generate && prisma db push && tsx scripts/seed.ts --force"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

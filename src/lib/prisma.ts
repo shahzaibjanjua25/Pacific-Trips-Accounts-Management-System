@@ -11,3 +11,13 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+if (typeof process !== "undefined") {
+  process.on("beforeExit", async () => {
+    try {
+      await prisma.$disconnect();
+    } catch {
+      /* ignore */
+    }
+  });
+}
