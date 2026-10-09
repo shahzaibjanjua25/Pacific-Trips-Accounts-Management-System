@@ -6,8 +6,11 @@ import {
   buildSalesTeamWorkbook,
 } from "@/lib/export-excel";
 import { prisma } from "@/lib/prisma";
+import { getSessionUserId } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
+  const uid = await getSessionUserId();
+  if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const periodId = req.nextUrl.searchParams.get("periodId");
     if (!periodId) {
