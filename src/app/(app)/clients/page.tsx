@@ -2,8 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
-import { formatPKR } from "@/lib/utils";
-import { ChevronRight } from "lucide-react";
+import { ClientsTable } from "./ClientsTable";
 
 export default async function ClientsPage({
   searchParams,
@@ -25,7 +24,6 @@ export default async function ClientsPage({
   const receivables = await prisma.receivable.findMany({
     where: { periodId: current.id },
   });
-  const trips = await prisma.trip.findMany({ where: { periodId: current.id } });
   const ledgers = await prisma.clientLedger.findMany();
 
   type Row = {
@@ -33,6 +31,9 @@ export default async function ClientsPage({
     name: string;
     phone: string | null;
     contact: string | null;
+    email: string | null;
+    notes: string | null;
+    totalPackage: number;
     amountPaid: number;
     amountDue: number;
     status: string;
@@ -40,56 +41,62 @@ export default async function ClientsPage({
   };
 
   const rows: Row[] = clients.map((c) => {
-    const recv = receivables.filter((r) => r.clientId === c.id || r.clientName === c.name);
-    const trip = trips.find((t) => t.clientName === c.name);
+    const recv = receivables.filter(
+      (r) => r.clientId === c.id || r.clientName === c.name
+    );
     const ledger = ledgers.filter((l) => l.clientId === c.id);
 
-    // Sum from receivables
-    const recvPaid = recv.reduce((s, r) => s + r.amountReceived, 0);
-    const recvDue = recv.reduce((s, r) => s + r.remainingAmount, 0);
+    // Prefer the Receivable row when it exists — it's the source of truth
+    let totalPackage = 0;
+    let amountPaid = 0;
+    let amountDue = 0;
+    let tripInfo = "—";
+    let status = "—";
 
-    // Sum from ledger rows
-    // - Payment rows use "hotel: Payment" or category "Client Receipt" → debit = money in
-    // - Receivable rows use "hotel: Receivables" → debit = money owed by client
-    const ledgerPaid = ledger
-      .filter(
+    if (recv.length > 0) {
+      totalPackage = recv.reduce((s, r) => s + r.totalPackage, 0);
+      amountPaid = recv.reduce((s, r) => s + r.amountReceived, 0);
+      amountDue = recv.reduce((s, r) => s + r.remainingAmount, 0);
+      tripInfo =
+        recv.find((r) => r.tripDates)?.tripDates ||
+        recv.find((r) => r.destination)?.destination ||
+        "—";
+      status = amountDue <= 0 && amountPaid > 0 ? "Settled" : amountPaid > 0 ? "Partial" : "Open";
+    } else if (ledger.length > 0) {
+      // Fall back to ledger sums
+      const paidRows = ledger.filter(
         (l) =>
           l.hotel === "Payment" ||
           (l.category || "").toLowerCase().includes("receipt") ||
           (l.category || "").toLowerCase().includes("revenue")
-      )
-      .reduce((s, l) => s + (l.debit || 0), 0);
-
-    const ledgerDue = ledger
-      .filter(
+      );
+      const dueRows = ledger.filter(
         (l) =>
           l.hotel === "Receivables" ||
           (l.category || "").toLowerCase().includes("receivable")
-      )
-      .reduce((s, l) => s + (l.debit || 0), 0);
-
-    // Combine both sources: a receivable row and a ledger row may represent
-    // different parts of the same engagement, so sum them.
-    const amountPaid = recvPaid + ledgerPaid;
-    const amountDue = recvDue + ledgerDue;
-
-    let status = trip?.status || "—";
-    if (amountDue <= 0 && amountPaid > 0) status = "Completed";
-    else if (amountDue > 0) status = status === "—" ? "Ongoing" : status;
+      );
+      amountPaid = paidRows.reduce((s, l) => s + (l.debit || 0), 0);
+      amountDue = dueRows.reduce((s, l) => s + (l.debit || 0), 0);
+      totalPackage = amountPaid + amountDue;
+      tripInfo =
+        ledger.find((l) => l.description)?.description ||
+        ledger.find((l) => l.hotel)?.hotel ||
+        "—";
+      status = amountDue <= 0 && amountPaid > 0 ? "Settled" : amountPaid > 0 ? "Partial" : "Open";
+    }
 
     return {
       id: c.id,
       name: c.name,
       phone: c.phone,
       contact: c.contact,
+      email: c.email,
+      notes: c.notes,
+      totalPackage,
       amountPaid,
       amountDue,
       status,
-      tripInfo:
-        trip?.destination ||
-        recv[0]?.tripDates ||
-        recv[0]?.destination ||
-        "—",
+      tripInfo,
     };
   });
 
@@ -103,6 +110,9 @@ export default async function ClientsPage({
       name: r.clientName,
       phone: r.contact,
       contact: r.contact,
+      email: null,
+      notes: null,
+      totalPackage: r.totalPackage,
       amountPaid: r.amountReceived,
       amountDue: r.remainingAmount,
       status: r.status || "Open",
@@ -122,86 +132,7 @@ export default async function ClientsPage({
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
-      {rows.length === 0 ? (
-        <div className="bg-white rounded-xl border p-10 text-center text-slate-500 text-sm">
-          No clients yet. Run seed or add from Settings / Receivables.
-        </div>
-      ) : (
-        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 border-b">
-                {["Client Name", "Phone", "Trip / Package", "Amount Paid", "Amount Due", "Status", ""].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="px-3 py-2.5 text-left text-xs font-semibold text-slate-600 uppercase"
-                    >
-                      {h}
-                    </th>
-                  )
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const clickable = !r.id.startsWith("recv-");
-                const href = `/clients/${r.id}?period=${current.id}`;
-                return (
-                  <tr
-                    key={r.id}
-                    className={`border-b border-slate-100 ${
-                      clickable ? "hover:bg-emerald-50/50" : ""
-                    }`}
-                  >
-                    <td className="px-3 py-3 font-medium text-slate-900">
-                      {clickable ? (
-                        <Link href={href} className="block text-slate-900 hover:text-emerald-700">
-                          {r.name}
-                        </Link>
-                      ) : (
-                        r.name
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-slate-600">{r.phone || r.contact || "—"}</td>
-                    <td className="px-3 py-3 max-w-[180px] truncate">{r.tripInfo}</td>
-                    <td className="px-3 py-3 text-right tabular-nums text-emerald-700">
-                      {formatPKR(r.amountPaid)}
-                    </td>
-                    <td
-                      className={`px-3 py-3 text-right tabular-nums font-medium ${
-                        r.amountDue > 0 ? "text-red-600" : "text-slate-500"
-                      }`}
-                    >
-                      {formatPKR(r.amountDue)}
-                    </td>
-                    <td className="px-3 py-3">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${
-                          r.status === "Completed" || r.status === "Settled"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : r.status === "Ongoing" || r.status === "Partial"
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      {clickable && (
-                        <Link href={href} className="inline-block text-slate-400 hover:text-emerald-600">
-                          <ChevronRight size={16} />
-                        </Link>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <ClientsTable rows={rows} periodId={current.id} />
     </div>
   );
 }
