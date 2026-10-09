@@ -38,7 +38,6 @@ export async function POST(req: NextRequest) {
     const row = await prisma.hotelBooking.create({ data: data as never });
     const payableId = await ensurePayableForHotel(row.id);
 
-    // If user entered cost on the hotel form, forward to payable
     const orig = Number(body.agreedCost) || 0;
     const paid = Number(body.amountPaid) || 0;
     if (payableId && (orig > 0 || paid > 0)) {
@@ -79,6 +78,7 @@ export async function PUT(req: NextRequest) {
     delete data.payableId;
     delete data.createdAt;
     delete data.updatedAt;
+    delete data.periodId;
 
     const row = await prisma.hotelBooking.update({ where: { id }, data: data as never });
     const payableId = await ensurePayableForHotel(row.id);
@@ -117,7 +117,6 @@ export async function DELETE(req: NextRequest) {
 
   const hotel = await prisma.hotelBooking.findUnique({ where: { id } });
   await prisma.hotelBooking.delete({ where: { id } });
-  // Optionally remove orphan payable
   if (hotel?.payableId) {
     const stillLinked = await prisma.hotelBooking.findFirst({
       where: { payableId: hotel.payableId },

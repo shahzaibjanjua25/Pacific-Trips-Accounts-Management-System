@@ -6,7 +6,6 @@ import { ComputePayrollButton } from "@/components/ComputePayrollButton";
 import { InitPayrollButton } from "@/components/InitPayrollButton";
 import { formatPKR } from "@/lib/utils";
 
-/** Exact designations from Excel Payroll sheet */
 const DESIGNATION: Record<string, string> = {
   "Mr Ahsaan": "Sales",
   "Amad Amjad": "Team Lead-Sales",
@@ -62,7 +61,7 @@ const fields: FieldDef[] = [
   { key: "otherDeductions", label: "Other Deductions", type: "number" as const, money: true },
   { key: "netPayable", label: "Net Payable", type: "number" as const, money: true },
   { key: "amountPaid", label: "Amount Paid", type: "number" as const, money: true },
-  { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Paid"] },
+  { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Partial", "Paid"] },
   { key: "paidDate", label: "Paid Date", type: "date" as const },
   { key: "notes", label: "Notes", type: "textarea" as const },
 ];
@@ -117,6 +116,9 @@ export default async function Page({
   const totalOtherNet = otherPayroll.reduce((s, r) => s + r.netPayable, 0);
   const totalComm = commissions.reduce((s, c) => s + c.commissionAmt, 0);
 
+  const totalOutstandingSalary =
+    enriched.reduce((s, r) => s + Math.max(0, r.netPayable - (r.amountPaid ?? 0)), 0);
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -166,6 +168,9 @@ export default async function Page({
         </span>
         <span className="text-sm bg-slate-100 px-3 py-1.5 rounded-md">
           Commissions: <strong>{formatPKR(totalComm)}</strong>
+        </span>
+        <span className="text-sm bg-amber-100 text-amber-900 px-3 py-1.5 rounded-md">
+          Outstanding Salary: <strong>{formatPKR(totalOutstandingSalary)}</strong>
         </span>
       </div>
 

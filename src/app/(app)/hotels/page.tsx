@@ -40,7 +40,6 @@ export default async function Page({
     include: { payable: true },
   });
 
-  // Flatten: expose financial fields from the linked payable + show payableId
   const rows = raw.map((h) => ({
     id: h.id,
     hotelName: h.hotelName,
@@ -76,7 +75,7 @@ export default async function Page({
         periodId={current.id}
         fields={fields}
         rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
-        linkedEntityType="payable"
+        linkedEntityType="hotel"
       />
     </div>
   );

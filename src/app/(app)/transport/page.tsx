@@ -71,7 +71,7 @@ export default async function Page({
         periodId={current.id}
         fields={fields}
         rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
-        linkedEntityType="payable"
+        linkedEntityType="transport"
       />
     </div>
   );

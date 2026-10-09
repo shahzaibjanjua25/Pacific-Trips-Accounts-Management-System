@@ -22,10 +22,6 @@ function prevYearMonth(year: number, month: number) {
   return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
 }
 
-/**
- * Create period if missing. Carry-forward runs ONLY on first creation.
- * Uses a transaction + guard so concurrent calls don't double-apply.
- */
 export async function getOrCreatePeriodWithCarryForward(year: number, month: number) {
   const label = monthLabel(year, month);
 
@@ -34,9 +30,7 @@ export async function getOrCreatePeriodWithCarryForward(year: number, month: num
   });
   if (existing) return { period: existing, carried: false };
 
-  // Serialize creation with a single transaction
   const result = await prisma.$transaction(async (tx) => {
-    // Re-check inside tx
     const recheck = await tx.period.findUnique({
       where: { year_month: { year, month } },
     });
@@ -59,7 +53,6 @@ export async function getOrCreatePeriodWithCarryForward(year: number, month: num
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string) {
-  // 1. Receivables
   const openRecv = await tx.receivable.findMany({
     where: { periodId: fromPeriodId, remainingAmount: { gt: 0 } },
   });
@@ -89,7 +82,6 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     });
   }
 
-  // 2. Payables
   const openPay = await tx.payable.findMany({
     where: { periodId: fromPeriodId, remaining: { gt: 0 } },
   });
@@ -112,11 +104,25 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     });
   }
 
-  // 3. Hotels
   const openHotels = await tx.hotelBooking.findMany({
-    where: { periodId: fromPeriodId, remaining: { gt: 0 } },
+    where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
+    include: { payable: true },
   });
   for (const h of openHotels) {
+    const payable = await tx.payable.create({
+      data: {
+        periodId: toPeriodId,
+        supplierName: h.hotelName,
+        category: "Hotel",
+        description: h.clientName ? `Hotel for ${h.clientName}` : "Hotel booking",
+        originalAmount: h.payable?.remaining ?? 0,
+        amountPaid: 0,
+        remaining: h.payable?.remaining ?? 0,
+        relatedTrip: h.tripRef,
+        status: "Open",
+        notes: "Carried forward",
+      },
+    });
     await tx.hotelBooking.create({
       data: {
         periodId: toPeriodId,
@@ -127,20 +133,32 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
         checkOut: h.checkOut,
         nights: h.nights,
         rooms: h.rooms,
-        agreedCost: h.remaining,
-        amountPaid: 0,
-        remaining: h.remaining,
         status: "Booked",
         notes: "Carried remaining",
+        payableId: payable.id,
       },
     });
   }
 
-  // 4. Transport
   const openTransport = await tx.transportJob.findMany({
-    where: { periodId: fromPeriodId, remaining: { gt: 0 } },
+    where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
+    include: { payable: true },
   });
   for (const t of openTransport) {
+    const payable = await tx.payable.create({
+      data: {
+        periodId: toPeriodId,
+        supplierName: t.driverName || "Driver",
+        category: "Transport",
+        description: t.vehicle || "Transport job",
+        originalAmount: t.payable?.remaining ?? 0,
+        amountPaid: 0,
+        remaining: t.payable?.remaining ?? 0,
+        relatedTrip: t.tripRef,
+        status: "Open",
+        notes: "Carried forward",
+      },
+    });
     await tx.transportJob.create({
       data: {
         periodId: toPeriodId,
@@ -148,17 +166,14 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
         vehicle: t.vehicle,
         clientName: t.clientName,
         tripRef: t.tripRef,
-        agreedCost: t.remaining,
         fuelCost: 0,
-        finalSettlement: 0,
-        remaining: t.remaining,
         status: "Pending",
         notes: "Carried remaining",
+        payableId: payable.id,
       },
     });
   }
 
-  // 5. Supplier advances
   const openAdv = await tx.supplierAdvance.findMany({
     where: { periodId: fromPeriodId, remaining: { gt: 0 } },
   });
@@ -176,7 +191,6 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     });
   }
 
-  // 6. Pending refunds
   const pendingRefunds = await tx.refund.findMany({
     where: { periodId: fromPeriodId, status: "Pending" },
   });
@@ -195,7 +209,6 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     });
   }
 
-  // 7. Payroll (copy structure; loans NOT decremented here)
   const prevPayroll = await tx.payrollEntry.findMany({
     where: { periodId: fromPeriodId },
   });
@@ -216,13 +229,13 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
         loanInstallment: installment,
         otherDeductions: other,
         netPayable: net,
+        amountPaid: 0,
         status: "Pending",
         notes: p.notes ? `${p.notes} | Carried forward` : "Carried forward",
       },
     });
   }
 
-  // 8. Recurring office expenses (dedupe by category)
   const prevOffice = await tx.officeExpense.findMany({
     where: { periodId: fromPeriodId, recurring: true },
   });
@@ -244,7 +257,6 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     });
   }
 
-  // 9. Marketing
   const prevMkt = await tx.marketingExpense.findMany({
     where: { periodId: fromPeriodId },
   });
@@ -261,7 +273,6 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     });
   }
 
-  // 10. Vadets (carry with same amounts; not decremented — advances are not loans)
   const prevVadets = await tx.vadet.findMany({ where: { periodId: fromPeriodId } });
   for (const v of prevVadets) {
     await tx.vadet.create({
@@ -271,27 +282,6 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
         amount: v.amount,
         notes: "Carried forward",
       },
-    });
-  }
-}
-
-/**
- * Called ONLY when payroll is marked as Paid — decrement employee loans.
- */
-export async function applyLoanRepayments(periodId: string) {
-  const paidPayroll = await prisma.payrollEntry.findMany({
-    where: { periodId, status: "Paid" },
-  });
-  for (const p of paidPayroll) {
-    if (!p.employeeId || p.loanInstallment <= 0) continue;
-    const loan = await prisma.employeeLoan.findFirst({
-      where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
-    });
-    if (!loan) continue;
-    const newRem = Math.max(0, loan.remainingAmount - p.loanInstallment);
-    await prisma.employeeLoan.update({
-      where: { id: loan.id },
-      data: { remainingAmount: newRem },
     });
   }
 }
