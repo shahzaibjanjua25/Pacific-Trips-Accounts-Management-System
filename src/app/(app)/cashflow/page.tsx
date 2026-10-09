@@ -24,8 +24,14 @@ export default async function CashFlowPage({
       prisma.bankBalance.findMany(),
       prisma.payrollEntry.findMany({ where: { periodId: current.id, status: "Pending" } }),
       prisma.payable.findMany({ where: { periodId: current.id } }),
-      prisma.hotelBooking.findMany({ where: { periodId: current.id } }),
-      prisma.transportJob.findMany({ where: { periodId: current.id } }),
+      prisma.hotelBooking.findMany({
+        where: { periodId: current.id },
+        include: { payable: true },
+      }),
+      prisma.transportJob.findMany({
+        where: { periodId: current.id },
+        include: { payable: true },
+      }),
       prisma.marketingExpense.findMany({ where: { periodId: current.id } }),
       prisma.officeExpense.findMany({ where: { periodId: current.id } }),
       prisma.receivable.findMany({ where: { periodId: current.id, remainingAmount: { gt: 0 } } }),
@@ -36,8 +42,8 @@ export default async function CashFlowPage({
   const totalAvailable = bankTotal;
   const salariesDue = payroll.reduce((s, p) => s + p.netPayable, 0);
   const supplierDue = payables.reduce((s, p) => s + p.remaining, 0);
-  const hotelDue = hotels.reduce((s, h) => s + h.remaining, 0);
-  const driverDue = transport.reduce((s, t) => s + t.remaining, 0);
+  const hotelDue = hotels.reduce((s, h) => s + (h.payable?.remaining ?? 0), 0);
+  const driverDue = transport.reduce((s, t) => s + (t.payable?.remaining ?? 0), 0);
   const totalCommitted = salariesDue + supplierDue + hotelDue + driverDue;
   const freeCash = totalAvailable - totalCommitted;
 

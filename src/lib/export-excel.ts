@@ -43,7 +43,6 @@ function addSheet(
     views: [{ state: "frozen", ySplit: 2 }],
   });
 
-  // Title row
   ws.mergeCells(1, 1, 1, Math.max(headers.length, 1));
   const titleCell = ws.getCell(1, 1);
   titleCell.value = title;
@@ -51,11 +50,9 @@ function addSheet(
   titleCell.alignment = { vertical: "middle" };
   ws.getRow(1).height = 28;
 
-  // Header row
   const headerRow = ws.addRow(headers);
   styleHeader(headerRow);
 
-  // Data
   for (const r of rows) {
     const row = ws.addRow(r);
     row.eachCell((cell, colNumber) => {
@@ -75,13 +72,11 @@ function addSheet(
     });
   }
 
-  // Column widths
   headers.forEach((h, i) => {
     const col = ws.getColumn(i + 1);
     col.width = Math.min(Math.max(h.length + 2, 12), 28);
   });
 
-  // Auto-filter
   if (headers.length > 0 && rows.length > 0) {
     ws.autoFilter = {
       from: { row: 2, column: 1 },
@@ -105,8 +100,14 @@ export async function buildAccountingWorkbook(periodId: string) {
     prisma.receivable.findMany({ where: { periodId } }),
     prisma.trip.findMany({ where: { periodId } }),
     prisma.payable.findMany({ where: { periodId } }),
-    prisma.hotelBooking.findMany({ where: { periodId } }),
-    prisma.transportJob.findMany({ where: { periodId } }),
+    prisma.hotelBooking.findMany({
+      where: { periodId },
+      include: { payable: true },
+    }),
+    prisma.transportJob.findMany({
+      where: { periodId },
+      include: { payable: true },
+    }),
     prisma.ticketing.findMany({ where: { periodId } }),
     prisma.supplierAdvance.findMany({ where: { periodId } }),
     prisma.refund.findMany({ where: { periodId } }),
@@ -174,18 +175,27 @@ export async function buildAccountingWorkbook(periodId: string) {
     p.remaining, p.dueDate, p.status, p.relatedTrip, p.notes,
   ]), [5, 6, 7], [8]);
 
+  // Hotels — financial numbers come from linked Payable
   addSheet(wb, "Hotels", `Hotels — ${period.label}`, [
     "Hotel","Client","Trip Ref","Check In","Check Out","Nights","Rooms","Agreed Cost","Paid","Remaining","Status","Notes",
   ], hotels.map((h) => [
     h.hotelName, h.clientName, h.tripRef, h.checkIn, h.checkOut, h.nights, h.rooms,
-    h.agreedCost, h.amountPaid, h.remaining, h.status, h.notes,
+    h.payable?.originalAmount ?? 0,
+    h.payable?.amountPaid ?? 0,
+    h.payable?.remaining ?? 0,
+    h.status, h.notes,
   ]), [8, 9, 10], [4, 5]);
 
+  // Transport — financial numbers come from linked Payable
   addSheet(wb, "Transport", `Transport — ${period.label}`, [
     "Driver","Vehicle","Client","Trip Ref","Agreed Cost","Fuel Cost","Final Settlement","Remaining","Status","Notes",
   ], transport.map((t) => [
-    t.driverName, t.vehicle, t.clientName, t.tripRef, t.agreedCost, t.fuelCost,
-    t.finalSettlement, t.remaining, t.status, t.notes,
+    t.driverName, t.vehicle, t.clientName, t.tripRef,
+    t.payable?.originalAmount ?? 0,
+    t.fuelCost,
+    t.payable?.amountPaid ?? 0,
+    t.payable?.remaining ?? 0,
+    t.status, t.notes,
   ]), [5, 6, 7, 8]);
 
   addSheet(wb, "Ticketing", `Ticketing — ${period.label}`, [
@@ -322,7 +332,6 @@ export async function buildClientDataWorkbook(periodId: string) {
       }
     }
 
-    // Totals
     const totalDebit = recv.reduce((s, r) => s + r.amountReceived, 0);
     const totalCredit = recv.reduce((s, r) => s + r.remainingAmount, 0);
     const tot = ws.addRow(["", "", "", "", "TOTALS", "", totalDebit, totalCredit]);
@@ -368,7 +377,6 @@ export async function buildSalesTeamWorkbook(periodId: string) {
     ];
   }), [2, 3, 4, 5, 6]);
 
-  // Policy note
   const policy = wb.addWorksheet("Commission Policy");
   policy.getCell("A1").value = "Sales Commission Policy";
   policy.getCell("A1").font = TITLE_FONT;
