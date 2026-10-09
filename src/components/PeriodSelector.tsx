@@ -51,6 +51,16 @@ export function PeriodSelector({
     }
     const p = await res.json();
     setShowNew(false);
+    if (p.carried) {
+      alert(
+        `Month ${p.label} created.\n\nCarried forward from previous month:\n` +
+          `• Open receivables & payables\n` +
+          `• Salaries (editable)\n` +
+          `• Employee loans (installments applied: Demo staff member 30k, Demo staff member 20k, Demo staff member 20k)\n` +
+          `• Recurring office/marketing expenses\n` +
+          `• Pending refunds & advances`
+      );
+    }
     startTransition(() => {
       router.push(`${pathname}?period=${p.id}`);
       router.refresh();
@@ -104,7 +114,7 @@ export function PeriodSelector({
             onClick={createMonth}
             className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded"
           >
-            Create
+            Create (carry forward)
           </button>
         </div>
       )}

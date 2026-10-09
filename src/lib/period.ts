@@ -1,17 +1,15 @@
 import { prisma } from "./prisma";
 import { monthLabel } from "./utils";
+import { getOrCreatePeriodWithCarryForward } from "./carry-forward";
 
 export async function getOrCreatePeriod(year: number, month: number) {
-  const label = monthLabel(year, month);
-  let period = await prisma.period.findUnique({
-    where: { year_month: { year, month } },
-  });
-  if (!period) {
-    period = await prisma.period.create({
-      data: { year, month, label },
-    });
-  }
+  const { period } = await getOrCreatePeriodWithCarryForward(year, month);
   return period;
+}
+
+/** Create period without error if exists; always runs carry-forward only on create */
+export async function createPeriod(year: number, month: number) {
+  return getOrCreatePeriodWithCarryForward(year, month);
 }
 
 export async function getCurrentPeriod() {
@@ -28,3 +26,5 @@ export async function listPeriods() {
 export async function getPeriodById(id: string) {
   return prisma.period.findUnique({ where: { id } });
 }
+
+export { monthLabel };
