@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ArrowLeftRight, Users, FileText, Plane, CreditCard,
@@ -71,14 +70,13 @@ export function Sidebar() {
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
-        <div className="p-5 border-b border-slate-700 flex items-center gap-3">
-          <div className="w-11 h-11 rounded-lg bg-white overflow-hidden shrink-0 flex items-center justify-center">
-            <Image
+        <div className="p-4 border-b border-slate-700 flex items-center gap-3">
+          <div className="w-12 h-12 rounded-lg bg-white overflow-hidden shrink-0 flex items-center justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src="/logo.jpg"
               alt="Pacific Trips"
-              width={44}
-              height={44}
-              className="object-contain"
+              className="w-full h-full object-contain p-1"
             />
           </div>
           <div className="min-w-0">
