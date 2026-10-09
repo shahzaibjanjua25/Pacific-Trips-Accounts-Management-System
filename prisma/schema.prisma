@@ -362,7 +362,8 @@ model PayrollEntry {
   loanInstallment Float     @default(0)
   otherDeductions Float     @default(0)
   netPayable      Float     @default(0)
-  status          String    @default("Pending")
+  amountPaid      Float     @default(0)   // ← NEW
+  status          String    @default("Pending") // Pending | Partial | Paid
   paidDate        DateTime?
   notes           String?
   createdAt       DateTime  @default(now())
