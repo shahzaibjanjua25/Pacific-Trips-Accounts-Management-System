@@ -133,10 +133,11 @@ export async function getDashboardData(periodId: string) {
   return {
     cash: {
       hbl: bankBalances.find((b) => b.accountName.includes("HBL"))?.balance ?? 0,
-      meezan:
-        bankBalances.find(
-          (b) => b.accountName.includes("Meezan") || b.accountName.includes("Faisal")
-        )?.balance ?? 0,
+      faisal: bankBalances.find((b) => b.accountName.includes("Faisal"))?.balance ?? 0,
+      meezan: bankBalances.find((b) => b.accountName.includes("Meezan"))?.balance ?? 0,
+      ubl: bankBalances.find((b) => b.accountName.includes("UBL"))?.balance ?? 0,
+      easypaisa: bankBalances.find((b) => b.accountName.includes("Easypaisa"))?.balance ?? 0,
+      jazzcash: bankBalances.find((b) => b.accountName.includes("Jazzcash"))?.balance ?? 0,
       totalBank,
       pettyCash: pettyCashBal,
       totalAvailable: totalAvailableCash,

@@ -15,6 +15,8 @@ export type FieldDef = {
   money?: boolean;
   showInTable?: boolean;
   transient?: boolean;
+  /** Display in table only — never sent to the form or the API */
+  readOnly?: boolean;
 };
 
 type Row = Record<string, unknown> & { id: string };
@@ -49,6 +51,7 @@ export function CrudPanel({
     setEditing(null);
     const init: Record<string, string> = {};
     fields.forEach((f) => {
+      if (f.readOnly) return;
       if (f.type === "date") init[f.key] = new Date().toISOString().slice(0, 10);
       else if (f.type === "number") init[f.key] = "0";
       else if (f.type === "select" && f.options?.[0]) init[f.key] = f.options[0];
@@ -62,6 +65,7 @@ export function CrudPanel({
     setEditing(row);
     const init: Record<string, string> = {};
     fields.forEach((f) => {
+      if (f.readOnly) return;
       const v = row[f.key];
       if (f.type === "date" && v) {
         init[f.key] = new Date(v as string).toISOString().slice(0, 10);
@@ -81,6 +85,7 @@ export function CrudPanel({
     try {
       const payload: Record<string, unknown> = { periodId, ...extraPayload };
       fields.forEach((f) => {
+        if (f.readOnly) return;
         if (f.type === "number") payload[f.key] = parseFloat(form[f.key]) || 0;
         else payload[f.key] = form[f.key] || null;
       });
@@ -176,46 +181,49 @@ export function CrudPanel({
             </button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {fields.map((f) => (
-              <label key={f.key} className="block text-xs">
-                <span className="text-slate-600 font-medium">{f.label}</span>
-                {f.type === "select" ? (
-                  <select
-                    value={form[f.key] || ""}
-                    onChange={(e) =>
-                      setForm({ ...form, [f.key]: e.target.value })
-                    }
-                    required={f.required}
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    {(f.options || []).map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                ) : f.type === "textarea" ? (
-                  <textarea
-                    value={form[f.key] || ""}
-                    onChange={(e) =>
-                      setForm({ ...form, [f.key]: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    rows={2}
-                  />
-                ) : (
-                  <input
-                    type={f.type || "text"}
-                    value={form[f.key] || ""}
-                    onChange={(e) =>
-                      setForm({ ...form, [f.key]: e.target.value })
-                    }
-                    required={f.required}
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                )}
-              </label>
-            ))}
+            {fields.map((f) => {
+              if (f.readOnly) return null;
+              return (
+                <label key={f.key} className="block text-xs">
+                  <span className="text-slate-600 font-medium">{f.label}</span>
+                  {f.type === "select" ? (
+                    <select
+                      value={form[f.key] || ""}
+                      onChange={(e) =>
+                        setForm({ ...form, [f.key]: e.target.value })
+                      }
+                      required={f.required}
+                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {(f.options || []).map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  ) : f.type === "textarea" ? (
+                    <textarea
+                      value={form[f.key] || ""}
+                      onChange={(e) =>
+                        setForm({ ...form, [f.key]: e.target.value })
+                      }
+                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      rows={2}
+                    />
+                  ) : (
+                    <input
+                      type={f.type || "text"}
+                      value={form[f.key] || ""}
+                      onChange={(e) =>
+                        setForm({ ...form, [f.key]: e.target.value })
+                      }
+                      required={f.required}
+                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  )}
+                </label>
+              );
+            })}
           </div>
           <button
             type="submit"
