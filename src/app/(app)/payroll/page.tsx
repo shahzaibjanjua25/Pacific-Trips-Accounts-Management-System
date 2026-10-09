@@ -8,6 +8,7 @@ import { formatPKR } from "@/lib/utils";
 
 const fields: FieldDef[] = [
   { key: "employeeName", label: "Employee Name", required: true },
+  { key: "team", label: "Team", type: "select" as const, options: ["Sales", "Staff", "Admin", "Other"] },
   { key: "basicSalary", label: "Basic Salary", type: "number" as const, money: true },
   { key: "taxDeducted", label: "Tax Deducted", type: "number" as const, money: true },
   { key: "loanInstallment", label: "Loan Installment", type: "number" as const, money: true },
@@ -34,7 +35,7 @@ export default async function Page({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [rows, commissions, salesStaff, otherStaff] = await Promise.all([
+  const [rows, commissions, salesStaff, otherStaff, allEmployees] = await Promise.all([
     prisma.payrollEntry.findMany({
       where: { periodId: current.id },
       orderBy: { employeeName: "asc" },
@@ -49,11 +50,24 @@ export default async function Page({
       where: { isActive: true, role: { not: "Sales" } },
       orderBy: { name: "asc" },
     }),
+    prisma.employee.findMany({ where: { isActive: true } }),
   ]);
 
+  // Map employee name → team (role)
+  const teamByName: Record<string, string> = {};
+  for (const e of allEmployees) {
+    teamByName[e.name] = e.role === "Sales" ? "Sales" : e.role || "Staff";
+  }
+
+  // Enrich rows with team for display
+  const enriched = rows.map((r) => ({
+    ...r,
+    team: teamByName[r.employeeName] || "Staff",
+  }));
+
   const salesNames = new Set(salesStaff.map((e) => e.name));
-  const salesPayroll = rows.filter((r) => salesNames.has(r.employeeName));
-  const otherPayroll = rows.filter((r) => !salesNames.has(r.employeeName));
+  const salesPayroll = enriched.filter((r) => salesNames.has(r.employeeName));
+  const otherPayroll = enriched.filter((r) => !salesNames.has(r.employeeName));
 
   const totalSalesNet = salesPayroll.reduce((s, r) => s + r.netPayable, 0);
   const totalOtherNet = otherPayroll.reduce((s, r) => s + r.netPayable, 0);
@@ -72,7 +86,6 @@ export default async function Page({
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
-      {/* Sales team roster */}
       <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
         <h2 className="font-semibold text-emerald-900 mb-2">
           Sales Team ({salesStaff.length} members) — eligible for 2.5% commission
@@ -110,7 +123,7 @@ export default async function Page({
         <InitPayrollButton periodId={current.id} />
         <ComputePayrollButton periodId={current.id} />
         <span className="text-xs text-slate-500">
-          Compute updates <strong>Sales only</strong>: commission from trips/receivables + loan installments
+          Compute updates <strong>Sales only</strong>
         </span>
         <span className="text-sm bg-slate-100 px-3 py-1.5 rounded-md">
           Sales Net: <strong>{formatPKR(totalSalesNet)}</strong>
@@ -123,23 +136,14 @@ export default async function Page({
         </span>
       </div>
 
-      {/* Sales payroll table */}
       <div>
         <h2 className="text-lg font-semibold mb-2 text-emerald-800">
           Sales Team Payroll ({salesPayroll.length})
         </h2>
         {salesPayroll.length === 0 ? (
           <div className="bg-white border rounded-xl p-6 text-sm text-slate-600">
-            No sales payroll rows for this month yet.
-            {salesStaff.length > 0 ? (
-              <>
-                {" "}
-                Click <strong>Compute Sales Payroll</strong> or re-run seed:
-                <code className="ml-1 text-xs bg-slate-100 px-1 rounded">npx tsx scripts/seed.ts</code>
-              </>
-            ) : (
-              <> Add Sales employees in Settings first.</>
-            )}
+            No sales payroll rows. Click <strong>Load team into payroll</strong> or run{" "}
+            <code className="text-xs bg-slate-100 px-1 rounded">npx tsx scripts/seed.ts</code>
           </div>
         ) : (
           <CrudPanel
@@ -152,7 +156,6 @@ export default async function Page({
         )}
       </div>
 
-      {/* Commissions */}
       {commissions.length > 0 && (
         <div className="bg-white rounded-xl border p-4">
           <h3 className="font-semibold mb-2">Commissions (Sales only)</h3>
@@ -160,6 +163,7 @@ export default async function Page({
             <thead>
               <tr className="text-left text-xs text-slate-500 uppercase border-b">
                 <th className="py-1">Employee</th>
+                <th className="py-1">Team</th>
                 <th className="py-1 text-right">Sale Base</th>
                 <th className="py-1 text-right">Rate</th>
                 <th className="py-1 text-right">Commission</th>
@@ -170,6 +174,11 @@ export default async function Page({
               {commissions.map((c) => (
                 <tr key={c.id} className="border-t">
                   <td className="py-1.5">{c.employeeName}</td>
+                  <td className="py-1.5">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                      Sales
+                    </span>
+                  </td>
                   <td className="py-1.5 text-right tabular-nums">{formatPKR(c.saleAmount)}</td>
                   <td className="py-1.5 text-right">{c.commissionRate}%</td>
                   <td className="py-1.5 text-right tabular-nums font-medium">
@@ -183,20 +192,17 @@ export default async function Page({
         </div>
       )}
 
-      {/* Other staff */}
       <div>
         <h2 className="text-lg font-semibold mb-2 text-slate-700">
           Other Staff — no commission ({otherPayroll.length})
         </h2>
         <p className="text-xs text-slate-500 mb-2">
-          CEO, Accountant, Marketing, Legal, Office Boy, Designer — fixed salary only.
-          {otherStaff.length > 0 && (
-            <> Roster: {otherStaff.map((e) => e.name).join(", ")}</>
-          )}
+          Fixed salary only.
+          {otherStaff.length > 0 && <> Roster: {otherStaff.map((e) => e.name).join(", ")}</>}
         </p>
         {otherPayroll.length === 0 ? (
           <div className="bg-white border rounded-xl p-6 text-sm text-slate-500">
-            No non-sales payroll rows. Run seed or Add rows below for Abdullah, Kamran, etc.
+            No non-sales payroll rows. Click Load team into payroll.
           </div>
         ) : (
           <CrudPanel

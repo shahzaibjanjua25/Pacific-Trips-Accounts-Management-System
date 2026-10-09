@@ -158,6 +158,7 @@ export function makeCrudHandlers(
       const body = await req.json();
       const data = enrich(modelName, body);
       delete data.id;
+      delete data.team; // virtual display field
       const row = await model.create({ data });
       return NextResponse.json(row);
     } catch (e) {
@@ -174,6 +175,7 @@ export function makeCrudHandlers(
       const data = enrich(modelName, body);
       const id = data.id as string;
       delete data.id;
+      delete data.team;
       delete data.createdAt;
       delete data.updatedAt;
       // don't allow changing periodId on update accidentally to null
