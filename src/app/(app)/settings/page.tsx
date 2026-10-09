@@ -1,7 +1,16 @@
-import { listPeriods, getOrCreatePeriod } from "@/lib/period";
+import { prisma } from "@/lib/prisma";
+import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
+import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
-export default async function Page({
+const empFields: FieldDef[] = [
+  { key: "name", label: "Name", required: true },
+  { key: "role", label: "Role", type: "select", options: ["Sales", "Admin", "Driver", "Staff"] },
+  { key: "basicSalary", label: "Basic Salary", type: "number", money: true },
+  { key: "phone", label: "Phone" },
+];
+
+export default async function SettingsPage({
   searchParams,
 }: {
   searchParams: Promise<{ period?: string }>;
@@ -16,30 +25,27 @@ export default async function Page({
     periods = await listPeriods();
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
+  const employees = await prisma.employee.findMany({ orderBy: { name: "asc" } });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
+          <h1 className="text-2xl font-bold">Settings & Employees</h1>
           <p className="text-sm text-slate-500">
-            Module ready · Data is period-scoped · Switch month above to view history
+            Manage staff. Sales role gets 40k + 2.5% commission. Name &quot;Amad Amjad&quot; = team lead (2.5% of all sales, no basic).
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
-      <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
-        <p className="text-lg font-medium text-slate-700 mb-2">Settings</p>
-        <p className="text-sm max-w-lg mx-auto">
-          Full CRUD forms, auto-calculations (remaining balances, overdue days,
-          profit margins, net pay) and period isolation are implemented in the
-          schema and dashboard. Extend this page with the same DataTable + Form
-          pattern used in Transactions and Receivables.
-        </p>
-        <p className="text-xs mt-4 text-slate-400">
-          Current period: {current.label}
-        </p>
-      </div>
+
+      <CrudPanel
+        title="Employees"
+        apiPath="/api/employees"
+        periodId={current.id}
+        fields={empFields}
+        rows={employees as unknown as (Record<string, unknown> & { id: string })[]}
+      />
     </div>
   );
 }

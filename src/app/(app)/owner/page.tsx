@@ -1,5 +1,17 @@
-import { listPeriods, getOrCreatePeriod } from "@/lib/period";
+import { prisma } from "@/lib/prisma";
+import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
+import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
+
+const fields: FieldDef[] = [
+    { key: "date", label: "Date", type: "date", required: true },
+    { key: "type", label: "Type", type: "select", options: ["Capital Introduced", "Withdrawal"], required: true },
+    { key: "description", label: "Description" },
+    { key: "amountIn", label: "Amount In", type: "number", money: true },
+    { key: "amountOut", label: "Amount Out", type: "number", money: true },
+    { key: "mode", label: "Mode" },
+    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+];
 
 export default async function Page({
   searchParams,
@@ -17,29 +29,28 @@ export default async function Page({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
+  const rows = await prisma.ownerTxn.findMany({
+    where: { periodId: current.id },
+    orderBy: { createdAt: "desc" },
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Owner Account</h1>
-          <p className="text-sm text-slate-500">
-            Module ready · Data is period-scoped · Switch month above to view history
-          </p>
+          <p className="text-sm text-slate-500">Capital introduced & withdrawals — NEVER mix with revenue/expenses</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
-      <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
-        <p className="text-lg font-medium text-slate-700 mb-2">Owner Account</p>
-        <p className="text-sm max-w-lg mx-auto">
-          Full CRUD forms, auto-calculations (remaining balances, overdue days,
-          profit margins, net pay) and period isolation are implemented in the
-          schema and dashboard. Extend this page with the same DataTable + Form
-          pattern used in Transactions and Receivables.
-        </p>
-        <p className="text-xs mt-4 text-slate-400">
-          Current period: {current.label}
-        </p>
-      </div>
+
+      <CrudPanel
+        title="Owner Account"
+        apiPath="/api/owner"
+        periodId={current.id}
+        fields={fields}
+        rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
+      />
     </div>
   );
 }

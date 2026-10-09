@@ -1,13 +1,27 @@
 import { prisma } from "@/lib/prisma";
 import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
-import { DataTable } from "@/components/DataTable";
-import { formatPKR } from "@/lib/utils";
+import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
+const fields: FieldDef[] = [
+    { key: "clientName", label: "Client Name", required: true },
+    { key: "contact", label: "Contact" },
+    { key: "bookingDate", label: "Booking Date", type: "date" },
+    { key: "tripDates", label: "Trip Dates" },
+    { key: "destination", label: "Destination" },
+    { key: "totalPackage", label: "Total Package", type: "number", required: true, money: true },
+    { key: "amountReceived", label: "Amount Received", type: "number", money: true },
+    { key: "dueDate", label: "Due Date", type: "date" },
+    { key: "salesperson", label: "Salesperson" },
+    { key: "status", label: "Status", type: "select", options: ["Open", "Partial", "Settled", "Overdue"] },
+    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+];
 
-export default async function ReceivablesPage({
+export default async function Page({
   searchParams,
-}: { searchParams: Promise<{ period?: string }> }) {
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   const params = await searchParams;
   let periods = await listPeriods();
   let periodId = params.period;
@@ -18,12 +32,11 @@ export default async function ReceivablesPage({
     periods = await listPeriods();
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
+
   const rows = await prisma.receivable.findMany({
     where: { periodId: current.id },
-    orderBy: { bookingDate: "desc" },
+    orderBy: { createdAt: "desc" },
   });
-  const totalOutstanding = rows.reduce((s, r) => s + r.remainingAmount, 0);
-  const overdue = rows.filter((r) => r.daysOverdue > 0).reduce((s, r) => s + r.remainingAmount, 0);
 
   return (
     <div className="space-y-6">
@@ -34,25 +47,13 @@ export default async function ReceivablesPage({
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
-      <div className="flex flex-wrap gap-3 text-sm">
-        <span className="bg-slate-100 px-3 py-1.5 rounded-md">Total Outstanding: <strong className="text-red-600">{formatPKR(totalOutstanding)}</strong></span>
-        <span className="bg-slate-100 px-3 py-1.5 rounded-md">Overdue: <strong className="text-red-600">{formatPKR(overdue)}</strong></span>
-        <span className="bg-slate-100 px-3 py-1.5 rounded-md">Open Clients: <strong>{rows.filter(r => r.status !== "Settled").length}</strong></span>
-      </div>
-      <DataTable
-        columns={[
-          { key: "clientName", header: "Client" },
-          { key: "contact", header: "Contact" },
-          { key: "bookingDate", header: "Booking Date", render: (r) => r.bookingDate ? new Date(r.bookingDate as string).toLocaleDateString("en-GB") : "—" },
-          { key: "tripDates", header: "Trip Dates" },
-          { key: "destination", header: "Destination" },
-          { key: "totalPackage", header: "Total Package", money: true },
-          { key: "amountReceived", header: "Received", money: true },
-          { key: "remainingAmount", header: "Remaining", money: true },
-          { key: "status", header: "Status" },
-          { key: "salesperson", header: "Salesperson" },
-        ]}
-        data={rows as unknown as Record<string, unknown>[]}
+
+      <CrudPanel
+        title="Client Receivables"
+        apiPath="/api/receivables"
+        periodId={current.id}
+        fields={fields}
+        rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
       />
     </div>
   );
