@@ -363,6 +363,7 @@ model PayrollEntry {
   otherDeductions Float     @default(0)
   netPayable      Float     @default(0)
   amountPaid      Float     @default(0)
+  remaining       Float     @default(0)
   status          String    @default("Pending")
   paidDate        DateTime?
   notes           String?

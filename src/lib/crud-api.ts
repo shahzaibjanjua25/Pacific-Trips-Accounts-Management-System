@@ -125,7 +125,12 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     const tax = Number(d.taxDeducted) || 0;
     const loan = Number(d.loanInstallment) || 0;
     const other = Number(d.otherDeductions) || 0;
+    const paid = Number(d.amountPaid) || 0;
     d.netPayable = Math.max(0, basic + bonus - tax - loan - other);
+    d.remaining = Math.max(0, (d.netPayable as number) - paid);
+    if ((d.remaining as number) === 0 && paid > 0) d.status = "Paid";
+    else if (paid > 0) d.status = "Partial";
+    else d.status = d.status || "Pending";
   }
 
   if (model === "liability") {

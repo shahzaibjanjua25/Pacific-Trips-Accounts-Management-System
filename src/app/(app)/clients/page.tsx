@@ -43,15 +43,39 @@ export default async function ClientsPage({
     const recv = receivables.filter((r) => r.clientId === c.id || r.clientName === c.name);
     const trip = trips.find((t) => t.clientName === c.name);
     const ledger = ledgers.filter((l) => l.clientId === c.id);
-    const amountPaid =
-      recv.reduce((s, r) => s + r.amountReceived, 0) ||
-      ledger.reduce((s, l) => s + (l.debit || 0), 0);
-    const amountDue =
-      recv.reduce((s, r) => s + r.remainingAmount, 0) ||
-      Math.max(0, ledger.reduce((s, l) => s + (l.credit || 0) - (l.debit || 0), 0));
+
+    // Sum from receivables
+    const recvPaid = recv.reduce((s, r) => s + r.amountReceived, 0);
+    const recvDue = recv.reduce((s, r) => s + r.remainingAmount, 0);
+
+    // Sum from ledger rows
+    // - Payment rows use "hotel: Payment" or category "Client Receipt" → debit = money in
+    // - Receivable rows use "hotel: Receivables" → debit = money owed by client
+    const ledgerPaid = ledger
+      .filter(
+        (l) =>
+          l.hotel === "Payment" ||
+          (l.category || "").toLowerCase().includes("receipt") ||
+          (l.category || "").toLowerCase().includes("revenue")
+      )
+      .reduce((s, l) => s + (l.debit || 0), 0);
+
+    const ledgerDue = ledger
+      .filter(
+        (l) =>
+          l.hotel === "Receivables" ||
+          (l.category || "").toLowerCase().includes("receivable")
+      )
+      .reduce((s, l) => s + (l.debit || 0), 0);
+
+    // Combine both sources: a receivable row and a ledger row may represent
+    // different parts of the same engagement, so sum them.
+    const amountPaid = recvPaid + ledgerPaid;
+    const amountDue = recvDue + ledgerDue;
+
     let status = trip?.status || "—";
-    if (recv.some((r) => r.status === "Settled") && amountDue <= 0) status = "Completed";
-    else if (recv.some((r) => r.remainingAmount > 0)) status = status === "—" ? "Ongoing" : status;
+    if (amountDue <= 0 && amountPaid > 0) status = "Completed";
+    else if (amountDue > 0) status = status === "—" ? "Ongoing" : status;
 
     return {
       id: c.id,
@@ -61,10 +85,15 @@ export default async function ClientsPage({
       amountPaid,
       amountDue,
       status,
-      tripInfo: trip?.destination || recv[0]?.tripDates || recv[0]?.destination || "—",
+      tripInfo:
+        trip?.destination ||
+        recv[0]?.tripDates ||
+        recv[0]?.destination ||
+        "—",
     };
   });
 
+  // Receivable-only clients (no Client master row)
   for (const r of receivables) {
     if (r.clientId) continue;
     if (clients.some((c) => c.name === r.clientName)) continue;
@@ -127,10 +156,7 @@ export default async function ClientsPage({
                   >
                     <td className="px-3 py-3 font-medium text-slate-900">
                       {clickable ? (
-                        <Link
-                          href={href}
-                          className="block text-slate-900 hover:text-emerald-700"
-                        >
+                        <Link href={href} className="block text-slate-900 hover:text-emerald-700">
                           {r.name}
                         </Link>
                       ) : (
@@ -164,10 +190,7 @@ export default async function ClientsPage({
                     </td>
                     <td className="px-3 py-3 text-right">
                       {clickable && (
-                        <Link
-                          href={href}
-                          className="inline-block text-slate-400 hover:text-emerald-600"
-                        >
+                        <Link href={href} className="inline-block text-slate-400 hover:text-emerald-600">
                           <ChevronRight size={16} />
                         </Link>
                       )}

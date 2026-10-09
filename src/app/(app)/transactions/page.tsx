@@ -1,91 +1,46 @@
-import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import {
-  postTransaction,
-  deleteTransaction,
-  updateTransaction,
-} from "@/lib/transaction-service";
+import { getOrCreatePeriod, listPeriods } from "@/lib/period";
+import { PeriodSelector } from "@/components/PeriodSelector";
+import { TransactionManager } from "./TransactionForm";
 
-export async function GET(req: NextRequest) {
-  const periodId = req.nextUrl.searchParams.get("periodId");
-  if (!periodId) return NextResponse.json([]);
+export default async function TransactionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
+  const params = await searchParams;
+  let periods = await listPeriods();
+  let periodId = params.period;
+
+  if (!periodId || periods.length === 0) {
+    const now = new Date();
+    const current = await getOrCreatePeriod(now.getFullYear(), now.getMonth() + 1);
+    periodId = current.id;
+    periods = await listPeriods();
+  }
+
+  const currentPeriod = periods.find((p) => p.id === periodId) ?? periods[0];
   const txns = await prisma.transaction.findMany({
-    where: { periodId },
+    where: { periodId: currentPeriod.id },
     orderBy: { date: "desc" },
   });
-  return NextResponse.json(txns);
-}
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const txn = await postTransaction({
-      periodId: body.periodId,
-      date: body.date,
-      description: body.description,
-      category: body.category || "Expense",
-      subCategory: body.subCategory,
-      party: body.party,
-      tripRef: body.tripRef,
-      debit: Number(body.debit) || 0,
-      credit: Number(body.credit) || 0,
-      paymentMethod: body.paymentMethod,
-      bankAccount: body.bankAccount,
-      status: body.status || "Completed",
-      enteredBy: body.enteredBy,
-      notes: body.notes,
-      relatedReceivableId: body.relatedReceivableId,
-      relatedPayableId: body.relatedPayableId,
-      relatedPayrollId: body.relatedPayrollId,
-      relatedRefundId: body.relatedRefundId,
-      relatedHotelId: body.relatedHotelId,
-      relatedTransportId: body.relatedTransportId,
-      relatedCommissionId: body.relatedCommissionId,
-      relatedAdvanceId: body.relatedAdvanceId,
-      clientTotalPackage: Number(body.clientTotalPackage) || 0,
-      clientAmountPaid: Number(body.clientAmountPaid) || 0,
-    });
-    return NextResponse.json(txn);
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
-  }
-}
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Daily Transactions / General Ledger</h1>
+          <p className="text-sm text-slate-500">
+            Record EVERY transaction — Category auto-updates Receivables, Payables, Bank, Expenses & more
+          </p>
+        </div>
+        <PeriodSelector periods={periods} currentId={currentPeriod.id} />
+      </div>
 
-export async function PUT(req: NextRequest) {
-  try {
-    const body = await req.json();
-    if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
-    const txn = await updateTransaction(body.id, {
-      date: body.date,
-      description: body.description,
-      category: body.category,
-      subCategory: body.subCategory,
-      party: body.party,
-      tripRef: body.tripRef,
-      debit: body.debit != null ? Number(body.debit) : undefined,
-      credit: body.credit != null ? Number(body.credit) : undefined,
-      paymentMethod: body.paymentMethod,
-      bankAccount: body.bankAccount,
-      status: body.status,
-      enteredBy: body.enteredBy,
-      notes: body.notes,
-    });
-    return NextResponse.json(txn);
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const id = req.nextUrl.searchParams.get("id");
-    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-    await deleteTransaction(id);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
-  }
+      <TransactionManager
+        periodId={currentPeriod.id}
+        txns={txns as unknown as Parameters<typeof TransactionManager>[0]["txns"]}
+      />
+    </div>
+  );
 }
