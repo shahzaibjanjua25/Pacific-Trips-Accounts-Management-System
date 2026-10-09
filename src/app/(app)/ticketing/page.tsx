@@ -4,13 +4,14 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "airline", label: "Airline" },
-    { key: "clientName", label: "Client" },
-    { key: "tripRef", label: "Trip Ref" },
-    { key: "ticketCost", label: "Ticket Cost (paid)", type: "number", required: true, money: true },
-    { key: "chargedToClient", label: "Charged to Client", type: "number", money: true },
-    { key: "status", label: "Status", type: "select", options: ["Booked", "Issued", "Cancelled"] },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "airline", label: "Airline" },
+  { key: "clientName", label: "Client Name" },
+  { key: "tripRef", label: "Trip / Booking Ref" },
+  { key: "ticketCost", label: "Ticket Cost (paid)", type: "number" as const, required: true, money: true },
+  { key: "chargedToClient", label: "Charged to Clients", type: "number" as const, money: true },
+  { key: "profit", label: "Ticketing Profit", type: "number" as const, money: true },
+  { key: "status", label: "Status", type: "select" as const, options: ["Booked", "Issued", "Cancelled"] },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -39,7 +40,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Ticketing</h1>
-          <p className="text-sm text-slate-500">Airline tickets — profit = charged − cost</p>
+          <p className="text-sm text-slate-500">Airline tickets — cost paid, charged to client, profit</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>

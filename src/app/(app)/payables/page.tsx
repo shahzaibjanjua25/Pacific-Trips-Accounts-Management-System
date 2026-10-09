@@ -4,16 +4,18 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "supplierName", label: "Supplier", required: true },
-    { key: "category", label: "Category", type: "select", options: ["Hotel", "Transport", "Ticketing", "Other"] },
-    { key: "description", label: "Description" },
-    { key: "invoiceRef", label: "Invoice Ref" },
-    { key: "originalAmount", label: "Original Amount", type: "number", required: true, money: true },
-    { key: "amountPaid", label: "Amount Paid", type: "number", money: true },
-    { key: "dueDate", label: "Due Date", type: "date" },
-    { key: "relatedTrip", label: "Trip Ref" },
-    { key: "status", label: "Status", type: "select", options: ["Open", "Partial", "Paid"] },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "supplierName", label: "Supplier Name", required: true },
+  { key: "category", label: "Category", type: "select" as const, options: ["Hotel", "Transport", "Ticketing", "Other"] },
+  { key: "description", label: "Description" },
+  { key: "invoiceRef", label: "Invoice / Doc Ref" },
+  { key: "originalAmount", label: "Original Amount", type: "number" as const, required: true, money: true },
+  { key: "amountPaid", label: "Amount Paid", type: "number" as const, money: true },
+  { key: "remaining", label: "Remaining", type: "number" as const, money: true },
+  { key: "dueDate", label: "Due Date", type: "date" as const },
+  { key: "daysOverdue", label: "Days Overdue", type: "number" as const },
+  { key: "relatedTrip", label: "Trip / Booking Ref" },
+  { key: "status", label: "Status", type: "select" as const, options: ["Open", "Partial", "Paid"] },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -42,7 +44,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Supplier Payables</h1>
-          <p className="text-sm text-slate-500">Money we owe suppliers</p>
+          <p className="text-sm text-slate-500">Money we owe suppliers — balances & overdue auto-calc</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>

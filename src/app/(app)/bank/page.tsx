@@ -4,8 +4,8 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "accountName", label: "Account Name", required: true },
-    { key: "balance", label: "Balance", type: "number", required: true, money: true },
+  { key: "accountName", label: "Account Name", required: true },
+  { key: "balance", label: "Balance (PKR)", type: "number" as const, required: true, money: true },
 ];
 
 export default async function Page({
@@ -33,7 +33,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Bank Accounts</h1>
-          <p className="text-sm text-slate-500">Account balances — must match statements</p>
+          <p className="text-sm text-slate-500">HBL, Meezan, UBL, Easypaisa, Jazzcash — balance must match statement</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>

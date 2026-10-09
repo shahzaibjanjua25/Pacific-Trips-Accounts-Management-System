@@ -4,14 +4,16 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "date", label: "Date", type: "date" },
-    { key: "category", label: "Category", type: "select", options: ["Rent", "Electricity", "Internet/Telephone", "Maintenance", "Saving", "Supplies", "Other"], required: true },
-    { key: "description", label: "Description" },
-    { key: "amount", label: "Amount", type: "number", required: true, money: true },
-    { key: "vendor", label: "Vendor" },
-    { key: "paymentMethod", label: "Payment Method", type: "select", options: ["Bank", "Cash", "Jazzcash", "Easypaisa", "Other"] },
-    { key: "receiptRef", label: "Receipt Ref" },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "date", label: "Date", type: "date" as const },
+  { key: "category", label: "Category", type: "select" as const, options: ["Rent", "Electricity", "Internet/Telephone", "Maintenance", "Saving", "Supplies", "Other"], required: true },
+  { key: "description", label: "Description" },
+  { key: "amount", label: "Amount (PKR)", type: "number" as const, required: true, money: true },
+  { key: "vendor", label: "Vendor / Paid To" },
+  { key: "paymentMethod", label: "Payment Method", type: "select" as const, options: ["Bank", "Cash", "Jazzcash", "Easypaisa", "Other"] },
+  { key: "receiptRef", label: "Receipt / Doc Ref" },
+  { key: "approvedBy", label: "Approved By" },
+  { key: "department", label: "Department" },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -40,7 +42,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Office Expenses</h1>
-          <p className="text-sm text-slate-500">Rent, utilities, maintenance — no amount too small</p>
+          <p className="text-sm text-slate-500">Rent, utilities, maintenance, saving — no amount too small</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>

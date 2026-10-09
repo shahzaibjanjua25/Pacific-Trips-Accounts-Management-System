@@ -4,14 +4,18 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "liabilityType", label: "Type", required: true },
-    { key: "partyName", label: "Party" },
-    { key: "description", label: "Description" },
-    { key: "originalAmount", label: "Original Amount", type: "number", required: true, money: true },
-    { key: "amountPaid", label: "Amount Paid", type: "number", money: true },
-    { key: "dueDate", label: "Due Date", type: "date" },
-    { key: "status", label: "Status", type: "select", options: ["Open", "Partial", "Paid"] },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "liabilityType", label: "Liability Type", required: true },
+  { key: "partyName", label: "Party Name" },
+  { key: "description", label: "Description" },
+  { key: "originalAmount", label: "Original Amount", type: "number" as const, required: true, money: true },
+  { key: "amountPaid", label: "Amount Paid / Repaid", type: "number" as const, money: true },
+  { key: "outstanding", label: "Outstanding Balance", type: "number" as const, money: true },
+  { key: "dueDate", label: "Due Date", type: "date" as const },
+  { key: "interest", label: "Interest", type: "number" as const, money: true },
+  { key: "relatedRef", label: "Related Ref" },
+  { key: "startDate", label: "Start Date", type: "date" as const },
+  { key: "status", label: "Status", type: "select" as const, options: ["Open", "Partial", "Paid"] },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -39,14 +43,14 @@ export default async function Page({
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Liabilities</h1>
-          <p className="text-sm text-slate-500">Loans, credit purchases, outstanding taxes</p>
+          <h1 className="text-2xl font-bold">Liabilities & Loans</h1>
+          <p className="text-sm text-slate-500">Supplier payables, loans, credit purchases, outstanding taxes</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
       <CrudPanel
-        title="Liabilities"
+        title="Liabilities & Loans"
         apiPath="/api/liabilities"
         periodId={current.id}
         fields={fields}

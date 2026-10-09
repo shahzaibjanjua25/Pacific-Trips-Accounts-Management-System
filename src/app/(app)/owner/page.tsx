@@ -4,13 +4,16 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "date", label: "Date", type: "date", required: true },
-    { key: "type", label: "Type", type: "select", options: ["Capital Introduced", "Withdrawal"], required: true },
-    { key: "description", label: "Description" },
-    { key: "amountIn", label: "Amount In", type: "number", money: true },
-    { key: "amountOut", label: "Amount Out", type: "number", money: true },
-    { key: "mode", label: "Mode" },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "date", label: "Date", type: "date" as const, required: true },
+  { key: "type", label: "Type", type: "select" as const, options: ["Capital Introduced", "Withdrawal"], required: true },
+  { key: "description", label: "Description" },
+  { key: "amountIn", label: "Amount In (Capital)", type: "number" as const, money: true },
+  { key: "amountOut", label: "Amount Out (Withdrawal)", type: "number" as const, money: true },
+  { key: "runningBalance", label: "Running Balance", type: "number" as const, money: true },
+  { key: "mode", label: "Mode" },
+  { key: "recordedBy", label: "Recorded By" },
+  { key: "supportingDoc", label: "Supporting Doc" },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -38,14 +41,14 @@ export default async function Page({
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Owner Account</h1>
-          <p className="text-sm text-slate-500">Capital introduced & withdrawals — NEVER mix with revenue/expenses</p>
+          <h1 className="text-2xl font-bold">Owner / Director Account</h1>
+          <p className="text-sm text-slate-500">Capital introduced & withdrawals — NEVER mix with revenue or expenses</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
       <CrudPanel
-        title="Owner Account"
+        title="Owner / Director Account"
         apiPath="/api/owner"
         periodId={current.id}
         fields={fields}

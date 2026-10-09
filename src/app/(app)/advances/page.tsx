@@ -4,12 +4,13 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "supplierName", label: "Supplier", required: true },
-    { key: "amount", label: "Amount", type: "number", required: true, money: true },
-    { key: "adjustedAmount", label: "Adjusted", type: "number", money: true },
-    { key: "relatedTrip", label: "Trip Ref" },
-    { key: "dateGiven", label: "Date Given", type: "date" },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "supplierName", label: "Supplier Name", required: true },
+  { key: "amount", label: "Amount Given", type: "number" as const, required: true, money: true },
+  { key: "adjustedAmount", label: "Adjusted Amount", type: "number" as const, money: true },
+  { key: "remaining", label: "Remaining", type: "number" as const, money: true },
+  { key: "relatedTrip", label: "Related Trip Ref" },
+  { key: "dateGiven", label: "Date Given", type: "date" as const },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -38,7 +39,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Supplier Advances</h1>
-          <p className="text-sm text-slate-500">Advances paid ahead — remaining auto-calc</p>
+          <p className="text-sm text-slate-500">Advances paid ahead — not yet adjusted against bookings</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>

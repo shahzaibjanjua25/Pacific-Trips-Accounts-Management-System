@@ -3,6 +3,7 @@ import { getDashboardData } from "@/lib/dashboard";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { KpiCard } from "@/components/KpiCard";
 import { formatPKR } from "@/lib/utils";
+import { ExportMonthButton } from "@/components/ExportMonthButton";
 
 
 export default async function DashboardPage({
@@ -33,7 +34,10 @@ export default async function DashboardPage({
             Pacific Trips · Lahore, Pakistan · PKR · All values auto-calculated from source sheets
           </p>
         </div>
-        <PeriodSelector periods={periods} currentId={currentPeriod.id} />
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <PeriodSelector periods={periods} currentId={currentPeriod.id} />
+          <ExportMonthButton periodId={currentPeriod.id} periodLabel={currentPeriod.label} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

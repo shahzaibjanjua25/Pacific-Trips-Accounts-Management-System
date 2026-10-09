@@ -4,19 +4,23 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "clientName", label: "Client", required: true },
-    { key: "tripRef", label: "Trip Ref" },
-    { key: "destination", label: "Destination" },
-    { key: "startDate", label: "Start Date", type: "date" },
-    { key: "endDate", label: "End Date", type: "date" },
-    { key: "packageRevenue", label: "Package Revenue", type: "number", required: true, money: true },
-    { key: "hotelCost", label: "Hotel Cost", type: "number", money: true },
-    { key: "transportCost", label: "Transport Cost", type: "number", money: true },
-    { key: "ticketingCost", label: "Ticketing Cost", type: "number", money: true },
-    { key: "otherDirectCost", label: "Other Direct Cost", type: "number", money: true },
-    { key: "salesperson", label: "Salesperson" },
-    { key: "status", label: "Status", type: "select", options: ["Planned", "Ongoing", "Completed", "Cancelled"] },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "clientName", label: "Client Name", required: true },
+  { key: "tripRef", label: "Trip / Booking Ref" },
+  { key: "destination", label: "Destination" },
+  { key: "startDate", label: "Start Date", type: "date" as const },
+  { key: "endDate", label: "End Date", type: "date" as const },
+  { key: "packageRevenue", label: "Package Revenue", type: "number" as const, required: true, money: true },
+  { key: "hotelCost", label: "Hotels / Resorts Cost", type: "number" as const, money: true },
+  { key: "transportCost", label: "Transport & Drivers", type: "number" as const, money: true },
+  { key: "ticketingCost", label: "Ticketing / Airline", type: "number" as const, money: true },
+  { key: "otherDirectCost", label: "Other Direct Costs", type: "number" as const, money: true },
+  { key: "totalDirectCost", label: "Total Direct Cost", type: "number" as const, money: true },
+  { key: "grossProfit", label: "Gross Profit", type: "number" as const, money: true },
+  { key: "overheadAlloc", label: "Overhead Alloc", type: "number" as const, money: true },
+  { key: "netProfit", label: "Net Profit", type: "number" as const, money: true },
+  { key: "salesperson", label: "Salesperson" },
+  { key: "status", label: "Status", type: "select" as const, options: ["Planned", "Ongoing", "Completed", "Cancelled"] },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -45,7 +49,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Trip PnL</h1>
-          <p className="text-sm text-slate-500">One row per trip — costs → Gross & Net Profit auto-calculate</p>
+          <p className="text-sm text-slate-500">One row per trip — all direct costs → Gross & Net Profit auto-calculate</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>

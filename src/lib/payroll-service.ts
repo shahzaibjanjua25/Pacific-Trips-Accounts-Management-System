@@ -37,7 +37,8 @@ export async function computeSalesPayroll(periodId: string) {
   const results = [];
 
   for (const emp of employees) {
-    const isLead = emp.name.toLowerCase().includes("amad") || emp.name === TEAM_LEAD_NAME;
+    const nameL = emp.name.toLowerCase();
+    const isLead = nameL.includes("amad") || nameL.includes("ammar") || emp.name === TEAM_LEAD_NAME;
     const individualSales = salesByPerson[emp.name] || 0;
 
     let basic = 0;

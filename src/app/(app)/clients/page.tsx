@@ -4,11 +4,11 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "name", label: "Name", required: true },
-    { key: "contact", label: "Contact" },
-    { key: "phone", label: "Phone" },
-    { key: "email", label: "Email" },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "name", label: "Client Name", required: true },
+  { key: "contact", label: "Contact / Ref" },
+  { key: "phone", label: "Phone Number" },
+  { key: "email", label: "Email" },
+  { key: "notes", label: "Notes", type: "textarea" as const },
 ];
 
 export default async function Page({
@@ -28,7 +28,7 @@ export default async function Page({
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
   const rows = await prisma.client.findMany({
-    orderBy: { createdAt: "desc" },
+    orderBy: { name: "asc" },
   });
 
   return (
@@ -36,7 +36,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Clients</h1>
-          <p className="text-sm text-slate-500">Client master list</p>
+          <p className="text-sm text-slate-500">Client master list with contact details</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
