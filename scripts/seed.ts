@@ -27,7 +27,7 @@ async function main() {
   // ── Employees ──
   const empData = [
     { name: "Mr Ahsaan", role: "Sales", basicSalary: 40000 },
-    { name: "Amad Amjad", role: "Sales", basicSalary: 0 },
+    { name: "Amad Amjad", role: "Sales", basicSalary: 0 }, // Team Lead-Sales
     { name: "Maira", role: "Sales", basicSalary: 40000 },
     { name: "Zunaira", role: "Sales", basicSalary: 40000 },
     { name: "Awais", role: "Sales", basicSalary: 40000 },
@@ -36,13 +36,32 @@ async function main() {
     { name: "Naimal", role: "Sales", basicSalary: 40000 },
     { name: "Ashir", role: "Sales", basicSalary: 40000 },
     { name: "Izza", role: "Sales", basicSalary: 40000 },
-    { name: "Ahmed", role: "Staff", basicSalary: 50000 },
-    { name: "Faisal", role: "Staff", basicSalary: 50000 },
-    { name: "Abdullah", role: "Staff", basicSalary: 60000 },
-    { name: "Kamran", role: "Staff", basicSalary: 30000 },
-    { name: "WAseem Akram", role: "Staff", basicSalary: 40000 },
-    { name: "Nadeem", role: "Staff", basicSalary: 10000 },
+    { name: "Ahmed", role: "Graphic Designer", basicSalary: 50000 },
+    { name: "Faisal", role: "Meta Marketing", basicSalary: 50000 },
+    { name: "Abdullah", role: "CEO", basicSalary: 60000 },
+    { name: "Kamran", role: "Accountant", basicSalary: 30000 },
+    { name: "WAseem Akram", role: "Legal Team", basicSalary: 40000 },
+    { name: "Nadeem", role: "Office Boy", basicSalary: 10000 },
   ];
+  // Designation labels for Team column (display)
+  const designation: Record<string, string> = {
+    "Mr Ahsaan": "Sales",
+    "Amad Amjad": "Team Lead-Sales",
+    "Maira": "Sales",
+    "Zunaira": "Sales",
+    "Awais": "Sales",
+    "Malika": "Sales",
+    "Talha": "Sales",
+    "Naimal": "Sales",
+    "Ashir": "Sales",
+    "Izza": "Sales",
+    "Ahmed": "Grapich Designer",
+    "Faisal": "meta marketing",
+    "Abdullah": "CEO",
+    "Kamran": "Acoountant",
+    "WAseem Akram": "Legal Team",
+    "Nadeem": "Office Boy",
+  };
   const employees: Record<string, string> = {};
   for (const e of empData) {
     const row = await prisma.employee.create({ data: e });
