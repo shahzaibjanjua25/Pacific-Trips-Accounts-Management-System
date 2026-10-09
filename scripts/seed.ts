@@ -314,16 +314,28 @@ async function main() {
     },
   });
 
-  // Employee loans leftover 870000 (approx from Dashboard)
-  await prisma.employeeLoan.create({
-    data: {
-      employeeId: (await prisma.employee.findFirst())!.id,
-      originalAmount: 940000,
-      remainingAmount: 870000,
-      monthlyInstallment: 70000,
-      notes: "Combined staff loans from Dashboard",
-    },
-  });
+  // Employee loans with named installments
+  // Ahsaan 30k/mo, Amjad 20k/mo, Awais 20k/mo
+  const empList = await prisma.employee.findMany();
+  const loanDefs: { match: string; original: number; remaining: number; installment: number }[] = [
+    { match: "ahsaan", original: 400000, remaining: 400000, installment: 30000 },
+    { match: "amad", original: 300000, remaining: 300000, installment: 20000 },
+    { match: "awais", original: 240000, remaining: 240000, installment: 20000 },
+  ];
+  for (const def of loanDefs) {
+    const emp = empList.find((e) => e.name.toLowerCase().includes(def.match));
+    if (emp) {
+      await prisma.employeeLoan.create({
+        data: {
+          employeeId: emp.id,
+          originalAmount: def.original,
+          remainingAmount: def.remaining,
+          monthlyInstallment: def.installment,
+          notes: `Monthly installment ${def.installment}`,
+        },
+      });
+    }
+  }
 
   console.log("✅ Seed complete. Open the app and select Oct-2026 period.");
 }

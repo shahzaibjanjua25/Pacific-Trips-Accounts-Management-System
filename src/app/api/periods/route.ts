@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreatePeriod, listPeriods } from "@/lib/period";
+import { createPeriod, listPeriods } from "@/lib/period";
 
 export async function GET() {
   const periods = await listPeriods();
@@ -12,8 +12,8 @@ export async function POST(req: NextRequest) {
     if (!year || !month || month < 1 || month > 12) {
       return NextResponse.json({ error: "year and month (1-12) required" }, { status: 400 });
     }
-    const period = await getOrCreatePeriod(Number(year), Number(month));
-    return NextResponse.json(period);
+    const { period, carried } = await createPeriod(Number(year), Number(month));
+    return NextResponse.json({ ...period, carried });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
