@@ -4,6 +4,7 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 import { ComputePayrollButton } from "@/components/ComputePayrollButton";
 import { InitPayrollButton } from "@/components/InitPayrollButton";
+import { SyncAllPayrollButton } from "@/components/SyncAllPayrollButton";
 import { formatPKR } from "@/lib/utils";
 
 const DESIGNATION: Record<string, string> = {
@@ -64,6 +65,8 @@ const fields: FieldDef[] = [
   { key: "remaining", label: "Remaining", type: "number" as const, money: true },
   { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Partial", "Paid"] },
   { key: "paidDate", label: "Paid Date", type: "date" as const },
+  { key: "loanInstallment", label: "Loan Installment", type: "number" as const, money: true },
+  { key: "loanBalance", label: "Loan Balance", type: "number" as const, money: true, showInTable: true },
   { key: "notes", label: "Notes", type: "textarea" as const },
 ];
 
@@ -103,11 +106,18 @@ export default async function Page({
 
   const roleByName: Record<string, string> = {};
   for (const e of allEmployees) roleByName[e.name] = e.role ?? "Staff";
+  const loansByEmp: Record<string, number> = {};
+  for (const e of salesStaff) {
+    const loan = e.loans?.[0];
+    if (loan) loansByEmp[e.name] = loan.remainingAmount;
+  }
 
   const enriched = rows.map((r) => ({
     ...r,
     team: teamLabel(r.employeeName, roleByName[r.employeeName]),
+    loanBalance: loansByEmp[r.employeeName] ?? 0,
   }));
+
 
   const salesNames = new Set(salesStaff.map((e) => e.name));
   const salesPayroll = enriched.filter((r) => salesNames.has(r.employeeName));
@@ -141,16 +151,24 @@ export default async function Page({
             const des = teamLabel(e.name, e.role);
             const isLead = des === "Team Lead-Sales";
             const loan = e.loans?.[0];
+            const payRow = rows.find((r) => r.employeeName === e.name);
+            const comm = commissions.find((c) => c.employeeName === e.name);
             return (
               <span
                 key={e.id}
                 className={`text-xs px-2.5 py-1 rounded-full border ${isLead
-                    ? "bg-amber-100 border-amber-300 text-amber-900 font-semibold"
-                    : "bg-white border-emerald-300 text-emerald-800"
+                  ? "bg-amber-100 border-amber-300 text-amber-900 font-semibold"
+                  : "bg-white border-emerald-300 text-emerald-800"
                   }`}
               >
                 {e.name} · {des}
-                {loan ? ` · loan ${formatPKR(loan.remainingAmount)}` : ""}
+                {loan
+                  ? ` · loan remaining ${formatPKR(loan.remainingAmount)} (${formatPKR(
+                    loan.monthlyInstallment
+                  )}/mo)`
+                  : ""}
+                {comm ? ` · comm ${formatPKR(comm.commissionAmt)}` : ""}
+                {payRow ? ` · net ${formatPKR(payRow.netPayable)}` : ""}
               </span>
             );
           })}
@@ -160,6 +178,7 @@ export default async function Page({
       <div className="flex flex-wrap gap-3 items-center">
         <InitPayrollButton periodId={current.id} />
         <ComputePayrollButton periodId={current.id} />
+        <SyncAllPayrollButton periodId={current.id} />
         <span className="text-sm bg-slate-100 px-3 py-1.5 rounded-md">
           Sales Net: <strong>{formatPKR(totalSalesNet)}</strong>
         </span>

@@ -217,7 +217,35 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     const basic = p.basicSalary;
     const tax = p.taxDeducted;
     const other = p.otherDeductions;
-    const net = Math.max(0, basic - tax - installment - other);
+    const commissionAmt = await tx.commission.findFirst({
+      where: { periodId: fromPeriodId, employeeName: p.employeeName },
+    });
+    const comm = commissionAmt?.commissionAmt ?? 0;
+    const net = Math.max(0, basic + comm - tax - installment - other);
+
+    // Decrement the employee loan for the PRIOR period if it was fully paid.
+    // We treat "fully paid" as status === "Paid" AND remaining <= 0.
+    if (p.status === "Paid" && (p.remaining ?? 0) <= 0 && p.employeeId && installment > 0) {
+      const loan = await tx.employeeLoan.findFirst({
+        where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
+      });
+      if (loan) {
+        await tx.employeeLoan.update({
+          where: { id: loan.id },
+          data: {
+            remainingAmount: Math.max(0, loan.remainingAmount - installment),
+          },
+        });
+      }
+    }
+
+    // Look up the NEW (post-decrement) loan balance for next month's row
+    const currentLoan = p.employeeId
+      ? await tx.employeeLoan.findFirst({
+        where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
+      })
+      : null;
+    const nextInstallment = currentLoan?.monthlyInstallment ?? installment;
 
     await tx.payrollEntry.create({
       data: {
@@ -226,15 +254,17 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
         employeeName: p.employeeName,
         basicSalary: basic,
         taxDeducted: tax,
-        loanInstallment: installment,
+        loanInstallment: nextInstallment,
         otherDeductions: other,
-        netPayable: net,
+        netPayable: Math.max(0, basic + comm - tax - nextInstallment - other),
         amountPaid: 0,
+        remaining: Math.max(0, basic + comm - tax - nextInstallment - other),
         status: "Pending",
         notes: p.notes ? `${p.notes} | Carried forward` : "Carried forward",
       },
     });
   }
+
 
   const prevOffice = await tx.officeExpense.findMany({
     where: { periodId: fromPeriodId, recurring: true },

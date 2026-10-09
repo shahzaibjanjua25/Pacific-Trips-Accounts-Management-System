@@ -5,21 +5,19 @@
  */
 
 import { prisma } from "./prisma";
+import { syncPayrollForEmployee } from "./links-service";
 
-const BASIC_SALARY = 40000;
-const COMMISSION_RATE = 0.025; // 2.5%
-const TEAM_LEAD_NAME = "Amad Amjad";
+const COMMISSION_RATE = 0.025;
 
 export async function computeSalesPayroll(periodId: string) {
   const employees = await prisma.employee.findMany({
     where: { isActive: true, role: "Sales" },
   });
 
-  // Total sales in period from trips / receivables attributed to salesperson
   const trips = await prisma.trip.findMany({ where: { periodId } });
   const receivables = await prisma.receivable.findMany({ where: { periodId } });
+  const salesEntries = await prisma.salesPerformance.findMany({ where: { periodId } });
 
-  // Individual sales by salesperson name
   const salesByPerson: Record<string, number> = {};
   for (const t of trips) {
     const sp = t.salesperson || "Unassigned";
@@ -31,75 +29,29 @@ export async function computeSalesPayroll(periodId: string) {
         (salesByPerson[r.salesperson] || 0) + r.totalPackage;
     }
   }
-
-  const totalTeamSales = Object.values(salesByPerson).reduce((a, b) => a + b, 0);
+  for (const e of salesEntries) {
+    salesByPerson[e.employeeName] =
+      (salesByPerson[e.employeeName] || 0) + (e.debit || 0);
+  }
 
   const results = [];
 
   for (const emp of employees) {
     const nameL = emp.name.toLowerCase();
-    const isLead = nameL.includes("amad") || nameL.includes("ammar") || emp.name === TEAM_LEAD_NAME;
+    const isLead = nameL.includes("amad") || nameL.includes("ammar");
     const individualSales = salesByPerson[emp.name] || 0;
 
-    let basic = 0;
-    let commission = 0;
-    let saleBase = 0;
+    const teamTotal = employees
+      .filter((e) => {
+        const n = e.name.toLowerCase();
+        return !n.includes("amad") && !n.includes("ammar");
+      })
+      .reduce((s, e) => s + (salesByPerson[e.name] || 0), 0);
 
-    if (isLead) {
-      // Team lead: 2.5% of ALL team sales, no basic
-      basic = 0;
-      saleBase = totalTeamSales;
-      commission = totalTeamSales * COMMISSION_RATE;
-    } else {
-      // Member: 40k basic + 2.5% of their own sales
-      basic = BASIC_SALARY;
-      saleBase = individualSales;
-      commission = individualSales * COMMISSION_RATE;
-    }
+    const saleBase = isLead ? teamTotal : individualSales;
+    const commission = saleBase * COMMISSION_RATE;
 
-    // Loan installment if any
-    const loan = await prisma.employeeLoan.findFirst({
-      where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
-    });
-    const installment = loan?.monthlyInstallment || 0;
-    const netPayable = Math.max(0, basic + commission - installment);
-
-    // Upsert payroll entry
-    const existing = await prisma.payrollEntry.findFirst({
-      where: { periodId, employeeName: emp.name },
-    });
-
-    let entry;
-    if (existing) {
-      entry = await prisma.payrollEntry.update({
-        where: { id: existing.id },
-        data: {
-          basicSalary: basic,
-          loanInstallment: installment,
-          netPayable,
-          notes: isLead
-            ? `Team Lead: 2.5% of total team sales (${saleBase.toFixed(0)})`
-            : `Basic 40k + 2.5% of own sales (${saleBase.toFixed(0)})`,
-        },
-      });
-    } else {
-      entry = await prisma.payrollEntry.create({
-        data: {
-          periodId,
-          employeeId: emp.id,
-          employeeName: emp.name,
-          basicSalary: basic,
-          loanInstallment: installment,
-          netPayable,
-          status: "Pending",
-          notes: isLead
-            ? `Team Lead: 2.5% of total team sales (${saleBase.toFixed(0)})`
-            : `Basic 40k + 2.5% of own sales (${saleBase.toFixed(0)})`,
-        },
-      });
-    }
-
-    // Upsert commission record
+    // Upsert Commission
     const existingComm = await prisma.commission.findFirst({
       where: { periodId, employeeName: emp.name },
     });
@@ -126,15 +78,15 @@ export async function computeSalesPayroll(periodId: string) {
       });
     }
 
+    // Recompute the payroll row via the shared helper
+    await syncPayrollForEmployee(periodId, emp.name);
+
     results.push({
       employee: emp.name,
       isLead,
-      basic,
       individualSales,
-      totalTeamSales: isLead ? totalTeamSales : undefined,
+      totalTeamSales: isLead ? teamTotal : undefined,
       commission,
-      installment,
-      netPayable,
     });
   }
 

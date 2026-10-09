@@ -7,7 +7,84 @@ import { prisma } from "./prisma";
 /* ─────────────────────────────────────────────
  * PAYABLE ← OPERATIONAL SYNC
  * ───────────────────────────────────────────── */
+/**
+ * Recompute a payroll entry from scratch based on:
+ *   basic + commission − tax − loan installment − other deductions
+ * Then set netPayable / remaining / status correctly.
+ *
+ * If `amountPaid` > 0 and status becomes fully Paid, decrement the linked
+ * EmployeeLoan by the current month's installment.
+ */
+export async function syncPayrollForEmployee(
+    periodId: string,
+    employeeName: string
+): Promise<void> {
+    const emp = await prisma.employee.findFirst({ where: { name: employeeName } });
+    if (!emp) return;
 
+    const isLead =
+        employeeName.toLowerCase().includes("amad") ||
+        employeeName.toLowerCase().includes("ammar");
+
+    // Get or create the payroll row for this period
+    let pay = await prisma.payrollEntry.findFirst({
+        where: { periodId, employeeName },
+    });
+
+    // Pull the current commission (if any)
+    const commission = await prisma.commission.findFirst({
+        where: { periodId, employeeName },
+    });
+    const commissionAmt = commission?.commissionAmt ?? 0;
+
+    // Determine basic
+    const basic = isLead ? 0 : emp.basicSalary || (emp.role === "Sales" ? 40000 : 0);
+
+    // Tax / other deductions — preserve whatever the user set
+    const tax = pay?.taxDeducted ?? 0;
+    const other = pay?.otherDeductions ?? 0;
+
+    // Loan installment: use the employee loan's monthly installment if present
+    const loan = await prisma.employeeLoan.findFirst({
+        where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
+    });
+    const installment = loan?.monthlyInstallment ?? 0;
+
+    const netPayable = Math.max(0, basic + commissionAmt - tax - installment - other);
+    const amountPaid = pay?.amountPaid ?? 0;
+    const remaining = Math.max(0, netPayable - amountPaid);
+    const status = remaining <= 0 && amountPaid > 0 ? "Paid" : amountPaid > 0 ? "Partial" : "Pending";
+
+    if (pay) {
+        await prisma.payrollEntry.update({
+            where: { id: pay.id },
+            data: {
+                basicSalary: basic,
+                loanInstallment: installment,
+                netPayable,
+                remaining,
+                status,
+            },
+        });
+    } else {
+        await prisma.payrollEntry.create({
+            data: {
+                periodId,
+                employeeId: emp.id,
+                employeeName,
+                basicSalary: basic,
+                loanInstallment: installment,
+                netPayable,
+                amountPaid: 0,
+                remaining: netPayable,
+                status: "Pending",
+                notes: isLead
+                    ? "Team Lead — 2.5% of team sales"
+                    : "Sales — 40k + 2.5% of own sales",
+            },
+        });
+    }
+}
 /** Ensure a Payable exists for a HotelBooking. Returns payable id. */
 export async function ensurePayableForHotel(hotelId: string): Promise<string | null> {
     const hotel = await prisma.hotelBooking.findUnique({ where: { id: hotelId } });
@@ -227,6 +304,7 @@ export async function applyReceiptToReceivables(
 }
 
 /** Apply a partial (or full) payment to a payroll entry. */
+/** Apply a partial (or full) payment to a payroll entry. */
 export async function applyPayrollPayment(
     periodId: string,
     employeeName: string,
@@ -250,18 +328,24 @@ export async function applyPayrollPayment(
     const applied = Math.min(amount, outstanding);
     const newPaid = (entry.amountPaid ?? 0) + applied;
     const newRemaining = Math.max(0, entry.netPayable - newPaid);
+    const fullyPaid = newRemaining <= 0;
+
+    // If we're about to flip from Partial/Pending to Paid for the first time,
+    // decrement the loan by this month's installment.
+    const wasFullyPaidBefore = entry.status === "Paid";
 
     await prisma.payrollEntry.update({
         where: { id: entry.id },
         data: {
             amountPaid: newPaid,
             remaining: newRemaining,
-            status: newRemaining <= 0 ? "Paid" : "Partial",
-            paidDate: newRemaining <= 0 ? new Date() : entry.paidDate,
+            status: fullyPaid ? "Paid" : "Partial",
+            paidDate: fullyPaid ? new Date() : entry.paidDate,
         },
     });
 
-    if (newRemaining <= 0 && entry.employeeId && entry.loanInstallment > 0) {
+    // Only decrement the loan ONCE — when the row first transitions to Paid
+    if (fullyPaid && !wasFullyPaidBefore && entry.employeeId && entry.loanInstallment > 0) {
         const loan = await prisma.employeeLoan.findFirst({
             where: { employeeId: entry.employeeId, remainingAmount: { gt: 0 } },
         });
