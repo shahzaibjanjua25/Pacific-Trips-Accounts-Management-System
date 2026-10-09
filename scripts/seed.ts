@@ -89,23 +89,24 @@ async function main() {
   }
 
   // ── Payroll (exact Net Salary from Excel) ──
+    // ── Payroll (exact Net Salary from Excel) ──
   const payroll = [
-    { name: "Mr Ahsaan", basic: 40000, loan: 30000, net: 10000, notes: "Loan 630k, installment 30k" },
-    { name: "Amad Amjad", basic: 0, loan: 20000, net: -20000, notes: "Team Lead — no basic; loan installment 20k" },
-    { name: "Maira", basic: 40000, loan: 0, net: 40000 },
-    { name: "Zunaira", basic: 40000, loan: 0, net: 40000 },
-    { name: "Awais", basic: 40000, loan: 20000, net: 20000, notes: "Loan 110k, installment 20k" },
-    { name: "Malika", basic: 40000, loan: 0, net: 40000 },
-    { name: "Talha", basic: 40000, loan: 0, net: 40000 },
-    { name: "Naimal", basic: 40000, loan: 0, net: 40000 },
-    { name: "Ashir", basic: 40000, loan: 0, net: 40000 },
-    { name: "Izza", basic: 40000, loan: 0, net: 40000 },
-    { name: "Ahmed", basic: 50000, loan: 0, net: 63000, notes: "Bonus 13000" },
-    { name: "Faisal", basic: 50000, loan: 0, net: 50000 },
-    { name: "Abdullah", basic: 60000, loan: 0, net: 60000 },
-    { name: "Kamran", basic: 30000, loan: 0, net: 30000 },
-    { name: "WAseem Akram", basic: 40000, loan: 0, net: 40000 },
-    { name: "Nadeem", basic: 10000, loan: 0, net: 10000 },
+    { name: "Mr Ahsaan", basic: 40000, bonus: 0, loan: 30000, net: 10000, notes: "Loan 630k, installment 30k" },
+    { name: "Amad Amjad", basic: 0, bonus: 0, loan: 20000, net: 0, notes: "Team Lead — no basic; commission via Compute button" },
+    { name: "Maira", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Zunaira", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Awais", basic: 40000, bonus: 0, loan: 20000, net: 20000, notes: "Loan 110k, installment 20k" },
+    { name: "Malika", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Talha", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Naimal", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Ashir", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Izza", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Ahmed", basic: 50000, bonus: 13000, loan: 0, net: 63000, notes: "Bonus 13,000 included" },
+    { name: "Faisal", basic: 50000, bonus: 0, loan: 0, net: 50000 },
+    { name: "Abdullah", basic: 60000, bonus: 0, loan: 0, net: 60000 },
+    { name: "Kamran", basic: 30000, bonus: 0, loan: 0, net: 30000 },
+    { name: "WAseem Akram", basic: 40000, bonus: 0, loan: 0, net: 40000 },
+    { name: "Nadeem", basic: 10000, bonus: 0, loan: 0, net: 10000 },
   ];
   for (const p of payroll) {
     await prisma.payrollEntry.create({
@@ -114,9 +115,8 @@ async function main() {
         employeeId: employees[p.name],
         employeeName: p.name,
         basicSalary: p.basic,
+        bonus: p.bonus,
         loanInstallment: p.loan,
-        otherDeductions: p.name === "Ahmed" ? 0 : 0,
-        // Ahmed: basic 50k + bonus 13k = 63k — store bonus in notes; netPayable exact
         netPayable: p.net,
         status: "Pending",
         notes: p.notes || null,
@@ -372,8 +372,20 @@ async function main() {
 
   console.log("Seed complete — Oct-2026 data from Excel loaded.");
 }
-
+  const force = process.argv.includes("--force");
+  if (process.env.NODE_ENV === "production" && !force) {
+    console.error("❌ Refusing to seed in production without --force.");
+    process.exit(1);
+  }
+  const existing = await prisma.period.count();
+  if (existing > 0 && !force) {
+    console.error(
+      `❌ DB already has ${existing} period(s). Pass --force to wipe & reseed.`
+    );
+    process.exit(1);
+  }
 main()
+
   .catch((e) => {
     console.error(e);
     process.exit(1);

@@ -323,11 +323,12 @@ model PayrollEntry {
   employee          Employee? @relation(fields: [employeeId], references: [id])
   employeeName      String
   basicSalary       Float    @default(0)
+  bonus             Float    @default(0)
   taxDeducted       Float    @default(0)
   loanInstallment   Float    @default(0)
   otherDeductions   Float    @default(0)
   netPayable        Float    @default(0)
-  status            String   @default("Pending") // Pending, Paid
+  status            String   @default("Pending")
   paidDate          DateTime?
   notes             String?
   createdAt         DateTime @default(now())

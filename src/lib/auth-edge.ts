@@ -1,0 +1,18 @@
+// src/lib/auth-edge.ts
+const SECRET =
+  process.env.AUTH_SECRET || "pacific-trips-auth-secret-change-in-prod-2026";
+
+export async function hmacHex(message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}

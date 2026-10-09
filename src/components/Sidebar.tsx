@@ -1,44 +1,12 @@
 "use client";
 
-async function doLogout() {
-  await fetch("/api/auth/logout", { method: "POST" });
-  window.location.href = "/login";
-}
-
-
-async function logout() {
-  await fetch("/api/auth/logout", { method: "POST" });
-  window.location.href = "/login";
-}
-
-
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard,
-  ArrowLeftRight,
-  Users,
-  FileText,
-  Plane,
-  CreditCard,
-  Building2,
-  Truck,
-  Ticket,
-  Wallet,
-  RotateCcw,
-  UserCheck,
-  Megaphone,
-  Building,
-  Banknote,
-  Landmark,
-  TrendingUp,
-  Package,
-  Scale,
-  User,
-  CalendarCheck,
-  Settings,
-  Menu,
-  X,
+  LayoutDashboard, ArrowLeftRight, Users, FileText, Plane, CreditCard,
+  Building2, Truck, Ticket, Wallet, RotateCcw, UserCheck, Megaphone,
+  Building, Banknote, Landmark, TrendingUp, Package, Scale, User,
+  CalendarCheck, Settings, Menu, X, ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -66,25 +34,32 @@ const nav = [
   { href: "/monthly-closing", label: "Monthly Closing", icon: CalendarCheck },
   { href: "/sales-team", label: "Sales Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings/security", label: "Security", icon: ShieldCheck },
 ];
-
-function LogoutBtn() {
-  return (
-    <button type="button" onClick={doLogout} className="w-full text-left text-sm text-red-600 hover:bg-red-50 rounded-lg px-3 py-2 mt-2">
-      Sign out
-    </button>
-  );
-}
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function logout() {
+    setSigningOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/login");
+      router.refresh();
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <>
       <button
         className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-md bg-slate-800 text-white"
         onClick={() => setOpen(!open)}
+        aria-label="Toggle menu"
       >
         {open ? <X size={20} /> : <Menu size={20} />}
       </button>
@@ -103,7 +78,7 @@ export function Sidebar() {
 
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
           {nav.map((item) => {
-            const active = pathname.startsWith(item.href);
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
             const Icon = item.icon;
             return (
               <Link
@@ -123,7 +98,15 @@ export function Sidebar() {
             );
           })}
         </nav>
-          <LogoutBtn />
+
+        <button
+          type="button"
+          onClick={logout}
+          disabled={signingOut}
+          className="mx-2 mb-2 text-left text-sm text-red-400 hover:bg-red-500/10 rounded-lg px-3 py-2 disabled:opacity-50"
+        >
+          {signingOut ? "Signing out…" : "Sign out"}
+        </button>
 
         <div className="p-3 border-t border-slate-700 text-[10px] text-slate-500">
           Every transaction · No amount too small

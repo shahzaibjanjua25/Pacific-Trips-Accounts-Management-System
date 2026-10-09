@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "./prisma";
+import { getSessionUserId } from "./auth";
+import { calcOverdue } from "./utils";
 
 type ModelName =
   | "receivable"
@@ -54,24 +56,44 @@ function getModel(name: ModelName): any {
   return map[name];
 }
 
-/** Auto-calc remaining / profit fields before save */
 function enrich(model: ModelName, data: Record<string, unknown>) {
   const d = { ...data };
 
   if (model === "receivable") {
     const total = Number(d.totalPackage) || 0;
     const received = Number(d.amountReceived) || 0;
-    d.remainingAmount = Math.max(0, total - received);
-    d.amountToReceive = total;
+    const discounts = Number(d.discounts) || 0;
+    const additional = Number(d.additionalCharges) || 0;
+    d.amountToReceive = Math.max(0, total + additional - discounts);
+    d.remainingAmount = Math.max(0, (d.amountToReceive as number) - received);
     if (d.remainingAmount === 0) d.status = "Settled";
-    else if (received > 0) d.status = d.status || "Partial";
+    else if (received > 0) d.status = d.status === "Overdue" ? "Overdue" : "Partial";
+    else d.status = d.status || "Open";
+    const dueDate = d.dueDate ? new Date(d.dueDate as string) : null;
+    d.daysOverdue = calcOverdue(dueDate);
+    if ((d.daysOverdue as number) > 0 && (d.remainingAmount as number) > 0) {
+      d.status = "Overdue";
+    }
   }
 
-  if (model === "payable" || model === "hotelBooking") {
-    const orig = Number(d.originalAmount ?? d.agreedCost) || 0;
+  if (model === "payable") {
+    const orig = Number(d.originalAmount) || 0;
+    const paid = Number(d.amountPaid) || 0;
+    d.remaining = Math.max(0, orig - paid);
+    const due = d.dueDate ? new Date(d.dueDate as string) : null;
+    d.daysOverdue = calcOverdue(due);
+    if ((d.remaining as number) === 0) d.status = "Paid";
+    else if ((d.daysOverdue as number) > 0) d.status = "Overdue";
+    else if (paid > 0) d.status = "Partial";
+    else d.status = d.status || "Open";
+  }
+
+  if (model === "hotelBooking") {
+    const orig = Number(d.agreedCost) || 0;
     const paid = Number(d.amountPaid) || 0;
     d.remaining = Math.max(0, orig - paid);
     if (d.remaining === 0) d.status = "Paid";
+    else if ((paid as number) > 0) d.status = "Partial";
   }
 
   if (model === "trip") {
@@ -99,10 +121,11 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
 
   if (model === "payrollEntry") {
     const basic = Number(d.basicSalary) || 0;
+    const bonus = Number(d.bonus) || 0;
     const tax = Number(d.taxDeducted) || 0;
     const loan = Number(d.loanInstallment) || 0;
     const other = Number(d.otherDeductions) || 0;
-    d.netPayable = Math.max(0, basic - tax - loan - other);
+    d.netPayable = Math.max(0, basic + bonus - tax - loan - other);
   }
 
   if (model === "liability") {
@@ -116,34 +139,39 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     const agreed = Number(d.agreedCost) || 0;
     const settled = Number(d.finalSettlement) || 0;
     d.remaining = Math.max(0, agreed - settled);
+    if (d.remaining === 0) d.status = "Settled";
+    else if ((settled as number) > 0) d.status = "Partial";
   }
 
-  // Convert date strings
+  // Date coercion
   for (const key of Object.keys(d)) {
     if (
-      (key.toLowerCase().includes("date") || key === "checkIn" || key === "checkOut" || key === "tripStart") &&
+      (key.toLowerCase().includes("date") ||
+        key === "checkIn" ||
+        key === "checkOut" ||
+        key === "tripStart") &&
       typeof d[key] === "string" &&
       d[key]
     ) {
       d[key] = new Date(d[key] as string);
+    } else if (typeof d[key] === "string" && d[key] === "") {
+      d[key] = null;
     }
   }
 
-  // Remove id from create data
   return d;
 }
 
 export function makeCrudHandlers(
   modelName: ModelName,
-  opts?: {
-    periodScoped?: boolean;
-    orderBy?: Record<string, string>;
-  }
+  opts?: { periodScoped?: boolean; orderBy?: Record<string, string> }
 ) {
   const periodScoped = opts?.periodScoped !== false;
   const orderBy = opts?.orderBy || { createdAt: "desc" };
 
   async function GET(req: NextRequest) {
+    const uid = await getSessionUserId();
+    if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const model = getModel(modelName);
     const periodId = req.nextUrl.searchParams.get("periodId");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -153,21 +181,25 @@ export function makeCrudHandlers(
   }
 
   async function POST(req: NextRequest) {
+    const uid = await getSessionUserId();
+    if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
       const model = getModel(modelName);
       const body = await req.json();
       const data = enrich(modelName, body);
       delete data.id;
-      delete data.team; // virtual display field
+      delete data.team;
       const row = await model.create({ data });
       return NextResponse.json(row);
     } catch (e) {
-      console.error(e);
-      return NextResponse.json({ error: String(e) }, { status: 500 });
+      console.error(`[crud:${modelName}:POST]`, e);
+      return NextResponse.json({ error: "Create failed" }, { status: 500 });
     }
   }
 
   async function PUT(req: NextRequest) {
+    const uid = await getSessionUserId();
+    if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
       const model = getModel(modelName);
       const body = await req.json();
@@ -178,17 +210,18 @@ export function makeCrudHandlers(
       delete data.team;
       delete data.createdAt;
       delete data.updatedAt;
-      // don't allow changing periodId on update accidentally to null
       if (data.periodId === null) delete data.periodId;
       const row = await model.update({ where: { id }, data });
       return NextResponse.json(row);
     } catch (e) {
-      console.error(e);
-      return NextResponse.json({ error: String(e) }, { status: 500 });
+      console.error(`[crud:${modelName}:PUT]`, e);
+      return NextResponse.json({ error: "Update failed" }, { status: 500 });
     }
   }
 
   async function DELETE(req: NextRequest) {
+    const uid = await getSessionUserId();
+    if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
       const model = getModel(modelName);
       const id = req.nextUrl.searchParams.get("id");
@@ -196,8 +229,8 @@ export function makeCrudHandlers(
       await model.delete({ where: { id } });
       return NextResponse.json({ ok: true });
     } catch (e) {
-      console.error(e);
-      return NextResponse.json({ error: String(e) }, { status: 500 });
+      console.error(`[crud:${modelName}:DELETE]`, e);
+      return NextResponse.json({ error: "Delete failed" }, { status: 500 });
     }
   }
 

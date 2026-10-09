@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function LoginPage() {
+type Mode = "login" | "reset" | "change";
+
+function LoginInner() {
   const router = useRouter();
-  const [mode, setMode] = useState<"login" | "reset">("login");
+  const sp = useSearchParams();
+  const next = sp.get("next") || "/dashboard";
+
+  const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [q1, setQ1] = useState("");
@@ -29,10 +34,10 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
-      router.push("/dashboard");
+      router.push(next);
       router.refresh();
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -40,6 +45,11 @@ export default function LoginPage() {
 
   async function loadQuestions() {
     setError("");
+    setMsg("");
+    if (!username) {
+      setError("Enter your username first");
+      return;
+    }
     const res = await fetch(`/api/auth/questions?username=${encodeURIComponent(username)}`);
     const data = await res.json();
     if (!res.ok) {
@@ -63,20 +73,26 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Reset failed");
-      setMsg("Password updated. You can log in now.");
+      setMsg("Password updated. You can sign in now.");
       setMode("login");
       setPassword("");
+      setNewPassword("");
+      setA1("");
+      setA2("");
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 space-y-6">
         <div className="text-center">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-600 text-white mb-3">
+            <span className="text-2xl font-bold">PT</span>
+          </div>
           <h1 className="text-2xl font-bold text-slate-900">Pacific Trips</h1>
           <p className="text-sm text-slate-500">Accounting System · Lahore · PKR</p>
         </div>
@@ -92,12 +108,12 @@ export default function LoginPage() {
           </div>
         )}
 
-        {mode === "login" ? (
+        {mode === "login" && (
           <form onSubmit={login} className="space-y-4">
             <label className="block text-sm">
               <span className="font-medium text-slate-700">Username</span>
               <input
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
@@ -108,7 +124,7 @@ export default function LoginPage() {
               <span className="font-medium text-slate-700">Password</span>
               <input
                 type="password"
-                className="mt-1 w-full border rounded-lg px-3 py-2"
+                className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
@@ -118,7 +134,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 rounded-lg"
+              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg"
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>
@@ -133,13 +149,15 @@ export default function LoginPage() {
               Forgot password? Answer security questions
             </button>
           </form>
-        ) : (
+        )}
+
+        {mode === "reset" && (
           <form onSubmit={reset} className="space-y-4">
             <label className="block text-sm">
               <span className="font-medium text-slate-700">Username</span>
               <div className="flex gap-2 mt-1">
                 <input
-                  className="flex-1 border rounded-lg px-3 py-2"
+                  className="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
@@ -147,7 +165,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={loadQuestions}
-                  className="bg-slate-800 text-white text-sm px-3 rounded-lg"
+                  className="bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 rounded-lg"
                 >
                   Load Qs
                 </button>
@@ -158,7 +176,7 @@ export default function LoginPage() {
                 <label className="block text-sm">
                   <span className="font-medium text-slate-700">{q1}</span>
                   <input
-                    className="mt-1 w-full border rounded-lg px-3 py-2"
+                    className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     value={a1}
                     onChange={(e) => setA1(e.target.value)}
                     required
@@ -167,17 +185,19 @@ export default function LoginPage() {
                 <label className="block text-sm">
                   <span className="font-medium text-slate-700">{q2}</span>
                   <input
-                    className="mt-1 w-full border rounded-lg px-3 py-2"
+                    className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     value={a2}
                     onChange={(e) => setA2(e.target.value)}
                     required
                   />
                 </label>
                 <label className="block text-sm">
-                  <span className="font-medium text-slate-700">New password (min 10 chars)</span>
+                  <span className="font-medium text-slate-700">
+                    New password (min 10 chars)
+                  </span>
                   <input
                     type="password"
-                    className="mt-1 w-full border rounded-lg px-3 py-2"
+                    className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     required
@@ -195,8 +215,11 @@ export default function LoginPage() {
             </button>
             <button
               type="button"
-              className="w-full text-sm text-slate-600"
-              onClick={() => setMode("login")}
+              className="w-full text-sm text-slate-600 hover:text-emerald-700"
+              onClick={() => {
+                setMode("login");
+                setError("");
+              }}
             >
               Back to login
             </button>
@@ -204,5 +227,13 @@ export default function LoginPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
+      <LoginInner />
+    </Suspense>
   );
 }

@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { getOrCreatePeriod, listPeriods } from "@/lib/period";
+import { resolveActivePeriod } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
+import { ShieldCheck } from "lucide-react";
 
 const empFields: FieldDef[] = [
   { key: "name", label: "Name", required: true },
@@ -16,15 +18,7 @@ export default async function SettingsPage({
   searchParams: Promise<{ period?: string }>;
 }) {
   const params = await searchParams;
-  let periods = await listPeriods();
-  let periodId = params.period;
-  if (!periodId || periods.length === 0) {
-    const now = new Date();
-    const c = await getOrCreatePeriod(now.getFullYear(), now.getMonth() + 1);
-    periodId = c.id;
-    periods = await listPeriods();
-  }
-  const current = periods.find((p) => p.id === periodId) ?? periods[0];
+  const { periods, current } = await resolveActivePeriod(params.period);
   const employees = await prisma.employee.findMany({ orderBy: { name: "asc" } });
 
   return (
@@ -38,6 +32,14 @@ export default async function SettingsPage({
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
+
+      <Link
+        href="/settings/security"
+        className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium"
+      >
+        <ShieldCheck size={16} />
+        Security settings (change password &amp; questions)
+      </Link>
 
       <CrudPanel
         title="Employees"
