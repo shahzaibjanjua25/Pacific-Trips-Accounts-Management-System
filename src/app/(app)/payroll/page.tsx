@@ -61,6 +61,7 @@ const fields: FieldDef[] = [
   { key: "loanInstallment", label: "Loan Installment", type: "number" as const, money: true },
   { key: "otherDeductions", label: "Other Deductions", type: "number" as const, money: true },
   { key: "netPayable", label: "Net Payable", type: "number" as const, money: true },
+  { key: "amountPaid", label: "Amount Paid", type: "number" as const, money: true },
   { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Paid"] },
   { key: "paidDate", label: "Paid Date", type: "date" as const },
   { key: "notes", label: "Notes", type: "textarea" as const },

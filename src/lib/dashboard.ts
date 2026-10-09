@@ -68,9 +68,10 @@ export async function getDashboardData(periodId: string) {
   const overduePayables = payables
     .filter((p) => p.daysOverdue > 0)
     .reduce((s, p) => s + p.remaining, 0);
-  const salaryPayable = payroll
-    .filter((p) => p.status === "Pending")
-    .reduce((s, p) => s + p.netPayable, 0);
+  const salaryPayable = payroll.reduce(
+    (s, p) => s + Math.max(0, p.netPayable - (p.amountPaid ?? 0)),
+    0
+  );
   const hotelRemaining = hotels.reduce((s, h) => s + (h.payable?.remaining ?? 0), 0);
   const commissionsRemaining = commissions
     .filter((c) => c.status === "Accrued")

@@ -229,27 +229,43 @@ export async function applyReceiptToReceivables(
 }
 
 /** Mark payroll as paid + decrement linked employee loan. */
+/** Apply a partial (or full) payment to a payroll entry. */
 export async function applyPayrollPayment(
     periodId: string,
     employeeName: string,
     amount: number
 ): Promise<AppliedLink[]> {
+    if (!employeeName || amount <= 0) return [];
+
+    // Find the most-recent unpaid/partial payroll row for this employee
     const entry = await prisma.payrollEntry.findFirst({
         where: {
             periodId,
             employeeName: { contains: employeeName.split(" ")[0] || employeeName },
-            status: "Pending",
+            status: { in: ["Pending", "Partial"] },
         },
+        orderBy: { createdAt: "asc" },
     });
     if (!entry) return [];
 
-    const applied = Math.min(amount, entry.netPayable);
+    const outstanding = Math.max(0, entry.netPayable - entry.amountPaid);
+    if (outstanding <= 0) return [];
+
+    const applied = Math.min(amount, outstanding);
+    const newPaid = entry.amountPaid + applied;
+    const newRemaining = Math.max(0, entry.netPayable - newPaid);
 
     await prisma.payrollEntry.update({
         where: { id: entry.id },
-        data: { status: "Paid", paidDate: new Date() },  // ← marks FULLY paid
+        data: {
+            amountPaid: newPaid,
+            status: newRemaining <= 0 ? "Paid" : "Partial",
+            paidDate: newRemaining <= 0 ? new Date() : entry.paidDate,
+        },
     });
-    if (entry.employeeId && entry.loanInstallment > 0) {
+
+    // Only decrement the loan when the payroll is fully paid
+    if (newRemaining <= 0 && entry.employeeId && entry.loanInstallment > 0) {
         const loan = await prisma.employeeLoan.findFirst({
             where: { employeeId: entry.employeeId, remainingAmount: { gt: 0 } },
         });
