@@ -1,0 +1,618 @@
+// Pacific Trips — Complete Accounting System
+// All figures in PKR | Monthly period isolation
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./pacific_trips.db"
+}
+
+// ─────────────────────────────────────────────
+// PERIOD (Year-Month isolation)
+// ─────────────────────────────────────────────
+model Period {
+  id        String   @id @default(cuid())
+  year      Int
+  month     Int      // 1-12
+  label     String   // e.g. "Oct-2026"
+  isClosed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions     Transaction[]
+  receivables      Receivable[]
+  trips            Trip[]
+  payables         Payable[]
+  hotelBookings    HotelBooking[]
+  transportJobs    TransportJob[]
+  ticketing        Ticketing[]
+  supplierAdvances SupplierAdvance[]
+  refunds          Refund[]
+  payrollEntries   PayrollEntry[]
+  commissions      Commission[]
+  officeExpenses   OfficeExpense[]
+  marketingExpenses MarketingExpense[]
+  pettyCashTxns    PettyCashTxn[]
+  bankTxns         BankTxn[]
+  cashFlowSnapshots CashFlowSnapshot[]
+  assets           Asset[]
+  liabilities      Liability[]
+  ownerTxns        OwnerTxn[]
+  vadets           Vadet[]
+  monthlyClosings  MonthlyClosing[]
+  salesPerformance SalesPerformance[]
+
+  @@unique([year, month])
+}
+
+// ─────────────────────────────────────────────
+// CLIENTS
+// ─────────────────────────────────────────────
+model Client {
+  id          String   @id @default(cuid())
+  name        String
+  contact     String?
+  phone       String?
+  email       String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  receivables Receivable[]
+  trips       Trip[]
+  refunds     Refund[]
+  clientLedgers ClientLedger[]
+}
+
+model ClientLedger {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  tourDate    DateTime?
+  description String?
+  category    String?
+  subCategory String?
+  hotel       String?
+  debit       Float    @default(0)
+  credit      Float    @default(0)
+  status      String?
+  receiptRef  String?
+  enteredBy   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// EMPLOYEES / SALES TEAM
+// ─────────────────────────────────────────────
+model Employee {
+  id            String   @id @default(cuid())
+  name          String
+  role          String?  // Sales, Driver, Admin...
+  basicSalary   Float    @default(0)
+  phone         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  payrollEntries PayrollEntry[]
+  commissions    Commission[]
+  loans          EmployeeLoan[]
+  salesPerformance SalesPerformance[]
+  assignedAssets Asset[]
+}
+
+model EmployeeLoan {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  originalAmount  Float
+  remainingAmount Float
+  monthlyInstallment Float @default(0)
+  startDate       DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// TRANSACTIONS (General Ledger)
+// ─────────────────────────────────────────────
+model Transaction {
+  id            String   @id @default(cuid())
+  periodId      String
+  period        Period   @relation(fields: [periodId], references: [id])
+  date          DateTime
+  txnId         String?
+  description   String
+  category      String   // Revenue, Expense, Transfer, Loan...
+  subCategory   String?
+  party         String?  // Client / Vendor / Employee name
+  tripRef       String?
+  debit         Float    @default(0)
+  credit        Float    @default(0)
+  paymentMethod String?
+  bankAccount   String?
+  phone         String?
+  approvedBy    String?
+  status        String   @default("Pending")
+  receiptRef    String?
+  enteredBy     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// RECEIVABLES
+// ─────────────────────────────────────────────
+model Receivable {
+  id                String   @id @default(cuid())
+  periodId          String
+  period            Period   @relation(fields: [periodId], references: [id])
+  clientId          String?
+  client            Client?  @relation(fields: [clientId], references: [id])
+  clientName        String
+  contact           String?
+  bookingDate       DateTime?
+  tripDates         String?
+  destination       String?
+  totalPackage      Float    @default(0)
+  amountToReceive   Float    @default(0)
+  amountReceived    Float    @default(0)
+  remainingAmount   Float    @default(0) // auto: total - received
+  dueDate           DateTime?
+  daysOverdue       Int      @default(0)
+  tripStart         DateTime?
+  salesperson       String?
+  discounts         Float    @default(0)
+  additionalCharges Float    @default(0)
+  finalSettlement   Float?
+  status            String   @default("Open") // Open, Partial, Settled, Overdue
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// TRIPS / TripPnL
+// ─────────────────────────────────────────────
+model Trip {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  clientId        String?
+  client          Client?  @relation(fields: [clientId], references: [id])
+  clientName      String
+  tripRef         String?
+  destination     String?
+  startDate       DateTime?
+  endDate         DateTime?
+  packageRevenue  Float    @default(0)
+  hotelCost       Float    @default(0)
+  transportCost   Float    @default(0)
+  ticketingCost   Float    @default(0)
+  otherDirectCost Float    @default(0)
+  totalDirectCost Float    @default(0) // formula
+  grossProfit     Float    @default(0)
+  overheadAlloc   Float    @default(0)
+  netProfit       Float    @default(0)
+  status          String   @default("Planned") // Planned, Ongoing, Completed, Cancelled
+  salesperson     String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// PAYABLES / SUPPLIERS
+// ─────────────────────────────────────────────
+model Payable {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  supplierName    String
+  category        String?  // Hotel, Transport, Ticketing, Other
+  description     String?
+  invoiceRef      String?
+  originalAmount  Float    @default(0)
+  amountPaid      Float    @default(0)
+  remaining       Float    @default(0)
+  dueDate         DateTime?
+  daysOverdue     Int      @default(0)
+  status          String   @default("Open")
+  relatedTrip     String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model HotelBooking {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  hotelName       String
+  clientName      String?
+  tripRef         String?
+  checkIn         DateTime?
+  checkOut        DateTime?
+  nights          Int?
+  rooms           Int?
+  agreedCost      Float    @default(0)
+  amountPaid      Float    @default(0)
+  remaining       Float    @default(0)
+  status          String   @default("Booked")
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model TransportJob {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  driverName      String?
+  vehicle         String?
+  clientName      String?
+  tripRef         String?
+  agreedCost      Float    @default(0)
+  fuelCost        Float    @default(0)
+  finalSettlement Float    @default(0)
+  remaining       Float    @default(0)
+  status          String   @default("Pending")
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model Ticketing {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  airline         String?
+  clientName      String?
+  tripRef         String?
+  ticketCost      Float    @default(0) // paid to airline
+  chargedToClient Float    @default(0)
+  profit          Float    @default(0)
+  status          String   @default("Booked")
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model SupplierAdvance {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  supplierName    String
+  amount          Float    @default(0)
+  adjustedAmount  Float    @default(0)
+  remaining       Float    @default(0)
+  relatedTrip     String?
+  dateGiven       DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// REFUNDS
+// ─────────────────────────────────────────────
+model Refund {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  clientId        String?
+  client          Client?  @relation(fields: [clientId], references: [id])
+  clientName      String
+  amount          Float    @default(0)
+  reason          String?
+  status          String   @default("Pending") // Pending, Paid
+  paidDate        DateTime?
+  tripRef         String?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// PAYROLL & COMMISSIONS
+// ─────────────────────────────────────────────
+model PayrollEntry {
+  id                String   @id @default(cuid())
+  periodId          String
+  period            Period   @relation(fields: [periodId], references: [id])
+  employeeId        String?
+  employee          Employee? @relation(fields: [employeeId], references: [id])
+  employeeName      String
+  basicSalary       Float    @default(0)
+  taxDeducted       Float    @default(0)
+  loanInstallment   Float    @default(0)
+  otherDeductions   Float    @default(0)
+  netPayable        Float    @default(0)
+  status            String   @default("Pending") // Pending, Paid
+  paidDate          DateTime?
+  notes             String?
+  createdAt         DateTime @default(now())
+}
+
+model Commission {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  employeeId      String?
+  employee        Employee? @relation(fields: [employeeId], references: [id])
+  employeeName    String
+  tripRef         String?
+  clientName      String?
+  saleAmount      Float    @default(0)
+  commissionRate  Float    @default(0)
+  commissionAmt   Float    @default(0)
+  status          String   @default("Accrued") // Accrued, Paid
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// EXPENSES
+// ─────────────────────────────────────────────
+model OfficeExpense {
+  id            String   @id @default(cuid())
+  periodId      String
+  period        Period   @relation(fields: [periodId], references: [id])
+  date          DateTime?
+  category      String   // Rent, Electricity, Internet, Maintenance, Saving...
+  description   String?
+  amount        Float    @default(0)
+  vendor        String?
+  paymentMethod String?
+  receiptRef    String?
+  approvedBy    String?
+  department    String?
+  recurring     Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model MarketingExpense {
+  id            String   @id @default(cuid())
+  periodId      String
+  period        Period   @relation(fields: [periodId], references: [id])
+  date          DateTime?
+  channel       String?  // Facebook, Google, Instagram...
+  description   String?
+  amount        Float    @default(0)
+  vendor        String?
+  paymentMethod String?
+  receiptRef    String?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// PETTY CASH & BANK
+// ─────────────────────────────────────────────
+model PettyCashTxn {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  date            DateTime
+  description     String
+  personReceiving String?
+  amountOut       Float    @default(0)
+  amountIn        Float    @default(0)
+  purpose         String?
+  receiptRef      String?
+  balanceAfter    Float    @default(0)
+  approvedBy      String?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model BankAccount {
+  id        String   @id @default(cuid())
+  name      String   // HBL Main, Meezan, UBL, Faisal, Easypaisa, Jazzcash
+  type      String   @default("Bank") // Bank, MobileWallet
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  txns      BankTxn[]
+}
+
+model BankTxn {
+  id            String   @id @default(cuid())
+  periodId      String
+  period        Period   @relation(fields: [periodId], references: [id])
+  accountId     String?
+  account       BankAccount? @relation(fields: [accountId], references: [id])
+  accountName   String
+  date          DateTime
+  description   String?
+  deposit       Float    @default(0)
+  withdrawal    Float    @default(0)
+  transferIn    Float    @default(0)
+  transferOut   Float    @default(0)
+  bankCharges   Float    @default(0)
+  balance       Float    @default(0)
+  statementRef  String?
+  reconciled    Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model BankBalance {
+  id          String   @id @default(cuid())
+  accountName String
+  balance     Float    @default(0)
+  asOfDate    DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// CASH FLOW
+// ─────────────────────────────────────────────
+model CashFlowSnapshot {
+  id                    String   @id @default(cuid())
+  periodId              String
+  period                Period   @relation(fields: [periodId], references: [id])
+  asOfDate              DateTime
+  bankBalances          Float    @default(0)
+  pettyCash             Float    @default(0)
+  expectedCollections7d Float    @default(0)
+  totalAvailable        Float    @default(0)
+  hotelPaymentsDue      Float    @default(0)
+  supplierPaymentsDue   Float    @default(0)
+  driverPaymentsDue     Float    @default(0)
+  salariesDue           Float    @default(0)
+  marketingCommitted    Float    @default(0)
+  officeExpensesDue     Float    @default(0)
+  taxesDue              Float    @default(0)
+  otherLiabilities      Float    @default(0)
+  totalCommitted        Float    @default(0)
+  freeCash              Float    @default(0)
+  createdAt             DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// ASSETS / LIABILITIES / OWNER
+// ─────────────────────────────────────────────
+model Asset {
+  id              String   @id @default(cuid())
+  periodId        String?  // optional - assets can span periods
+  period          Period?  @relation(fields: [periodId], references: [id])
+  assetName       String
+  category        String   // Camera, Laptop, Phone, Furniture, Other
+  purchaseDate    DateTime?
+  purchaseCost    Float    @default(0)
+  currentStatus   String   @default("In Use")
+  assignedToId    String?
+  assignedTo      Employee? @relation(fields: [assignedToId], references: [id])
+  location        String?
+  serialNo        String?
+  disposalDate    DateTime?
+  disposalValue   Float?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model Liability {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  liabilityType   String
+  partyName       String?
+  description     String?
+  originalAmount  Float    @default(0)
+  amountPaid      Float    @default(0)
+  outstanding     Float    @default(0)
+  dueDate         DateTime?
+  interest        Float    @default(0)
+  relatedRef      String?
+  startDate       DateTime?
+  status          String   @default("Open")
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model OwnerTxn {
+  id              String   @id @default(cuid())
+  periodId        String
+  period          Period   @relation(fields: [periodId], references: [id])
+  date            DateTime
+  type            String   // Capital Introduced / Withdrawal
+  description     String?
+  amountIn        Float    @default(0)
+  amountOut       Float    @default(0)
+  runningBalance  Float    @default(0)
+  mode            String?
+  recordedBy      String?
+  supportingDoc   String?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// VADETS (staff advances tracker from Excel)
+// ─────────────────────────────────────────────
+model Vadet {
+  id        String   @id @default(cuid())
+  periodId  String
+  period    Period   @relation(fields: [periodId], references: [id])
+  name      String
+  amount    Float    @default(0)
+  notes     String?
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// MONTHLY CLOSING
+// ─────────────────────────────────────────────
+model MonthlyClosing {
+  id                  String   @id @default(cuid())
+  periodId            String
+  period              Period   @relation(fields: [periodId], references: [id])
+  totalRevenue        Float    @default(0)
+  ticketingRevenue    Float    @default(0)
+  otherRevenue        Float    @default(0)
+  hotelsCost          Float    @default(0)
+  transportCost       Float    @default(0)
+  ticketingCost       Float    @default(0)
+  otherDirectCost     Float    @default(0)
+  totalDirectCost     Float    @default(0)
+  grossProfit         Float    @default(0)
+  salaries            Float    @default(0)
+  commissions         Float    @default(0)
+  marketing           Float    @default(0)
+  officeExpenses      Float    @default(0)
+  otherOverheads      Float    @default(0)
+  totalOperatingExp   Float    @default(0)
+  netProfit           Float    @default(0)
+  bankBalance         Float    @default(0)
+  cashBalance         Float    @default(0)
+  receivables         Float    @default(0)
+  payables            Float    @default(0)
+  supplierAdvances    Float    @default(0)
+  loansLiabilities    Float    @default(0)
+  assetsAtCost        Float    @default(0)
+  netWorkingCapital   Float    @default(0)
+  tripsCompleted      Int      @default(0)
+  avgRevenuePerTrip   Float    @default(0)
+  profitMarginPct     Float    @default(0)
+  closedAt            DateTime?
+  closedBy            String?
+  notes               String?
+  createdAt           DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// SALES TEAM PERFORMANCE
+// ─────────────────────────────────────────────
+model SalesPerformance {
+  id          String   @id @default(cuid())
+  periodId    String
+  period      Period   @relation(fields: [periodId], references: [id])
+  employeeId  String?
+  employee    Employee? @relation(fields: [employeeId], references: [id])
+  employeeName String
+  tourDate    DateTime?
+  description String?
+  category    String?
+  subCategory String?
+  clientName  String?
+  debit       Float    @default(0)
+  credit      Float    @default(0)
+  status      String?
+  enteredBy   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// SETTINGS / COMPANY
+// ─────────────────────────────────────────────
+model CompanySettings {
+  id              String   @id @default(cuid())
+  companyName     String   @default("Pacific Trips")
+  city            String   @default("Lahore, Pakistan")
+  currency        String   @default("PKR")
+  fiscalYearStart Int      @default(1) // January
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
