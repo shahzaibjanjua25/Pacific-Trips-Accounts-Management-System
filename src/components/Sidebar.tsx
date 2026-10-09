@@ -1,5 +1,17 @@
 "use client";
 
+async function doLogout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.href = "/login";
+}
+
+
+async function logout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.href = "/login";
+}
+
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -56,6 +68,14 @@ const nav = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+function LogoutBtn() {
+  return (
+    <button type="button" onClick={doLogout} className="w-full text-left text-sm text-red-600 hover:bg-red-50 rounded-lg px-3 py-2 mt-2">
+      Sign out
+    </button>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -103,6 +123,7 @@ export function Sidebar() {
             );
           })}
         </nav>
+          <LogoutBtn />
 
         <div className="p-3 border-t border-slate-700 text-[10px] text-slate-500">
           Every transaction · No amount too small
