@@ -1,7 +1,17 @@
 /**
- * Full cascade: transactions update related modules by category + party name match.
+ * Full cascade: transactions update related modules AND record
+ * TransactionLink rows so payment history is permanently traceable.
  */
 import { prisma } from "./prisma";
+import {
+  applyPaymentToPayables,
+  applyReceiptToReceivables,
+  applyPayrollPayment,
+  applyCommissionPayment,
+  applyRefundPayment,
+  applyToAdvances,
+  type AppliedLink,
+} from "./links-service";
 
 export type TxnInput = {
   periodId: string;
@@ -18,14 +28,13 @@ export type TxnInput = {
   status?: string;
   enteredBy?: string | null;
   notes?: string | null;
-  // Optional relation hints — reserved for future use; currently ignored
-  relatedReceivableId?: string | null;
   relatedPayableId?: string | null;
-  relatedPayrollId?: string | null;
-  relatedRefundId?: string | null;
+  relatedReceivableId?: string | null;
   relatedHotelId?: string | null;
   relatedTransportId?: string | null;
+  relatedPayrollId?: string | null;
   relatedCommissionId?: string | null;
+  relatedRefundId?: string | null;
   relatedAdvanceId?: string | null;
 };
 
@@ -44,118 +53,84 @@ async function adjustBank(accountName: string | null | undefined, delta: number)
   }
 }
 
-function cashDelta(debit: number, credit: number) {
-  return debit - credit;
-}
+const cashDelta = (debit: number, credit: number) => debit - credit;
 
-function partyMatch(a: string, b: string) {
-  const x = a.toLowerCase().trim();
-  const y = b.toLowerCase().trim();
-  return x === y || x.includes(y) || y.includes(x);
-}
+/**
+ * Determine which entity a transaction should link to based on
+ * category + party, and apply payment.
+ */
+async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
+  const cat = (input.category || "").toLowerCase();
+  const party = input.party || input.subCategory || "";
+  const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
+  const periodId = input.periodId;
 
-/** Apply payment amount to reduce remaining on payables / hotels / transport by party name */
-async function reducePayableLike(
-  periodId: string,
-  party: string,
-  amount: number,
-  kinds: ("payable" | "hotel" | "transport")[]
-) {
-  if (!party || amount <= 0) return;
-
-  if (kinds.includes("payable")) {
-    const list = await prisma.payable.findMany({
-      where: { periodId, remaining: { gt: 0 } },
+  // Explicit ID overrides
+  if (input.relatedPayableId) {
+    return applyPaymentToPayables(periodId, party, amount).then((links) => {
+      // ensure the explicit one is in the list
+      if (!links.find((l) => l.entityId === input.relatedPayableId)) {
+        links.unshift({
+          entityType: "payable",
+          entityId: input.relatedPayableId!,
+          appliedAmount: 0,
+        });
+      }
+      return links;
     });
-    let left = amount;
-    for (const p of list) {
-      if (left <= 0) break;
-      if (!partyMatch(p.supplierName, party)) continue;
-      const pay = Math.min(left, p.remaining);
-      const newPaid = p.amountPaid + pay;
-      const newRem = Math.max(0, p.originalAmount - newPaid);
-      await prisma.payable.update({
-        where: { id: p.id },
+  }
+
+  if (cat.includes("receipt") || cat.includes("client receipt") || cat.includes("revenue")) {
+    return applyReceiptToReceivables(periodId, party, amount);
+  }
+
+  if (cat.includes("hotel")) {
+    return applyPaymentToPayables(periodId, party, amount, ["Hotel"]);
+  }
+
+  if (cat.includes("transport") || cat.includes("driver")) {
+    return applyPaymentToPayables(periodId, party, amount, ["Transport"]);
+  }
+
+  if (cat.includes("ticketing")) {
+    return applyPaymentToPayables(periodId, party, amount, ["Ticketing"]);
+  }
+
+  if (cat.includes("supplier") || cat.includes("payable")) {
+    return applyPaymentToPayables(periodId, party, amount);
+  }
+
+  if (cat.includes("salary") || cat.includes("payroll")) {
+    return applyPayrollPayment(periodId, party, amount);
+  }
+
+  if (cat.includes("commission")) {
+    return applyCommissionPayment(periodId, party, amount);
+  }
+
+  if (cat.includes("refund")) {
+    return applyRefundPayment(periodId, party, amount);
+  }
+
+  if (cat.includes("advance") && !cat.includes("employee")) {
+    // A new advance payment = create it
+    if (input.credit > 0 && party) {
+      const adv = await prisma.supplierAdvance.create({
         data: {
-          amountPaid: newPaid,
-          remaining: newRem,
-          status: newRem <= 0 ? "Paid" : "Partial",
+          periodId,
+          supplierName: party,
+          amount,
+          adjustedAmount: 0,
+          remaining: amount,
+          dateGiven: new Date(input.date),
+          notes: input.description,
         },
       });
-      left -= pay;
+      return [{ entityType: "advance", entityId: adv.id, appliedAmount: amount }];
     }
   }
 
-  if (kinds.includes("hotel")) {
-    const list = await prisma.hotelBooking.findMany({
-      where: { periodId, remaining: { gt: 0 } },
-    });
-    let left = amount;
-    for (const h of list) {
-      if (left <= 0) break;
-      if (!partyMatch(h.hotelName, party)) continue;
-      const pay = Math.min(left, h.remaining);
-      const newPaid = h.amountPaid + pay;
-      const newRem = Math.max(0, h.agreedCost - newPaid);
-      await prisma.hotelBooking.update({
-        where: { id: h.id },
-        data: {
-          amountPaid: newPaid,
-          remaining: newRem,
-          status: newRem <= 0 ? "Paid" : "Partial",
-        },
-      });
-      left -= pay;
-    }
-  }
-
-  if (kinds.includes("transport")) {
-    const list = await prisma.transportJob.findMany({
-      where: { periodId, remaining: { gt: 0 } },
-    });
-    let left = amount;
-    for (const t of list) {
-      if (left <= 0) break;
-      const name = t.driverName || "";
-      if (!partyMatch(name, party) && !(t.vehicle && partyMatch(t.vehicle, party))) continue;
-      const pay = Math.min(left, t.remaining);
-      const settled = t.finalSettlement + pay;
-      const newRem = Math.max(0, t.agreedCost - settled);
-      await prisma.transportJob.update({
-        where: { id: t.id },
-        data: {
-          finalSettlement: settled,
-          remaining: newRem,
-          status: newRem <= 0 ? "Settled" : "Partial",
-        },
-      });
-      left -= pay;
-    }
-  }
-}
-
-async function reduceReceivable(periodId: string, party: string, amount: number) {
-  if (!party || amount <= 0) return;
-  const list = await prisma.receivable.findMany({
-    where: { periodId, remainingAmount: { gt: 0 } },
-  });
-  let left = amount;
-  for (const r of list) {
-    if (left <= 0) break;
-    if (!partyMatch(r.clientName, party)) continue;
-    const recv = Math.min(left, r.remainingAmount);
-    const newReceived = r.amountReceived + recv;
-    const newRem = Math.max(0, r.totalPackage - newReceived);
-    await prisma.receivable.update({
-      where: { id: r.id },
-      data: {
-        amountReceived: newReceived,
-        remainingAmount: newRem,
-        status: newRem <= 0 ? "Settled" : "Partial",
-      },
-    });
-    left -= recv;
-  }
+  return [];
 }
 
 export async function postTransaction(input: TxnInput) {
@@ -178,71 +153,26 @@ export async function postTransaction(input: TxnInput) {
     },
   });
 
-  const delta = cashDelta(input.debit || 0, input.credit || 0);
-  await adjustBank(input.bankAccount, delta);
+  await adjustBank(input.bankAccount, cashDelta(input.debit || 0, input.credit || 0));
 
-  const cat = (input.category || "").toLowerCase();
-  const party = input.party || input.subCategory || "";
-  const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
+  const links = await resolveLinks(input);
 
-  if (cat.includes("receipt") || cat.includes("revenue") || cat.includes("client payment")) {
-    await reduceReceivable(input.periodId, party, amount || input.debit || 0);
-  }
-
-  if (cat.includes("hotel")) {
-    await reducePayableLike(input.periodId, party, amount, ["hotel", "payable"]);
-  } else if (cat.includes("transport") || cat.includes("driver")) {
-    await reducePayableLike(input.periodId, party, amount, ["transport", "payable"]);
-  } else if (cat.includes("supplier") || cat.includes("payable")) {
-    await reducePayableLike(input.periodId, party, amount, ["payable", "hotel", "transport"]);
-  }
-
-  if (cat.includes("salary")) {
-    const entry = await prisma.payrollEntry.findFirst({
-      where: { periodId: input.periodId, employeeName: { contains: party.split(" ")[0] || party } },
-    });
-    if (entry) {
-      await prisma.payrollEntry.update({
-        where: { id: entry.id },
-        data: { status: "Paid", paidDate: new Date() },
-      });
-    }
-  }
-
-  if (cat.includes("commission")) {
-    const c = await prisma.commission.findFirst({
-      where: { periodId: input.periodId, employeeName: { contains: party.split(" ")[0] || party } },
-    });
-    if (c) {
-      await prisma.commission.update({ where: { id: c.id }, data: { status: "Paid" } });
-    }
-  }
-
-  if (cat.includes("refund")) {
-    const r = await prisma.refund.findFirst({
-      where: { periodId: input.periodId, clientName: { contains: party }, status: "Pending" },
-    });
-    if (r) {
-      await prisma.refund.update({
-        where: { id: r.id },
-        data: { status: "Paid", paidDate: new Date() },
-      });
-    }
-  }
-
-  if (cat.includes("advance") && !cat.includes("employee") && party && input.credit > 0) {
-    await prisma.supplierAdvance.create({
+  for (const link of links) {
+    await prisma.transactionLink.create({
       data: {
+        transactionId: txn.id,
         periodId: input.periodId,
-        supplierName: party,
-        amount,
-        adjustedAmount: 0,
-        remaining: amount,
-        dateGiven: new Date(input.date),
-        notes: input.description,
+        entityType: link.entityType,
+        entityId: link.entityId,
+        appliedAmount: link.appliedAmount,
       },
     });
   }
+
+  // Auto-side-effects for expense-type categories
+  const cat = (input.category || "").toLowerCase();
+  const party = input.party || input.subCategory || "";
+  const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
 
   if (cat.includes("office") && amount > 0) {
     await prisma.officeExpense.create({
@@ -293,15 +223,88 @@ export async function postTransaction(input: TxnInput) {
 export async function deleteTransaction(id: string) {
   const txn = await prisma.transaction.findUnique({ where: { id } });
   if (!txn) return null;
+
+  // Reverse the payment effects (best-effort: add back to remaining)
+  const links = await prisma.transactionLink.findMany({ where: { transactionId: id } });
+  for (const link of links) {
+    await reverseLink(link);
+  }
+
   await adjustBank(txn.bankAccount, -cashDelta(txn.debit, txn.credit));
   await prisma.transaction.delete({ where: { id } });
   return txn;
 }
 
+async function reverseLink(link: {
+  entityType: string;
+  entityId: string;
+  appliedAmount: number;
+}) {
+  const amt = link.appliedAmount;
+  if (amt <= 0) return;
+
+  if (link.entityType === "payable") {
+    const p = await prisma.payable.findUnique({ where: { id: link.entityId } });
+    if (!p) return;
+    const newPaid = Math.max(0, p.amountPaid - amt);
+    const newRem = Math.max(0, p.originalAmount - newPaid);
+    await prisma.payable.update({
+      where: { id: p.id },
+      data: {
+        amountPaid: newPaid,
+        remaining: newRem,
+        status: newRem <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Open",
+      },
+    });
+  }
+
+  if (link.entityType === "receivable") {
+    const r = await prisma.receivable.findUnique({ where: { id: link.entityId } });
+    if (!r) return;
+    const newReceived = Math.max(0, r.amountReceived - amt);
+    const newRem = Math.max(0, r.totalPackage - newReceived);
+    await prisma.receivable.update({
+      where: { id: r.id },
+      data: {
+        amountReceived: newReceived,
+        remainingAmount: newRem,
+        status: newRem <= 0 ? "Settled" : newReceived > 0 ? "Partial" : "Open",
+      },
+    });
+  }
+
+  if (link.entityType === "payroll") {
+    await prisma.payrollEntry.update({
+      where: { id: link.entityId },
+      data: { status: "Pending", paidDate: null },
+    });
+  }
+
+  if (link.entityType === "commission") {
+    await prisma.commission.update({
+      where: { id: link.entityId },
+      data: { status: "Accrued" },
+    });
+  }
+
+  if (link.entityType === "refund") {
+    await prisma.refund.update({
+      where: { id: link.entityId },
+      data: { status: "Pending", paidDate: null },
+    });
+  }
+}
+
 export async function updateTransaction(id: string, input: Partial<TxnInput>) {
   const old = await prisma.transaction.findUnique({ where: { id } });
   if (!old) return null;
+
+  // Reverse bank + links
   await adjustBank(old.bankAccount, -cashDelta(old.debit, old.credit));
+  const links = await prisma.transactionLink.findMany({ where: { transactionId: id } });
+  for (const link of links) await reverseLink(link);
+  await prisma.transactionLink.deleteMany({ where: { transactionId: id } });
+
   const updated = await prisma.transaction.update({
     where: { id },
     data: {
@@ -320,6 +323,31 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
       notes: input.notes,
     },
   });
+
   await adjustBank(updated.bankAccount, cashDelta(updated.debit, updated.credit));
+
+  const newLinks = await resolveLinks({
+    periodId: updated.periodId,
+    date: updated.date.toISOString(),
+    description: updated.description,
+    category: updated.category,
+    subCategory: updated.subCategory,
+    party: updated.party,
+    debit: updated.debit,
+    credit: updated.credit,
+  });
+
+  for (const link of newLinks) {
+    await prisma.transactionLink.create({
+      data: {
+        transactionId: updated.id,
+        periodId: updated.periodId,
+        entityType: link.entityType,
+        entityId: link.entityId,
+        appliedAmount: link.appliedAmount,
+      },
+    });
+  }
+
   return updated;
 }

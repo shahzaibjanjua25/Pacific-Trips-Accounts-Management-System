@@ -1,5 +1,6 @@
 // Pacific Trips — Complete Accounting System
 // All figures in PKR | Monthly period isolation
+// Financial master = Payable / Receivable. Hotel/Transport = operational detail.
 
 generator client {
   provider = "prisma-client-js"
@@ -11,39 +12,40 @@ datasource db {
 }
 
 // ─────────────────────────────────────────────
-// PERIOD (Year-Month isolation)
+// PERIOD
 // ─────────────────────────────────────────────
 model Period {
   id        String   @id @default(cuid())
   year      Int
-  month     Int      // 1-12
-  label     String   // e.g. "Oct-2026"
+  month     Int
+  label     String
   isClosed  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  transactions     Transaction[]
-  receivables      Receivable[]
-  trips            Trip[]
-  payables         Payable[]
-  hotelBookings    HotelBooking[]
-  transportJobs    TransportJob[]
-  ticketing        Ticketing[]
-  supplierAdvances SupplierAdvance[]
-  refunds          Refund[]
-  payrollEntries   PayrollEntry[]
-  commissions      Commission[]
-  officeExpenses   OfficeExpense[]
+  transactions      Transaction[]
+  transactionLinks  TransactionLink[]
+  receivables       Receivable[]
+  trips             Trip[]
+  payables          Payable[]
+  hotelBookings     HotelBooking[]
+  transportJobs     TransportJob[]
+  ticketing         Ticketing[]
+  supplierAdvances  SupplierAdvance[]
+  refunds           Refund[]
+  payrollEntries    PayrollEntry[]
+  commissions       Commission[]
+  officeExpenses    OfficeExpense[]
   marketingExpenses MarketingExpense[]
-  pettyCashTxns    PettyCashTxn[]
-  bankTxns         BankTxn[]
+  pettyCashTxns     PettyCashTxn[]
+  bankTxns          BankTxn[]
   cashFlowSnapshots CashFlowSnapshot[]
-  assets           Asset[]
-  liabilities      Liability[]
-  ownerTxns        OwnerTxn[]
-  vadets           Vadet[]
-  monthlyClosings  MonthlyClosing[]
-  salesPerformance SalesPerformance[]
+  assets            Asset[]
+  liabilities       Liability[]
+  ownerTxns         OwnerTxn[]
+  vadets            Vadet[]
+  monthlyClosings   MonthlyClosing[]
+  salesPerformance  SalesPerformance[]
 
   @@unique([year, month])
 }
@@ -52,73 +54,73 @@ model Period {
 // CLIENTS
 // ─────────────────────────────────────────────
 model Client {
-  id          String   @id @default(cuid())
-  name        String
-  contact     String?
-  phone       String?
-  email       String?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  contact   String?
+  phone     String?
+  email     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  receivables Receivable[]
-  trips       Trip[]
-  refunds     Refund[]
+  receivables   Receivable[]
+  trips         Trip[]
+  refunds       Refund[]
   clientLedgers ClientLedger[]
 }
 
 model ClientLedger {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   clientId    String
-  client      Client   @relation(fields: [clientId], references: [id])
-  clientName  String?          // ← ADD THIS LINE
+  client      Client    @relation(fields: [clientId], references: [id])
+  clientName  String?
   tourDate    DateTime?
   description String?
   category    String?
   subCategory String?
   hotel       String?
-  debit       Float    @default(0)
-  credit      Float    @default(0)
+  debit       Float     @default(0)
+  credit      Float     @default(0)
   status      String?
   receiptRef  String?
   enteredBy   String?
   notes       String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
 // EMPLOYEES / SALES TEAM
 // ─────────────────────────────────────────────
 model Employee {
-  id            String   @id @default(cuid())
-  name          String
-  role          String?  // Sales, Driver, Admin...
-  basicSalary   Float    @default(0)
-  phone         String?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
+  id          String   @id @default(cuid())
+  name        String
+  role        String?
+  basicSalary Float    @default(0)
+  phone       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
 
-  payrollEntries PayrollEntry[]
-  commissions    Commission[]
-  loans          EmployeeLoan[]
+  payrollEntries   PayrollEntry[]
+  commissions      Commission[]
+  loans            EmployeeLoan[]
   salesPerformance SalesPerformance[]
-  assignedAssets Asset[]
+  assignedAssets   Asset[]
 }
 
 model EmployeeLoan {
-  id              String   @id @default(cuid())
-  employeeId      String
-  employee        Employee @relation(fields: [employeeId], references: [id])
-  originalAmount  Float
-  remainingAmount Float
-  monthlyInstallment Float @default(0)
-  startDate       DateTime?
-  notes           String?
-  createdAt       DateTime @default(now())
+  id                 String    @id @default(cuid())
+  employeeId         String
+  employee           Employee  @relation(fields: [employeeId], references: [id])
+  originalAmount     Float
+  remainingAmount    Float
+  monthlyInstallment Float     @default(0)
+  startDate          DateTime?
+  notes              String?
+  createdAt          DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
-// TRANSACTIONS (General Ledger)
+// TRANSACTIONS + LINKS
 // ─────────────────────────────────────────────
 model Transaction {
   id            String   @id @default(cuid())
@@ -127,9 +129,9 @@ model Transaction {
   date          DateTime
   txnId         String?
   description   String
-  category      String   // Revenue, Expense, Transfer, Loan...
+  category      String
   subCategory   String?
-  party         String?  // Client / Vendor / Employee name
+  party         String?
   tripRef       String?
   debit         Float    @default(0)
   credit        Float    @default(0)
@@ -143,126 +145,157 @@ model Transaction {
   notes         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  links TransactionLink[]
+
+  @@index([periodId, category])
+  @@index([party])
+}
+
+/// Records what a transaction paid / received, so we can show
+/// payment history for any hotel / supplier / client / employee.
+model TransactionLink {
+  id            String      @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  periodId      String
+  period        Period      @relation(fields: [periodId], references: [id])
+  entityType    String      // "payable" | "hotel" | "transport" | "receivable" | "payroll" | "commission" | "refund" | "advance"
+  entityId      String
+  appliedAmount Float       @default(0)
+  createdAt     DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([transactionId])
+  @@index([periodId])
 }
 
 // ─────────────────────────────────────────────
 // RECEIVABLES
 // ─────────────────────────────────────────────
 model Receivable {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   periodId          String
-  period            Period   @relation(fields: [periodId], references: [id])
+  period            Period    @relation(fields: [periodId], references: [id])
   clientId          String?
-  client            Client?  @relation(fields: [clientId], references: [id])
+  client            Client?   @relation(fields: [clientId], references: [id])
   clientName        String
   contact           String?
   bookingDate       DateTime?
   tripDates         String?
   destination       String?
-  totalPackage      Float    @default(0)
-  amountToReceive   Float    @default(0)
-  amountReceived    Float    @default(0)
-  remainingAmount   Float    @default(0) // auto: total - received
+  totalPackage      Float     @default(0)
+  amountToReceive   Float     @default(0)
+  amountReceived    Float     @default(0)
+  remainingAmount   Float     @default(0)
   dueDate           DateTime?
-  daysOverdue       Int      @default(0)
+  daysOverdue       Int       @default(0)
   tripStart         DateTime?
   salesperson       String?
-  discounts         Float    @default(0)
-  additionalCharges Float    @default(0)
+  discounts         Float     @default(0)
+  additionalCharges Float     @default(0)
   finalSettlement   Float?
-  status            String   @default("Open") // Open, Partial, Settled, Overdue
+  status            String    @default("Open")
   notes             String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 // ─────────────────────────────────────────────
 // TRIPS / TripPnL
 // ─────────────────────────────────────────────
 model Trip {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
+  period          Period    @relation(fields: [periodId], references: [id])
   clientId        String?
-  client          Client?  @relation(fields: [clientId], references: [id])
+  client          Client?   @relation(fields: [clientId], references: [id])
   clientName      String
   tripRef         String?
   destination     String?
   startDate       DateTime?
   endDate         DateTime?
-  packageRevenue  Float    @default(0)
-  hotelCost       Float    @default(0)
-  transportCost   Float    @default(0)
-  ticketingCost   Float    @default(0)
-  otherDirectCost Float    @default(0)
-  totalDirectCost Float    @default(0) // formula
-  grossProfit     Float    @default(0)
-  overheadAlloc   Float    @default(0)
-  netProfit       Float    @default(0)
-  status          String   @default("Planned") // Planned, Ongoing, Completed, Cancelled
+  packageRevenue  Float     @default(0)
+  hotelCost       Float     @default(0)
+  transportCost   Float     @default(0)
+  ticketingCost   Float     @default(0)
+  otherDirectCost Float     @default(0)
+  totalDirectCost Float     @default(0)
+  grossProfit     Float     @default(0)
+  overheadAlloc   Float     @default(0)
+  netProfit       Float     @default(0)
+  status          String    @default("Planned")
   salesperson     String?
   notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 // ─────────────────────────────────────────────
-// PAYABLES / SUPPLIERS
+// PAYABLES (FINANCIAL MASTER for money we owe)
 // ─────────────────────────────────────────────
 model Payable {
-  id              String   @id @default(cuid())
-  periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
-  supplierName    String
-  category        String?  // Hotel, Transport, Ticketing, Other
-  description     String?
-  invoiceRef      String?
-  originalAmount  Float    @default(0)
-  amountPaid      Float    @default(0)
-  remaining       Float    @default(0)
-  dueDate         DateTime?
-  daysOverdue     Int      @default(0)
-  status          String   @default("Open")
-  relatedTrip     String?
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String    @id @default(cuid())
+  periodId       String
+  period         Period    @relation(fields: [periodId], references: [id])
+  supplierName   String
+  category       String?   // Hotel | Transport | Ticketing | Other
+  description    String?
+  invoiceRef     String?
+  originalAmount Float     @default(0)
+  amountPaid     Float     @default(0)
+  remaining      Float     @default(0)
+  dueDate        DateTime?
+  daysOverdue    Int       @default(0)
+  status         String    @default("Open")
+  relatedTrip    String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  hotelBooking   HotelBooking?
+  transportJob   TransportJob?
+
+  @@index([periodId, status])
+  @@index([category])
 }
 
+/// Hotel booking — OPERATIONAL DETAIL. Financial fields live on Payable.
 model HotelBooking {
-  id              String   @id @default(cuid())
-  periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
-  hotelName       String
-  clientName      String?
-  tripRef         String?
-  checkIn         DateTime?
-  checkOut        DateTime?
-  nights          Int?
-  rooms           Int?
-  agreedCost      Float    @default(0)
-  amountPaid      Float    @default(0)
-  remaining       Float    @default(0)
-  status          String   @default("Booked")
-  notes           String?
-  createdAt       DateTime @default(now())
+  id          String    @id @default(cuid())
+  periodId    String
+  period      Period    @relation(fields: [periodId], references: [id])
+  hotelName   String
+  clientName  String?
+  tripRef     String?
+  checkIn     DateTime?
+  checkOut    DateTime?
+  nights      Int?
+  rooms       Int?
+  status      String    @default("Booked") // Booked | Partial | Paid | Cancelled
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  payableId   String?   @unique
+  payable     Payable?  @relation(fields: [payableId], references: [id], onDelete: SetNull)
 }
 
+/// Transport job — OPERATIONAL DETAIL. Financial fields live on Payable.
 model TransportJob {
-  id              String   @id @default(cuid())
-  periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
-  driverName      String?
-  vehicle         String?
-  clientName      String?
-  tripRef         String?
-  agreedCost      Float    @default(0)
-  fuelCost        Float    @default(0)
-  finalSettlement Float    @default(0)
-  remaining       Float    @default(0)
-  status          String   @default("Pending")
-  notes           String?
-  createdAt       DateTime @default(now())
+  id          String    @id @default(cuid())
+  periodId    String
+  period      Period    @relation(fields: [periodId], references: [id])
+  driverName  String?
+  vehicle     String?
+  clientName  String?
+  tripRef     String?
+  fuelCost    Float     @default(0)
+  status      String    @default("Pending") // Pending | Partial | Settled | Cancelled
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  payableId   String?   @unique
+  payable     Payable?  @relation(fields: [payableId], references: [id], onDelete: SetNull)
 }
 
 model Ticketing {
@@ -272,7 +305,7 @@ model Ticketing {
   airline         String?
   clientName      String?
   tripRef         String?
-  ticketCost      Float    @default(0) // paid to airline
+  ticketCost      Float    @default(0)
   chargedToClient Float    @default(0)
   profit          Float    @default(0)
   status          String   @default("Booked")
@@ -281,111 +314,111 @@ model Ticketing {
 }
 
 model SupplierAdvance {
-  id              String   @id @default(cuid())
-  periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
-  supplierName    String
-  amount          Float    @default(0)
-  adjustedAmount  Float    @default(0)
-  remaining       Float    @default(0)
-  relatedTrip     String?
-  dateGiven       DateTime?
-  notes           String?
-  createdAt       DateTime @default(now())
+  id             String    @id @default(cuid())
+  periodId       String
+  period         Period    @relation(fields: [periodId], references: [id])
+  supplierName   String
+  amount         Float     @default(0)
+  adjustedAmount Float     @default(0)
+  remaining      Float     @default(0)
+  relatedTrip    String?
+  dateGiven      DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
 // REFUNDS
 // ─────────────────────────────────────────────
 model Refund {
-  id              String   @id @default(cuid())
-  periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
-  clientId        String?
-  client          Client?  @relation(fields: [clientId], references: [id])
-  clientName      String
-  amount          Float    @default(0)
-  reason          String?
-  status          String   @default("Pending") // Pending, Paid
-  paidDate        DateTime?
-  tripRef         String?
-  notes           String?
-  createdAt       DateTime @default(now())
+  id         String    @id @default(cuid())
+  periodId   String
+  period     Period    @relation(fields: [periodId], references: [id])
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id])
+  clientName String
+  amount     Float     @default(0)
+  reason     String?
+  status     String    @default("Pending")
+  paidDate   DateTime?
+  tripRef    String?
+  notes      String?
+  createdAt  DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
 // PAYROLL & COMMISSIONS
 // ─────────────────────────────────────────────
 model PayrollEntry {
-  id                String   @id @default(cuid())
-  periodId          String
-  period            Period   @relation(fields: [periodId], references: [id])
-  employeeId        String?
-  employee          Employee? @relation(fields: [employeeId], references: [id])
-  employeeName      String
-  basicSalary       Float    @default(0)
-  bonus             Float    @default(0)
-  taxDeducted       Float    @default(0)
-  loanInstallment   Float    @default(0)
-  otherDeductions   Float    @default(0)
-  netPayable        Float    @default(0)
-  status            String   @default("Pending")
-  paidDate          DateTime?
-  notes             String?
-  createdAt         DateTime @default(now())
-}
-
-model Commission {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
+  period          Period    @relation(fields: [periodId], references: [id])
   employeeId      String?
   employee        Employee? @relation(fields: [employeeId], references: [id])
   employeeName    String
-  tripRef         String?
-  clientName      String?
-  saleAmount      Float    @default(0)
-  commissionRate  Float    @default(0)
-  commissionAmt   Float    @default(0)
-  status          String   @default("Accrued") // Accrued, Paid
+  basicSalary     Float     @default(0)
+  bonus           Float     @default(0)
+  taxDeducted     Float     @default(0)
+  loanInstallment Float     @default(0)
+  otherDeductions Float     @default(0)
+  netPayable      Float     @default(0)
+  status          String    @default("Pending")
+  paidDate        DateTime?
   notes           String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
+}
+
+model Commission {
+  id             String    @id @default(cuid())
+  periodId       String
+  period         Period    @relation(fields: [periodId], references: [id])
+  employeeId     String?
+  employee       Employee? @relation(fields: [employeeId], references: [id])
+  employeeName   String
+  tripRef        String?
+  clientName     String?
+  saleAmount     Float     @default(0)
+  commissionRate Float     @default(0)
+  commissionAmt  Float     @default(0)
+  status         String    @default("Accrued")
+  notes          String?
+  createdAt      DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
 // EXPENSES
 // ─────────────────────────────────────────────
 model OfficeExpense {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   periodId      String
-  period        Period   @relation(fields: [periodId], references: [id])
+  period        Period    @relation(fields: [periodId], references: [id])
   date          DateTime?
-  category      String   // Rent, Electricity, Internet, Maintenance, Saving...
+  category      String
   description   String?
-  amount        Float    @default(0)
+  amount        Float     @default(0)
   vendor        String?
   paymentMethod String?
   receiptRef    String?
   approvedBy    String?
   department    String?
-  recurring     Boolean  @default(false)
+  recurring     Boolean   @default(false)
   notes         String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
 }
 
 model MarketingExpense {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   periodId      String
-  period        Period   @relation(fields: [periodId], references: [id])
+  period        Period    @relation(fields: [periodId], references: [id])
   date          DateTime?
-  channel       String?  // Facebook, Google, Instagram...
+  channel       String?
   description   String?
-  amount        Float    @default(0)
+  amount        Float     @default(0)
   vendor        String?
   paymentMethod String?
   receiptRef    String?
   notes         String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
@@ -410,33 +443,32 @@ model PettyCashTxn {
 
 model BankAccount {
   id        String   @id @default(cuid())
-  name      String   // HBL Main, Meezan, UBL, Faisal, Easypaisa, Jazzcash
-  type      String   @default("Bank") // Bank, MobileWallet
+  name      String
+  type      String   @default("Bank")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
-
   txns      BankTxn[]
 }
 
 model BankTxn {
-  id            String   @id @default(cuid())
-  periodId      String
-  period        Period   @relation(fields: [periodId], references: [id])
-  accountId     String?
-  account       BankAccount? @relation(fields: [accountId], references: [id])
-  accountName   String
-  date          DateTime
-  description   String?
-  deposit       Float    @default(0)
-  withdrawal    Float    @default(0)
-  transferIn    Float    @default(0)
-  transferOut   Float    @default(0)
-  bankCharges   Float    @default(0)
-  balance       Float    @default(0)
-  statementRef  String?
-  reconciled    Boolean  @default(false)
-  notes         String?
-  createdAt     DateTime @default(now())
+  id           String       @id @default(cuid())
+  periodId     String
+  period       Period       @relation(fields: [periodId], references: [id])
+  accountId    String?
+  account      BankAccount? @relation(fields: [accountId], references: [id])
+  accountName  String
+  date         DateTime
+  description  String?
+  deposit      Float        @default(0)
+  withdrawal   Float        @default(0)
+  transferIn   Float        @default(0)
+  transferOut  Float        @default(0)
+  bankCharges  Float        @default(0)
+  balance      Float        @default(0)
+  statementRef String?
+  reconciled   Boolean      @default(false)
+  notes        String?
+  createdAt    DateTime     @default(now())
 }
 
 model BankBalance {
@@ -476,62 +508,62 @@ model CashFlowSnapshot {
 // ASSETS / LIABILITIES / OWNER
 // ─────────────────────────────────────────────
 model Asset {
-  id              String   @id @default(cuid())
-  periodId        String?  // optional - assets can span periods
-  period          Period?  @relation(fields: [periodId], references: [id])
-  assetName       String
-  category        String   // Camera, Laptop, Phone, Furniture, Other
-  purchaseDate    DateTime?
-  purchaseCost    Float    @default(0)
-  currentStatus   String   @default("In Use")
-  assignedToId    String?
-  assignedTo      Employee? @relation(fields: [assignedToId], references: [id])
-  location        String?
-  serialNo        String?
-  disposalDate    DateTime?
-  disposalValue   Float?
-  notes           String?
-  createdAt       DateTime @default(now())
+  id            String    @id @default(cuid())
+  periodId      String?
+  period        Period?   @relation(fields: [periodId], references: [id])
+  assetName     String
+  category      String
+  purchaseDate  DateTime?
+  purchaseCost  Float     @default(0)
+  currentStatus String    @default("In Use")
+  assignedToId  String?
+  assignedTo    Employee? @relation(fields: [assignedToId], references: [id])
+  location      String?
+  serialNo      String?
+  disposalDate  DateTime?
+  disposalValue Float?
+  notes         String?
+  createdAt     DateTime  @default(now())
 }
 
 model Liability {
-  id              String   @id @default(cuid())
-  periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
-  liabilityType   String
-  partyName       String?
-  description     String?
-  originalAmount  Float    @default(0)
-  amountPaid      Float    @default(0)
-  outstanding     Float    @default(0)
-  dueDate         DateTime?
-  interest        Float    @default(0)
-  relatedRef      String?
-  startDate       DateTime?
-  status          String   @default("Open")
-  notes           String?
-  createdAt       DateTime @default(now())
+  id             String    @id @default(cuid())
+  periodId       String
+  period         Period    @relation(fields: [periodId], references: [id])
+  liabilityType  String
+  partyName      String?
+  description    String?
+  originalAmount Float     @default(0)
+  amountPaid     Float     @default(0)
+  outstanding    Float     @default(0)
+  dueDate        DateTime?
+  interest       Float     @default(0)
+  relatedRef     String?
+  startDate      DateTime?
+  status         String    @default("Open")
+  notes          String?
+  createdAt      DateTime  @default(now())
 }
 
 model OwnerTxn {
-  id              String   @id @default(cuid())
-  periodId        String
-  period          Period   @relation(fields: [periodId], references: [id])
-  date            DateTime
-  type            String   // Capital Introduced / Withdrawal
-  description     String?
-  amountIn        Float    @default(0)
-  amountOut       Float    @default(0)
-  runningBalance  Float    @default(0)
-  mode            String?
-  recordedBy      String?
-  supportingDoc   String?
-  notes           String?
-  createdAt       DateTime @default(now())
+  id             String    @id @default(cuid())
+  periodId       String
+  period         Period    @relation(fields: [periodId], references: [id])
+  date           DateTime
+  type           String
+  description    String?
+  amountIn       Float     @default(0)
+  amountOut      Float     @default(0)
+  runningBalance Float     @default(0)
+  mode           String?
+  recordedBy     String?
+  supportingDoc  String?
+  notes          String?
+  createdAt      DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
-// VADETS (staff advances tracker from Excel)
+// VADETS
 // ─────────────────────────────────────────────
 model Vadet {
   id        String   @id @default(cuid())
@@ -547,87 +579,86 @@ model Vadet {
 // MONTHLY CLOSING
 // ─────────────────────────────────────────────
 model MonthlyClosing {
-  id                  String   @id @default(cuid())
-  periodId            String
-  period              Period   @relation(fields: [periodId], references: [id])
-  totalRevenue        Float    @default(0)
-  ticketingRevenue    Float    @default(0)
-  otherRevenue        Float    @default(0)
-  hotelsCost          Float    @default(0)
-  transportCost       Float    @default(0)
-  ticketingCost       Float    @default(0)
-  otherDirectCost     Float    @default(0)
-  totalDirectCost     Float    @default(0)
-  grossProfit         Float    @default(0)
-  salaries            Float    @default(0)
-  commissions         Float    @default(0)
-  marketing           Float    @default(0)
-  officeExpenses      Float    @default(0)
-  otherOverheads      Float    @default(0)
-  totalOperatingExp   Float    @default(0)
-  netProfit           Float    @default(0)
-  bankBalance         Float    @default(0)
-  cashBalance         Float    @default(0)
-  receivables         Float    @default(0)
-  payables            Float    @default(0)
-  supplierAdvances    Float    @default(0)
-  loansLiabilities    Float    @default(0)
-  assetsAtCost        Float    @default(0)
-  netWorkingCapital   Float    @default(0)
-  tripsCompleted      Int      @default(0)
-  avgRevenuePerTrip   Float    @default(0)
-  profitMarginPct     Float    @default(0)
-  closedAt            DateTime?
-  closedBy            String?
-  notes               String?
-  createdAt           DateTime @default(now())
+  id                String    @id @default(cuid())
+  periodId          String
+  period            Period    @relation(fields: [periodId], references: [id])
+  totalRevenue      Float     @default(0)
+  ticketingRevenue  Float     @default(0)
+  otherRevenue      Float     @default(0)
+  hotelsCost        Float     @default(0)
+  transportCost     Float     @default(0)
+  ticketingCost     Float     @default(0)
+  otherDirectCost   Float     @default(0)
+  totalDirectCost   Float     @default(0)
+  grossProfit       Float     @default(0)
+  salaries          Float     @default(0)
+  commissions       Float     @default(0)
+  marketing         Float     @default(0)
+  officeExpenses    Float     @default(0)
+  otherOverheads    Float     @default(0)
+  totalOperatingExp Float     @default(0)
+  netProfit         Float     @default(0)
+  bankBalance       Float     @default(0)
+  cashBalance       Float     @default(0)
+  receivables       Float     @default(0)
+  payables          Float     @default(0)
+  supplierAdvances  Float     @default(0)
+  loansLiabilities  Float     @default(0)
+  assetsAtCost      Float     @default(0)
+  netWorkingCapital Float     @default(0)
+  tripsCompleted    Int       @default(0)
+  avgRevenuePerTrip Float     @default(0)
+  profitMarginPct   Float     @default(0)
+  closedAt          DateTime?
+  closedBy          String?
+  notes             String?
+  createdAt         DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
-// SALES TEAM PERFORMANCE
+// SALES TEAM
 // ─────────────────────────────────────────────
 model SalesPerformance {
-  id          String   @id @default(cuid())
-  periodId    String
-  period      Period   @relation(fields: [periodId], references: [id])
-  employeeId  String?
-  employee    Employee? @relation(fields: [employeeId], references: [id])
+  id           String    @id @default(cuid())
+  periodId     String
+  period       Period    @relation(fields: [periodId], references: [id])
+  employeeId   String?
+  employee     Employee? @relation(fields: [employeeId], references: [id])
   employeeName String
-  tourDate    DateTime?
-  description String?
-  category    String?
-  subCategory String?
-  clientName  String?
-  debit       Float    @default(0)
-  credit      Float    @default(0)
-  status      String?
-  enteredBy   String?
-  notes       String?
-  createdAt   DateTime @default(now())
+  tourDate     DateTime?
+  description  String?
+  category     String?
+  subCategory  String?
+  clientName   String?
+  debit        Float     @default(0)
+  credit       Float     @default(0)
+  status       String?
+  enteredBy    String?
+  notes        String?
+  createdAt    DateTime  @default(now())
 }
 
 // ─────────────────────────────────────────────
-// SETTINGS / COMPANY
+// SETTINGS / USERS
 // ─────────────────────────────────────────────
 model CompanySettings {
   id              String   @id @default(cuid())
   companyName     String   @default("Pacific Trips")
   city            String   @default("Lahore, Pakistan")
   currency        String   @default("PKR")
-  fiscalYearStart Int      @default(1) // January
+  fiscalYearStart Int      @default(1)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
 
-
 model User {
-  id                String   @id @default(cuid())
-  username          String   @unique
-  passwordHash      String
-  securityQ1        String
-  securityA1Hash    String
-  securityQ2        String
-  securityA2Hash    String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id             String   @id @default(cuid())
+  username       String   @unique
+  passwordHash   String
+  securityQ1     String
+  securityA1Hash String
+  securityQ2     String
+  securityA2Hash String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }

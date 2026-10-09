@@ -16,6 +16,10 @@ export const metadata: Metadata = {
   title: "Pacific Trips — Complete Accounting System",
   description:
     "Professional multi-module financial workbook for Pacific Trips, Lahore. All figures in PKR. Monthly isolation & historical access.",
+  icons: {
+    icon: "/logo.jpg",
+    apple: "/logo.jpg",
+  },
 };
 
 export default function RootLayout({

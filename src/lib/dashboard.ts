@@ -20,6 +20,8 @@ export async function getDashboardData(periodId: string) {
     ticketing,
     supplierAdvances,
     transactions,
+    ownerTxns,
+    liabilities,
   ] = await Promise.all([
     prisma.bankBalance.findMany(),
     prisma.pettyCashTxn.findMany({
@@ -38,11 +40,13 @@ export async function getDashboardData(periodId: string) {
     prisma.employeeLoan.findMany(),
     prisma.refund.findMany({ where: { periodId, status: "Pending" } }),
     prisma.commission.findMany({ where: { periodId } }),
-    prisma.hotelBooking.findMany({ where: { periodId } }),
-    prisma.transportJob.findMany({ where: { periodId } }),
+    prisma.hotelBooking.findMany({ where: { periodId }, include: { payable: true } }),
+    prisma.transportJob.findMany({ where: { periodId }, include: { payable: true } }),
     prisma.ticketing.findMany({ where: { periodId } }),
     prisma.supplierAdvance.findMany({ where: { periodId } }),
     prisma.transaction.findMany({ where: { periodId } }),
+    prisma.ownerTxn.findMany({ where: { periodId } }),
+    prisma.liability.findMany({ where: { periodId } }),
   ]);
 
   const totalBank = bankBalances.reduce((s, b) => s + b.balance, 0);
@@ -67,14 +71,20 @@ export async function getDashboardData(periodId: string) {
   const salaryPayable = payroll
     .filter((p) => p.status === "Pending")
     .reduce((s, p) => s + p.netPayable, 0);
-  const hotelRemaining = hotels.reduce((s, h) => s + h.remaining, 0);
+  const hotelRemaining = hotels.reduce((s, h) => s + (h.payable?.remaining ?? 0), 0);
   const commissionsRemaining = commissions
     .filter((c) => c.status === "Accrued")
     .reduce((s, c) => s + c.commissionAmt, 0);
   const refundsPending = refunds.reduce((s, r) => s + r.amount, 0);
+  const liabilitiesOutstanding = liabilities.reduce((s, l) => s + l.outstanding, 0);
 
   const totalWeOwe =
-    supplierRemaining + salaryPayable + hotelRemaining + commissionsRemaining + refundsPending;
+    supplierRemaining +
+    salaryPayable +
+    hotelRemaining +
+    commissionsRemaining +
+    refundsPending +
+    liabilitiesOutstanding;
 
   const officeTotal = officeExp.reduce((s, e) => s + e.amount, 0);
   const marketingTotal = marketingExp.reduce((s, e) => s + e.amount, 0);
@@ -95,24 +105,40 @@ export async function getDashboardData(periodId: string) {
   const assetsTotal = assets.reduce((s, a) => s + a.purchaseCost, 0);
   const vadetsTotal = vadets.reduce((s, v) => s + v.amount, 0);
 
-  const hotelBookingCost = hotels.reduce((s, h) => s + h.agreedCost, 0);
-  const transportAgreed = transport.reduce((s, t) => s + t.agreedCost, 0);
-  const transportSettlement = transport.reduce((s, t) => s + t.finalSettlement, 0);
+  const hotelBookingCost = hotels.reduce((s, h) => s + (h.payable?.originalAmount ?? 0), 0);
+  const transportAgreed = transport.reduce((s, t) => s + (t.payable?.originalAmount ?? 0), 0);
+  const transportSettlement = transport.reduce((s, t) => s + (t.payable?.amountPaid ?? 0), 0);
   const ticketingPaid = ticketing.reduce((s, t) => s + t.ticketCost, 0);
   const ticketingCharged = ticketing.reduce((s, t) => s + t.chargedToClient, 0);
   const ticketingProfit = ticketing.reduce((s, t) => s + t.profit, 0);
 
-  const freeCash = totalAvailableCash; // committed can be extended later
+  // FIXED: Free Cash = Available − Committed
+  const committed = totalWeOwe;
+  const expectedCollections7d = receivables
+    .filter((r) => {
+      if (!r.dueDate) return false;
+      const due = new Date(r.dueDate).getTime();
+      const wk = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      return due <= wk && r.remainingAmount > 0;
+    })
+    .reduce((s, r) => s + r.remainingAmount, 0);
+  const freeCash = totalAvailableCash + expectedCollections7d - committed;
+
+  const ownerCapital = ownerTxns.reduce((s, t) => s + t.amountIn, 0);
+  const ownerWithdrawals = ownerTxns.reduce((s, t) => s + t.amountOut, 0);
 
   return {
     cash: {
       hbl: bankBalances.find((b) => b.accountName.includes("HBL"))?.balance ?? 0,
-      meezan: bankBalances.find((b) => b.accountName.includes("Meezan") || b.accountName.includes("Faisal"))?.balance ?? 0,
+      meezan:
+        bankBalances.find(
+          (b) => b.accountName.includes("Meezan") || b.accountName.includes("Faisal")
+        )?.balance ?? 0,
       totalBank,
       pettyCash: pettyCashBal,
       totalAvailable: totalAvailableCash,
-      expectedCollections7d: 0,
-      committed: 0,
+      expectedCollections7d,
+      committed,
       freeCash,
     },
     receivables: {
@@ -130,7 +156,7 @@ export async function getDashboardData(periodId: string) {
       overdue: overduePayables,
       salaryPayable,
       hotelRemaining,
-      otherLiabilities: 0,
+      otherLiabilities: liabilitiesOutstanding,
       commissionsRemaining,
       refundsPending,
       totalWeOwe,
@@ -149,8 +175,8 @@ export async function getDashboardData(periodId: string) {
       employeeLoans: leftoverLoans,
       assets: assetsTotal,
       vadets: vadetsTotal,
-      ownerCapital: 0,
-      ownerWithdrawals: 0,
+      ownerCapital,
+      ownerWithdrawals,
       total: leftoverLoans + assetsTotal,
     },
     profitability: {
@@ -184,10 +210,11 @@ export async function getDashboardData(periodId: string) {
       cashPlusReceivables: totalAvailableCash + clientOutstanding,
       cashPlusAllOwed: totalAvailableCash + clientOutstanding + leftoverLoans,
       totalWeOwe,
-      netPosition: clientOutstanding + leftoverLoans - totalWeOwe,
+      netPosition: totalAvailableCash + clientOutstanding + leftoverLoans - totalWeOwe,
       assetsPlusCash: totalAvailableCash + assetsTotal,
       salaryPctOfRevenue: tripRevenue > 0 ? (salariesTotal / tripRevenue) * 100 : 0,
-      monthlyExpPctOfRevenue: tripRevenue > 0 ? (totalMonthlyExp / tripRevenue) * 100 : 0,
+      monthlyExpPctOfRevenue:
+        tripRevenue > 0 ? (totalMonthlyExp / tripRevenue) * 100 : 0,
     },
   };
 }
