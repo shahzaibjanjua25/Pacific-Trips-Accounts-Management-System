@@ -55,6 +55,7 @@ const fields: FieldDef[] = [
       "Staff",
     ],
   },
+  { key: "bonus", label: "Bonus", type: "number" as const, money: true },
   { key: "basicSalary", label: "Basic Salary", type: "number" as const, money: true },
   { key: "taxDeducted", label: "Tax Deducted", type: "number" as const, money: true },
   { key: "loanInstallment", label: "Loan Installment", type: "number" as const, money: true },

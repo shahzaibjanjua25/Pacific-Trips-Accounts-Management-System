@@ -1,10 +1,15 @@
+import { redirect } from "next/navigation";
+import { getSessionUserId } from "@/lib/auth";
 import { Sidebar } from "@/components/Sidebar";
 
-export default function AppLayout({
+export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const uid = await getSessionUserId();
+  if (!uid) redirect("/login");
+
   return (
     <div className="min-h-screen bg-slate-50">
       <Sidebar />
