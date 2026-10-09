@@ -288,6 +288,7 @@ export async function postTransaction(input: TxnInput) {
       }
 
       // Ledger — payment received
+      // Ledger — payment received
       await prisma.clientLedger.create({
         data: {
           clientId: client.id,
@@ -305,7 +306,7 @@ export async function postTransaction(input: TxnInput) {
         },
       });
 
-      // Ledger — outstanding balance (if any)
+      // Ledger — outstanding balance
       const stillOwed = Math.max(0, totalPackage - paidNow);
       if (stillOwed > 0) {
         await prisma.clientLedger.create({
@@ -391,6 +392,7 @@ async function reverseLink(link: {
       where: { id: p.id },
       data: {
         amountPaid: newPaid,
+        remaining: newRemaining,
         status: newRemaining <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Pending",
         paidDate: newRemaining <= 0 ? p.paidDate : null,
       },

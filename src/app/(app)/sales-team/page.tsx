@@ -1,23 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
-import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
+import { formatPKR } from "@/lib/utils";
+import { SalesTeamPanel } from "./SalesTeamPanel";
 
-const fields: FieldDef[] = [
-  { key: "employeeName", label: "Employee Name", required: true },
-  { key: "tourDate", label: "Tour Date", type: "date" as const },
-  { key: "description", label: "Description" },
-  { key: "category", label: "Category" },
-  { key: "subCategory", label: "Sub-Category" },
-  { key: "clientName", label: "Client Name" },
-  { key: "debit", label: "Debit (PKR)", type: "number" as const, money: true },
-  { key: "credit", label: "Credit (PKR)", type: "number" as const, money: true },
-  { key: "status", label: "Status" },
-  { key: "enteredBy", label: "Entered By" },
-  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
-];
-
-export default async function Page({
+export default async function SalesTeamPage({
   searchParams,
 }: {
   searchParams: Promise<{ period?: string }>;
@@ -33,9 +20,60 @@ export default async function Page({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const rows = await prisma.salesPerformance.findMany({
-    where: { periodId: current.id },
-    orderBy: { createdAt: "desc" },
+  const [employees, trips, receivables, commissions, payroll] = await Promise.all([
+    prisma.employee.findMany({
+      where: { isActive: true, role: "Sales" },
+      orderBy: { name: "asc" },
+    }),
+    prisma.trip.findMany({ where: { periodId: current.id } }),
+    prisma.receivable.findMany({ where: { periodId: current.id } }),
+    prisma.commission.findMany({ where: { periodId: current.id } }),
+    prisma.payrollEntry.findMany({ where: { periodId: current.id } }),
+  ]);
+
+  const TEAM_LEAD_KEYWORDS = ["amad", "ammar"];
+  const isTeamLead = (name: string) =>
+    TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
+
+  // Build per-person sales stats
+  const salesByPerson: Record<string, number> = {};
+  for (const t of trips) {
+    const sp = t.salesperson || "Unassigned";
+    salesByPerson[sp] = (salesByPerson[sp] || 0) + t.packageRevenue;
+  }
+  for (const r of receivables) {
+    if (r.salesperson) {
+      salesByPerson[r.salesperson] =
+        (salesByPerson[r.salesperson] || 0) + r.totalPackage;
+    }
+  }
+
+  const totalTeamSales = employees
+    .filter((e) => !isTeamLead(e.name))
+    .reduce((s, e) => s + (salesByPerson[e.name] || 0), 0);
+
+  const rows = employees.map((e) => {
+    const lead = isTeamLead(e.name);
+    const individual = salesByPerson[e.name] || 0;
+    const comm = commissions.find((c) => c.employeeName === e.name);
+    const pay = payroll.find((p) => p.employeeName === e.name);
+    const saleBase = lead ? totalTeamSales : individual;
+    const commissionAmt = comm?.commissionAmt ?? saleBase * 0.025;
+
+    return {
+      id: e.id,
+      name: e.name,
+      isLead: lead,
+      basicSalary: pay?.basicSalary ?? (lead ? 0 : 40000),
+      individualSales: individual,
+      saleBase,
+      commissionRate: 2.5,
+      commissionAmt,
+      netPayable: pay?.netPayable ?? 0,
+      amountPaid: pay?.amountPaid ?? 0,
+      remaining: pay?.remaining ?? Math.max(0, (pay?.netPayable ?? 0) - (pay?.amountPaid ?? 0)),
+      status: pay?.status ?? "Pending",
+    };
   });
 
   return (
@@ -43,17 +81,17 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Sales Team Performance</h1>
-          <p className="text-sm text-slate-500">Individual sales activity ledger per team member</p>
+          <p className="text-sm text-slate-500">
+            Individual sales, commission (2.5%), and payout status. Team Lead commission is 2.5% of ALL team sales.
+          </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
-      <CrudPanel
-        title="Sales Team Performance"
-        apiPath="/api/sales-team"
+      <SalesTeamPanel
         periodId={current.id}
-        fields={fields}
-        rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
+        rows={rows}
+        totalTeamSales={totalTeamSales}
       />
     </div>
   );

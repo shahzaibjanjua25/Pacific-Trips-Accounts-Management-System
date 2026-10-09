@@ -61,6 +61,7 @@ const fields: FieldDef[] = [
   { key: "otherDeductions", label: "Other Deductions", type: "number" as const, money: true },
   { key: "netPayable", label: "Net Payable", type: "number" as const, money: true },
   { key: "amountPaid", label: "Amount Paid", type: "number" as const, money: true },
+  { key: "remaining", label: "Remaining", type: "number" as const, money: true },
   { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Partial", "Paid"] },
   { key: "paidDate", label: "Paid Date", type: "date" as const },
   { key: "notes", label: "Notes", type: "textarea" as const },
@@ -143,11 +144,10 @@ export default async function Page({
             return (
               <span
                 key={e.id}
-                className={`text-xs px-2.5 py-1 rounded-full border ${
-                  isLead
+                className={`text-xs px-2.5 py-1 rounded-full border ${isLead
                     ? "bg-amber-100 border-amber-300 text-amber-900 font-semibold"
                     : "bg-white border-emerald-300 text-emerald-800"
-                }`}
+                  }`}
               >
                 {e.name} · {des}
                 {loan ? ` · loan ${formatPKR(loan.remainingAmount)}` : ""}
