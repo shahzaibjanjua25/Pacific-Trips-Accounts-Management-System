@@ -4,13 +4,13 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "clientName", label: "Client", required: true },
-    { key: "amount", label: "Amount", type: "number", required: true, money: true },
-    { key: "reason", label: "Reason" },
-    { key: "status", label: "Status", type: "select", options: ["Pending", "Paid"] },
-    { key: "paidDate", label: "Paid Date", type: "date" },
-    { key: "tripRef", label: "Trip Ref" },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "clientName", label: "Client Name", required: true },
+  { key: "amount", label: "Refund Amount", type: "number" as const, required: true, money: true },
+  { key: "reason", label: "Reason" },
+  { key: "status", label: "Status", type: "select" as const, options: ["Pending", "Paid"] },
+  { key: "paidDate", label: "Paid Date", type: "date" as const },
+  { key: "tripRef", label: "Trip / Booking Ref" },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({

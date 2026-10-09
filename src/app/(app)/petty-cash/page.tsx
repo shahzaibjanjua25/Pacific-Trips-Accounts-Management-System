@@ -4,15 +4,16 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "date", label: "Date", type: "date", required: true },
-    { key: "description", label: "Description", required: true },
-    { key: "personReceiving", label: "Person" },
-    { key: "amountOut", label: "Amount Out", type: "number", money: true },
-    { key: "amountIn", label: "Amount In", type: "number", money: true },
-    { key: "purpose", label: "Purpose" },
-    { key: "balanceAfter", label: "Balance After", type: "number", money: true },
-    { key: "approvedBy", label: "Approved By" },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "date", label: "Date", type: "date" as const, required: true },
+  { key: "description", label: "Description", required: true },
+  { key: "personReceiving", label: "Person Receiving" },
+  { key: "amountOut", label: "Amount Out", type: "number" as const, money: true },
+  { key: "amountIn", label: "Amount In", type: "number" as const, money: true },
+  { key: "purpose", label: "Purpose" },
+  { key: "receiptRef", label: "Receipt / Doc" },
+  { key: "balanceAfter", label: "Balance After", type: "number" as const, money: true },
+  { key: "approvedBy", label: "Approved By" },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
@@ -40,14 +41,14 @@ export default async function Page({
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Petty Cash</h1>
+          <h1 className="text-2xl font-bold">Petty Cash Register</h1>
           <p className="text-sm text-slate-500">Physical cash must match accounting record</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
       <CrudPanel
-        title="Petty Cash"
+        title="Petty Cash Register"
         apiPath="/api/petty-cash"
         periodId={current.id}
         fields={fields}

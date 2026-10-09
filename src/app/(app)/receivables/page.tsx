@@ -4,17 +4,24 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
-    { key: "clientName", label: "Client Name", required: true },
-    { key: "contact", label: "Contact" },
-    { key: "bookingDate", label: "Booking Date", type: "date" },
-    { key: "tripDates", label: "Trip Dates" },
-    { key: "destination", label: "Destination" },
-    { key: "totalPackage", label: "Total Package", type: "number", required: true, money: true },
-    { key: "amountReceived", label: "Amount Received", type: "number", money: true },
-    { key: "dueDate", label: "Due Date", type: "date" },
-    { key: "salesperson", label: "Salesperson" },
-    { key: "status", label: "Status", type: "select", options: ["Open", "Partial", "Settled", "Overdue"] },
-    { key: "notes", label: "Notes", type: "textarea", showInTable: false },
+  { key: "clientName", label: "Client Name", required: true },
+  { key: "contact", label: "Contact/Ref" },
+  { key: "bookingDate", label: "Booking Date", type: "date" as const },
+  { key: "tripDates", label: "Trip Dates" },
+  { key: "destination", label: "Destination" },
+  { key: "totalPackage", label: "Total Package", type: "number" as const, required: true, money: true },
+  { key: "amountToReceive", label: "Amount to Receive", type: "number" as const, money: true },
+  { key: "amountReceived", label: "Amount Received", type: "number" as const, money: true },
+  { key: "remainingAmount", label: "Remaining", type: "number" as const, money: true },
+  { key: "dueDate", label: "Due Date", type: "date" as const },
+  { key: "daysOverdue", label: "Days Overdue", type: "number" as const },
+  { key: "tripStart", label: "Trip Start", type: "date" as const },
+  { key: "salesperson", label: "Salesperson" },
+  { key: "discounts", label: "Discounts", type: "number" as const, money: true },
+  { key: "additionalCharges", label: "Additional Charges", type: "number" as const, money: true },
+  { key: "finalSettlement", label: "Final Settlement", type: "number" as const, money: true },
+  { key: "status", label: "Status", type: "select" as const, options: ["Open", "Partial", "Settled", "Overdue"] },
+  { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
 
 export default async function Page({
