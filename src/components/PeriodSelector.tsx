@@ -31,13 +31,12 @@ export function PeriodSelector({
   const [newYear, setNewYear] = useState(now.getFullYear());
   const [newMonth, setNewMonth] = useState(now.getMonth() + 1);
 
-  function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const id = e.target.value;
-    startTransition(() => {
-      router.push(`${pathname}?period=${id}`);
-      router.refresh();
-    });
-  }
+ function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
+  const id = e.target.value;
+  startTransition(() => {
+    router.push(`${pathname}?period=${id}`);
+  });
+}
 
   async function createMonth() {
     const res = await fetch("/api/periods", {

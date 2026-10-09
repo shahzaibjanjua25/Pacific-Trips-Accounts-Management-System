@@ -101,7 +101,7 @@ export default async function Page({
   ]);
 
   const roleByName: Record<string, string> = {};
-  for (const e of allEmployees) roleByName[e.name] = e.role;
+  for (const e of allEmployees) roleByName[e.name] = e.role ?? "Staff";
 
   const enriched = rows.map((r) => ({
     ...r,

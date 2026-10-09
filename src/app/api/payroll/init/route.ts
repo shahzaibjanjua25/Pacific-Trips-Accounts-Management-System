@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-/** Create payroll rows for all active employees if missing for this period */
+import { getSessionUserId } from "@/lib/auth";
+
 export async function POST(req: NextRequest) {
+  const uid = await getSessionUserId();
+  if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { periodId } = await req.json();
     if (!periodId) return NextResponse.json({ error: "periodId required" }, { status: 400 });

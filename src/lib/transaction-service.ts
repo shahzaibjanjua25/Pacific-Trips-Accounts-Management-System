@@ -18,6 +18,15 @@ export type TxnInput = {
   status?: string;
   enteredBy?: string | null;
   notes?: string | null;
+  // Optional relation hints — reserved for future use; currently ignored
+  relatedReceivableId?: string | null;
+  relatedPayableId?: string | null;
+  relatedPayrollId?: string | null;
+  relatedRefundId?: string | null;
+  relatedHotelId?: string | null;
+  relatedTransportId?: string | null;
+  relatedCommissionId?: string | null;
+  relatedAdvanceId?: string | null;
 };
 
 async function adjustBank(accountName: string | null | undefined, delta: number) {
