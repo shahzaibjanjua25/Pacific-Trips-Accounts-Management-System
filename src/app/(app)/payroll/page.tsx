@@ -19,7 +19,7 @@ const DESIGNATION: Record<string, string> = {
   "Ashir": "Sales",
   "Izza": "Sales",
   "Ahmed": "Grapich Designer",
-  "Faisal": "meta marketing",
+  "Faysal": "meta marketing",
   "Abdullah": "CEO",
   "Kamran": "Acoountant",
   "WAseem Akram": "Legal Team",

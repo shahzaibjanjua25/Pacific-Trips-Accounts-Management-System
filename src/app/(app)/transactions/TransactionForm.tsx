@@ -54,7 +54,7 @@ const empty = {
   debit: "",
   credit: "",
   paymentMethod: "Bank",
-  bankAccount: "Faisal Bank",  // was "Faisal / Meezan"
+  bankAccount: "Faysal Bank",  // was "Faysal / Meezan"
 
   status: "Completed",
   enteredBy: "",
@@ -122,7 +122,7 @@ export function TransactionManager({
       debit: String(t.debit || 0),
       credit: String(t.credit || 0),
       paymentMethod: t.paymentMethod || "Bank",
-      bankAccount: t.bankAccount || "Faisal Bank",  // was "Faisal / Meezan"
+      bankAccount: t.bankAccount || "Faysal Bank",  // was "Faysal / Meezan"
       status: t.status || "Completed",
       enteredBy: t.enteredBy || "",
       notes: t.notes || "",
@@ -343,7 +343,7 @@ export function TransactionManager({
               label="Bank / Cash Account"
               value={form.bankAccount}
               onChange={(v) => setForm({ ...form, bankAccount: v })}
-              options={["UBL", "Faisal Bank", "Meezan Bank", "Easypaisa", "Jazzcash", "Petty Cash", "HBL Main"]}
+              options={["UBL", "Faysal Bank", "Meezan Bank", "Easypaisa", "Jazzcash", "Petty Cash", "HBL Main"]}
             />
             <Select
               label="Status"

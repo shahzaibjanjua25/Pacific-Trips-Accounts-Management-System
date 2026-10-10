@@ -9,7 +9,9 @@ import {
   applyPayrollPayment,
   applyCommissionPayment,
   applyRefundPayment,
-  applyToAdvances,
+  applyHotelPayment,
+  applyTransportPayment,
+  applyGenericPayablePayment,
   syncRefundToClientLedger,
   type AppliedLink,
 } from "./links-service";
@@ -41,27 +43,36 @@ export type TxnInput = {
   clientAmountPaid?: number;
 };
 
+/* ── BANK (normalized) ── */
 async function adjustBank(accountName: string | null | undefined, delta: number) {
-  if (!accountName || delta === 0) return;
-  const existing = await prisma.bankBalance.findFirst({ where: { accountName } });
+  if (!accountName || delta === 0) {
+    console.log("[adjustBank] skipped", { accountName, delta });
+    return;
+  }
+  const trimmed = accountName.trim();
+  const normalized = trimmed.toLowerCase();
+  const all = await prisma.bankBalance.findMany();
+  console.log("[adjustBank] looking for", normalized, "in", all.map(b => b.accountName));
+
+  const existing = all.find(
+    (b) => b.accountName.trim().toLowerCase() === normalized
+  );
   if (existing) {
+    console.log("[adjustBank] updating", existing.accountName, existing.balance, "+", delta);
     await prisma.bankBalance.update({
       where: { id: existing.id },
       data: { balance: existing.balance + delta },
     });
   } else {
+    console.log("[adjustBank] creating new account", trimmed, delta);
     await prisma.bankBalance.create({
-      data: { accountName, balance: Math.max(0, delta) },
+      data: { accountName: trimmed, balance: Math.max(0, delta) },
     });
   }
 }
-
 const cashDelta = (debit: number, credit: number) => debit - credit;
 
-/**
- * Determine which entity a transaction should link to based on
- * category + party, and apply payment.
- */
+/* ── LINK RESOLUTION ── */
 async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const cat = (input.category || "").toLowerCase();
   const party = input.party || input.subCategory || "";
@@ -81,24 +92,40 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-  if (cat.includes("receipt") || cat.includes("client receipt") || cat.includes("revenue")) {
+  if (
+    cat.includes("receipt") ||
+    cat.includes("client receipt") ||
+    cat.includes("revenue")
+  ) {
     return applyReceiptToReceivables(periodId, party, amount);
   }
 
   if (cat.includes("hotel")) {
-    return applyPaymentToPayables(periodId, party, amount, ["Hotel"]);
+    return applyHotelPayment(periodId, party, amount, {
+      description: input.description,
+      tripRef: input.tripRef ?? undefined,
+    });
   }
 
   if (cat.includes("transport") || cat.includes("driver")) {
-    return applyPaymentToPayables(periodId, party, amount, ["Transport"]);
+    return applyTransportPayment(periodId, party, amount, {
+      description: input.description,
+      tripRef: input.tripRef ?? undefined,
+    });
   }
 
   if (cat.includes("ticketing")) {
-    return applyPaymentToPayables(periodId, party, amount, ["Ticketing"]);
+    return applyGenericPayablePayment(periodId, party, "Ticketing", amount, {
+      description: input.description,
+      tripRef: input.tripRef ?? undefined,
+    });
   }
 
   if (cat.includes("supplier") || cat.includes("payable")) {
-    return applyPaymentToPayables(periodId, party, amount);
+    return applyGenericPayablePayment(periodId, party, "Other", amount, {
+      description: input.description,
+      tripRef: input.tripRef ?? undefined,
+    });
   }
 
   if (cat.includes("salary") || cat.includes("payroll")) {
@@ -113,19 +140,11 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     const links = await applyRefundPayment(periodId, party, amount);
     if (links.length > 0) return links;
 
-    // No pending refund matched → create one from this credit
     if (input.credit > 0 && party) {
-      let client = await prisma.client.findFirst({ where: { name: party } });
-
-      // If the client already paid us (has received > 0), treat as a real refund
+      const client = await prisma.client.findFirst({ where: { name: party } });
       const recv = await prisma.receivable.findFirst({
-        where: {
-          periodId,
-          clientName: party,
-          amountReceived: { gt: 0 },
-        },
+        where: { periodId, clientName: party, amountReceived: { gt: 0 } },
       });
-
       if (recv) {
         const refund = await prisma.refund.create({
           data: {
@@ -141,12 +160,14 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
           },
         });
         await syncRefundToClientLedger(refund.id);
-        return [{ entityType: "refund", entityId: refund.id, appliedAmount: amount }];
+        return [
+          { entityType: "refund", entityId: refund.id, appliedAmount: amount },
+        ];
       }
     }
-
     return links;
   }
+
   if (cat.includes("advance") && !cat.includes("employee")) {
     if (input.credit > 0 && party) {
       const adv = await prisma.supplierAdvance.create({
@@ -167,6 +188,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   return [];
 }
 
+/* ── POST ── */
 export async function postTransaction(input: TxnInput) {
   const txn = await prisma.transaction.create({
     data: {
@@ -190,7 +212,6 @@ export async function postTransaction(input: TxnInput) {
   await adjustBank(input.bankAccount, cashDelta(input.debit || 0, input.credit || 0));
 
   const links = await resolveLinks(input);
-
   for (const link of links) {
     await prisma.transactionLink.create({
       data: {
@@ -250,8 +271,6 @@ export async function postTransaction(input: TxnInput) {
     });
   }
 
-  // ---- CLIENT AUTO-CREATE / RECEIVABLE / LEDGER ----
-  // ---- CLIENT AUTO-CREATE / RECEIVABLE / LEDGER ----
   const isClientSide =
     cat.includes("receipt") ||
     cat.includes("client receipt") ||
@@ -259,9 +278,7 @@ export async function postTransaction(input: TxnInput) {
 
   if (isClientSide && party) {
     let client = await prisma.client.findFirst({ where: { name: party } });
-    if (!client) {
-      client = await prisma.client.create({ data: { name: party } });
-    }
+    if (!client) client = await prisma.client.create({ data: { name: party } });
 
     const paidNow =
       input.clientAmountPaid && input.clientAmountPaid > 0
@@ -286,9 +303,6 @@ export async function postTransaction(input: TxnInput) {
       });
 
       if (recv) {
-        // The Receivable was ALREADY updated by applyReceiptToReceivables().
-        // Do NOT subtract again. Only bump totalPackage if a new higher package
-        // value was supplied, and recompute remaining from the new total.
         const newTotal = Math.max(recv.totalPackage, totalPackage);
         const newRemaining = Math.max(0, newTotal - recv.amountReceived);
         await prisma.receivable.update({
@@ -306,9 +320,6 @@ export async function postTransaction(input: TxnInput) {
           },
         });
       } else {
-        // No existing Receivable — create it fresh.
-        // applyReceiptToReceivables() found nothing to update, so this is the
-        // first and only write.
         const remaining = Math.max(0, totalPackage - paidNow);
         recv = await prisma.receivable.create({
           data: {
@@ -320,17 +331,12 @@ export async function postTransaction(input: TxnInput) {
             amountReceived: paidNow,
             remainingAmount: remaining,
             status:
-              remaining <= 0
-                ? "Settled"
-                : paidNow > 0
-                  ? "Partial"
-                  : "Open",
+              remaining <= 0 ? "Settled" : paidNow > 0 ? "Partial" : "Open",
             notes: "Auto-created from transaction",
           },
         });
       }
 
-      // Ledger — payment received
       await prisma.clientLedger.create({
         data: {
           clientId: client.id,
@@ -348,7 +354,6 @@ export async function postTransaction(input: TxnInput) {
         },
       });
 
-      // Ledger — outstanding balance (only the part still owed)
       const stillOwed = Math.max(0, totalPackage - paidNow);
       if (stillOwed > 0) {
         await prisma.clientLedger.create({
@@ -373,14 +378,15 @@ export async function postTransaction(input: TxnInput) {
   return txn;
 }
 
+/* ── DELETE ── */
 export async function deleteTransaction(id: string) {
   const txn = await prisma.transaction.findUnique({ where: { id } });
   if (!txn) return null;
 
-  const links = await prisma.transactionLink.findMany({ where: { transactionId: id } });
-  for (const link of links) {
-    await reverseLink(link);
-  }
+  const links = await prisma.transactionLink.findMany({
+    where: { transactionId: id },
+  });
+  for (const link of links) await reverseLink(link);
 
   await adjustBank(txn.bankAccount, -cashDelta(txn.debit, txn.credit));
   await prisma.transaction.delete({ where: { id } });
@@ -456,12 +462,15 @@ async function reverseLink(link: {
   }
 }
 
+/* ── UPDATE ── */
 export async function updateTransaction(id: string, input: Partial<TxnInput>) {
   const old = await prisma.transaction.findUnique({ where: { id } });
   if (!old) return null;
 
   await adjustBank(old.bankAccount, -cashDelta(old.debit, old.credit));
-  const links = await prisma.transactionLink.findMany({ where: { transactionId: id } });
+  const links = await prisma.transactionLink.findMany({
+    where: { transactionId: id },
+  });
   for (const link of links) await reverseLink(link);
   await prisma.transactionLink.deleteMany({ where: { transactionId: id } });
 
@@ -493,6 +502,7 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
     category: updated.category,
     subCategory: updated.subCategory,
     party: updated.party,
+    tripRef: updated.tripRef,
     debit: updated.debit,
     credit: updated.credit,
   });

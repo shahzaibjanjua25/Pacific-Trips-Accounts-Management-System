@@ -44,7 +44,7 @@ async function main() {
     { name: "Ashir", role: "Sales", basicSalary: 40000 },
     { name: "Izza", role: "Sales", basicSalary: 40000 },
     { name: "Ahmed", role: "Graphic Designer", basicSalary: 50000 },
-    { name: "Faisal", role: "Meta Marketing", basicSalary: 50000 },
+    { name: "Faysal", role: "Meta Marketing", basicSalary: 50000 },
     { name: "Abdullah", role: "CEO", basicSalary: 60000 },
     { name: "Kamran", role: "Accountant", basicSalary: 30000 },
     { name: "WAseem Akram", role: "Legal Team", basicSalary: 40000 },
@@ -89,7 +89,7 @@ async function main() {
     { name: "Ashir", basic: 40000, bonus: 0, loan: 0, net: 40000 },
     { name: "Izza", basic: 40000, bonus: 0, loan: 0, net: 40000 },
     { name: "Ahmed", basic: 50000, bonus: 13000, loan: 0, net: 63000, notes: "Bonus 13,000 included" },
-    { name: "Faisal", basic: 50000, bonus: 0, loan: 0, net: 50000 },
+    { name: "Faysal", basic: 50000, bonus: 0, loan: 0, net: 50000 },
     { name: "Abdullah", basic: 60000, bonus: 0, loan: 0, net: 60000 },
     { name: "Kamran", basic: 30000, bonus: 0, loan: 0, net: 30000 },
     { name: "WAseem Akram", basic: 40000, bonus: 0, loan: 0, net: 40000 },
@@ -119,7 +119,7 @@ async function main() {
  // scripts/seed.ts → replace the banks block
 const banks = [
   { accountName: "UBL", balance: 0 },
-  { accountName: "Faisal Bank", balance: 370000 },
+  { accountName: "Faysal Bank", balance: 370000 },
   { accountName: "Meezan Bank", balance: 0 },
   { accountName: "Easypaisa", balance: 282 },
   { accountName: "Jazzcash", balance: 10472 },
