@@ -17,8 +17,8 @@ export const metadata: Metadata = {
   description:
     "Professional multi-module financial workbook for Pacific Trips, Lahore. All figures in PKR. Monthly isolation & historical access.",
   icons: {
-    icon: "/logo.jpg",
-    apple: "/logo.jpg",
+    icon: "logo.jpg",
+    apple: "logo.jpg",
   },
 };
 
