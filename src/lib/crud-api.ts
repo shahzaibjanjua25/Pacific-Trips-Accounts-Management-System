@@ -234,11 +234,19 @@ export function makeCrudHandlers(
       const model = getModel(modelName);
       const id = req.nextUrl.searchParams.get("id");
       if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+      // Cascade delete transaction links for payroll entries
+      if (modelName === "payrollEntry") {
+        await prisma.transactionLink.deleteMany({
+          where: { entityType: "payroll", entityId: id },
+        });
+      }
+
       await model.delete({ where: { id } });
       return NextResponse.json({ ok: true });
     } catch (e) {
       console.error(`[crud:${modelName}:DELETE]`, e);
-      return NextResponse.json({ error: "Delete failed" }, { status: 500 });
+      return NextResponse.json({ error: String(e) }, { status: 500 });
     }
   }
 
