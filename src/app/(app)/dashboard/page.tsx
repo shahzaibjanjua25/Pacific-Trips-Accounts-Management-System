@@ -4,6 +4,7 @@ import { PeriodSelector } from "@/components/PeriodSelector";
 import { KpiCard } from "@/components/KpiCard";
 import { formatPKR } from "@/lib/utils";
 import { ExportMonthButton } from "@/components/ExportMonthButton";
+import { SeedDatabaseButton } from "@/components/SeedDatabaseButton";
 
 
 export default async function DashboardPage({
@@ -40,10 +41,12 @@ export default async function DashboardPage({
         </div>
       </div>
 
+      <SeedDatabaseButton />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Section title="1. Cash & Bank" color="bg-emerald-500">
           <Row label="HBL / Main" value={data.cash.hbl} />
-          <Row label="Faysal Bank" value={data.cash.faysal} />
+          <Row label="Faysal Bank" value={data.cash.Faysal} />
           <Row label="Meezan Bank" value={data.cash.meezan} />
           <Row label="UBL" value={data.cash.ubl} />
           <Row label="Easypaisa" value={data.cash.easypaisa} />
