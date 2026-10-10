@@ -232,8 +232,22 @@ export async function runSeed(force: boolean = false) {
     await prisma.vadet.create({ data: { periodId: period.id, ...v } });
   }
 
-  // ── Clients + Receivables + Ledger ──
-  const clientRows = [
+  // ── Clients + Receivables + Ledger + Trips ──
+  // From Client Data.xlsx — full per-client ledger rows
+  type LedgerCost = { hotel: string; credit: number; notes?: string };
+  type ClientRow = {
+    name: string;
+    tourDate: Date;
+    desc: string;
+    received: number;
+    totalPackage: number;
+    remaining: number;
+    salesperson: string;
+    destination: string;
+    ledger?: LedgerCost[];
+  };
+
+  const clientRows: ClientRow[] = [
     {
       name: "Mr Haris",
       tourDate: new Date("2026-10-05"),
@@ -241,6 +255,8 @@ export async function runSeed(force: boolean = false) {
       received: 169000,
       totalPackage: 169000,
       remaining: 0,
+      salesperson: "Amad Amjad",
+      destination: "Skardu",
       ledger: [
         { hotel: "Qayyam (2x nights)", credit: 34650 },
         { hotel: "Khoj",               credit: 41930 },
@@ -248,12 +264,53 @@ export async function runSeed(force: boolean = false) {
         { hotel: "Transportation",     credit: 70000, notes: "Fuel: 34000, Rent 36000" },
       ],
     },
-    { name: "Mr Bilal",   tourDate: new Date("2026-10-17"), desc: "8 Days, Hunza Skardu Trip By Road", received: 330000, totalPackage: 650000, remaining: 320000 },
-    { name: "Dr Ali",     tourDate: new Date("2026-10-11"), desc: "5 days, Skardu By Air",             received: 260000, totalPackage: 349000, remaining: 89000  },
-    { name: "Mr Moiz",    tourDate: new Date("2026-11-01"), desc: "6 days, Skardu By Air",             received: 10000,  totalPackage: 200000, remaining: 190000 },
-    { name: "Mr Shahid",  tourDate: new Date("2026-11-20"), desc: "6 days, Skardu By Air",             received: 140000, totalPackage: 420000, remaining: 280000 },
-    { name: "Mr Zeeshan", tourDate: new Date("2027-05-03"), desc: "6 days, Skardu By Road",            received: 10000,  totalPackage: 238000, remaining: 228000 },
-    { name: "Ms Aiman",   tourDate: new Date("2026-10-18"), desc: "5 days, Skardu By Air",             received: 10000,  totalPackage: 245000, remaining: 235000 },
+    {
+      name: "Mr Bilal",
+      tourDate: new Date("2026-10-17"),
+      desc: "8 Days, Hunza Skardu Trip By Road",
+      received: 330000, totalPackage: 650000, remaining: 320000,
+      salesperson: "Amad Amjad", destination: "Hunza + Skardu",
+    },
+    {
+      name: "Dr Ali",
+      tourDate: new Date("2026-10-11"),
+      desc: "5 days, Skardu By Air",
+      received: 260000, totalPackage: 349000, remaining: 89000,
+      salesperson: "Maira", destination: "Skardu",
+    },
+    {
+      name: "Mr Moiz",
+      tourDate: new Date("2026-11-01"),
+      desc: "6 days, Skardu By Air",
+      received: 10000, totalPackage: 200000, remaining: 190000,
+      salesperson: "Zunaira", destination: "Skardu",
+    },
+    {
+      name: "Mr Shahid",
+      tourDate: new Date("2026-11-20"),
+      desc: "6 days, Skardu By Air",
+      received: 140000, totalPackage: 420000, remaining: 280000,
+      salesperson: "Awais", destination: "Skardu",
+    },
+    {
+      name: "Mr Zeeshan",
+      tourDate: new Date("2027-05-03"),
+      desc: "6 days, Skardu By Road",
+      received: 10000, totalPackage: 238000, remaining: 228000,
+      salesperson: "Talha", destination: "Skardu",
+    },
+    {
+      name: "Ms Aiman",
+      tourDate: new Date("2026-10-18"),
+      desc: "5 days, Skardu By Air",
+      received: 10000, totalPackage: 245000, remaining: 235000,
+      salesperson: "Izza", destination: "Skardu",
+    },
+  ];
+
+  const HOTEL_KEYWORDS = [
+    "qayyam", "khoj", "kisar", "himmel", "alnoor", "rivaaj",
+    "hatopi", "hotel", "resort",
   ];
 
   for (const c of clientRows) {
@@ -261,6 +318,7 @@ export async function runSeed(force: boolean = false) {
       data: { name: c.name, contact: c.desc },
     });
 
+    // 1. Payment row (debit = money in)
     await prisma.clientLedger.create({
       data: {
         clientId: client.id,
@@ -274,7 +332,8 @@ export async function runSeed(force: boolean = false) {
       },
     });
 
-    if ("ledger" in c && c.ledger) {
+    // 2. Cost rows (only Mr Haris has them in the source Excel)
+    if (c.ledger) {
       for (const cost of c.ledger) {
         await prisma.clientLedger.create({
           data: {
@@ -291,6 +350,7 @@ export async function runSeed(force: boolean = false) {
       }
     }
 
+    // 3. Outstanding row (debit = client still owes)
     if (c.remaining > 0) {
       await prisma.clientLedger.create({
         data: {
@@ -306,6 +366,7 @@ export async function runSeed(force: boolean = false) {
       });
     }
 
+    // 4. Receivable row (financial master)
     await prisma.receivable.create({
       data: {
         periodId: period.id,
@@ -313,6 +374,8 @@ export async function runSeed(force: boolean = false) {
         clientName: c.name,
         bookingDate: c.tourDate,
         tripDates: c.desc,
+        destination: c.destination,
+        salesperson: c.salesperson,
         totalPackage: c.totalPackage,
         amountToReceive: c.totalPackage,
         amountReceived: c.received,
@@ -320,8 +383,47 @@ export async function runSeed(force: boolean = false) {
         status: c.remaining > 0 ? "Partial" : "Settled",
       },
     });
+
+    // 5. TripPnL row — computed from client ledger costs
+    const hotelCost = c.ledger
+      ? c.ledger
+          .filter((l) =>
+            HOTEL_KEYWORDS.some((k) => l.hotel.toLowerCase().includes(k))
+          )
+          .reduce((s, l) => s + l.credit, 0)
+      : 0;
+    const transportCost = c.ledger
+      ? c.ledger
+          .filter((l) => l.hotel.toLowerCase().includes("transport"))
+          .reduce((s, l) => s + l.credit, 0)
+      : 0;
+    const totalDirect = hotelCost + transportCost;
+
+    await prisma.trip.create({
+      data: {
+        periodId: period.id,
+        clientId: client.id,
+        clientName: c.name,
+        tripRef: c.desc,
+        destination: c.destination,
+        startDate: c.tourDate,
+        packageRevenue: c.totalPackage,
+        hotelCost,
+        transportCost,
+        ticketingCost: 0,
+        otherDirectCost: 0,
+        totalDirectCost: totalDirect,
+        grossProfit: c.totalPackage - totalDirect,
+        overheadAlloc: 0,
+        netProfit: c.totalPackage - totalDirect,
+        salesperson: c.salesperson,
+        status: "Completed",
+        notes: "Seeded from Oct-2026 workbook",
+      },
+    });
   }
 
+  // Aggregate family receivable (Dashboard Total Amount Received)
   await prisma.receivable.create({
     data: {
       periodId: period.id,
@@ -335,9 +437,13 @@ export async function runSeed(force: boolean = false) {
     },
   });
 
+  // ── Sales team ledger entries ──
+  // Sales Team Performance October 2026.xlsx has all sheets EMPTY.
+  // Nothing to seed here — the /sales-team page computes live.
+
   return {
     ok: true,
-    message: "Seed complete",
+    message: "Seed complete — Oct-2026 data restored from Excel",
     counts: {
       employees: empData.length,
       loans: loans.length,
@@ -345,9 +451,16 @@ export async function runSeed(force: boolean = false) {
       banks: banks.length,
       payables: payablesData.length,
       officeExpenses: office.length,
+      marketing: 1,
       assets: assets.length,
       vadets: vadets.length,
       clients: clientRows.length,
+      receivables: clientRows.length + 1,   // + Family aggregate
+      trips: clientRows.length,
+      ledgerRows:
+        clientRows.reduce((s, c) => s + (c.ledger?.length ?? 0), 0) +
+        clientRows.length +                              // payment rows
+        clientRows.filter((c) => c.remaining > 0).length, // outstanding rows
     },
   };
 }
