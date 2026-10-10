@@ -55,7 +55,105 @@ function getModel(name: ModelName): any {
   };
   return map[name];
 }
+// Add this near the top of crud-api.ts, after `getModel`
 
+const ALLOWED_FIELDS: Record<ModelName, string[]> = {
+  receivable: [
+    "periodId", "clientId", "clientName", "contact", "bookingDate", "tripDates",
+    "destination", "totalPackage", "amountToReceive", "amountReceived",
+    "remainingAmount", "dueDate", "daysOverdue", "tripStart", "salesperson",
+    "discounts", "additionalCharges", "finalSettlement", "status", "notes",
+  ],
+  payable: [
+    "periodId", "supplierName", "category", "description", "invoiceRef",
+    "originalAmount", "amountPaid", "remaining", "dueDate", "daysOverdue",
+    "status", "relatedTrip", "notes",
+  ],
+  trip: [
+    "periodId", "clientId", "clientName", "tripRef", "destination", "startDate",
+    "endDate", "packageRevenue", "hotelCost", "transportCost", "ticketingCost",
+    "otherDirectCost", "totalDirectCost", "grossProfit", "overheadAlloc",
+    "netProfit", "status", "salesperson", "notes",
+  ],
+  payrollEntry: [
+    "periodId", "employeeId", "employeeName", "basicSalary", "bonus",
+    "taxDeducted", "loanInstallment", "otherDeductions", "netPayable",
+    "amountPaid", "remaining", "status", "paidDate", "notes",
+  ],
+  commission: [
+    "periodId", "employeeId", "employeeName", "tripRef", "clientName",
+    "saleAmount", "commissionRate", "commissionAmt", "status", "notes",
+  ],
+  officeExpense: [
+    "periodId", "date", "category", "description", "amount", "vendor",
+    "paymentMethod", "receiptRef", "approvedBy", "department", "recurring", "notes",
+  ],
+  marketingExpense: [
+    "periodId", "date", "channel", "description", "amount", "vendor",
+    "paymentMethod", "receiptRef", "notes",
+  ],
+  hotelBooking: [
+    "periodId", "hotelName", "clientName", "tripRef", "checkIn", "checkOut",
+    "nights", "rooms", "status", "notes",
+  ],
+  transportJob: [
+    "periodId", "driverName", "vehicle", "clientName", "tripRef", "fuelCost",
+    "status", "notes",
+  ],
+  ticketing: [
+    "periodId", "airline", "clientName", "tripRef", "ticketCost",
+    "chargedToClient", "profit", "status", "notes",
+  ],
+  supplierAdvance: [
+    "periodId", "supplierName", "amount", "adjustedAmount", "remaining",
+    "relatedTrip", "dateGiven", "notes",
+  ],
+  refund: [
+    "periodId", "clientId", "clientName", "amount", "reason", "status",
+    "paidDate", "tripRef", "notes",
+  ],
+  asset: [
+    "periodId", "assetName", "category", "purchaseDate", "purchaseCost",
+    "currentStatus", "assignedToId", "location", "serialNo", "disposalDate",
+    "disposalValue", "notes",
+  ],
+  liability: [
+    "periodId", "liabilityType", "partyName", "description", "originalAmount",
+    "amountPaid", "outstanding", "dueDate", "interest", "relatedRef",
+    "startDate", "status", "notes",
+  ],
+  ownerTxn: [
+    "periodId", "date", "type", "description", "amountIn", "amountOut",
+    "runningBalance", "mode", "recordedBy", "supportingDoc", "notes",
+  ],
+  pettyCashTxn: [
+    "periodId", "date", "description", "personReceiving", "amountOut",
+    "amountIn", "purpose", "receiptRef", "balanceAfter", "approvedBy", "notes",
+  ],
+  bankTxn: [
+    "periodId", "accountId", "accountName", "date", "description", "deposit",
+    "withdrawal", "transferIn", "transferOut", "bankCharges", "balance",
+    "statementRef", "reconciled", "notes",
+  ],
+  client: ["name", "contact", "phone", "email", "notes"],
+  employee: ["name", "role", "basicSalary", "phone", "isActive"],
+  vadet: ["periodId", "name", "amount", "notes"],
+  salesPerformance: [
+    "periodId", "employeeId", "employeeName", "tourDate", "description",
+    "category", "subCategory", "clientName", "debit", "credit", "status",
+    "enteredBy", "notes",
+  ],
+  bankBalance: ["accountName", "balance", "asOfDate"],
+};
+
+function pickAllowed(model: ModelName, data: Record<string, unknown>) {
+  const allowed = ALLOWED_FIELDS[model] ?? [];
+  const out: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (key in data) out[key] = data[key];
+  }
+  return out;
+}
 function enrich(model: ModelName, data: Record<string, unknown>) {
   const d = { ...data };
 
@@ -190,7 +288,8 @@ export function makeCrudHandlers(
     try {
       const model = getModel(modelName);
       const body = await req.json();
-      const data = enrich(modelName, body);
+      const cleaned = pickAllowed(modelName, body);
+      const data = enrich(modelName, cleaned);
       delete data.id;
       delete data.team;
       // ⬇️ NEW: strip periodId when this model isn't period-scoped
@@ -212,7 +311,8 @@ export function makeCrudHandlers(
       const model = getModel(modelName);
       const body = await req.json();
       if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
-      const data = enrich(modelName, body);
+      const cleaned = pickAllowed(modelName, body);
+      const data = enrich(modelName, cleaned);
       const id = data.id as string;
       delete data.id;
       delete data.team;
