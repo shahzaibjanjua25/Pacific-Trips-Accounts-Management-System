@@ -37,6 +37,8 @@ async function recompute(periodId: string, employeeName: string) {
 
   const saleBase = isLead ? teamTotal : individualTotal;
   const commission = saleBase * RATE;
+  // src/app/api/sales-team/entry/route.ts
+  // ADD this PUT handler (keep existing POST and DELETE)
 
   // Upsert commission record
   const existingComm = await prisma.commission.findFirst({
@@ -70,7 +72,42 @@ async function recompute(periodId: string, employeeName: string) {
     await syncPayrollForEmployee(periodId, employeeName);
   }
 }
+export async function PUT(req: NextRequest) {
+  const uid = await getSessionUserId();
+  if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  try {
+    const body = await req.json();
+    const { id, employeeName, tourDate, description, clientName, amount, notes } = body;
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+    const existing = await prisma.salesPerformance.findUnique({ where: { id } });
+    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    const updated = await prisma.salesPerformance.update({
+      where: { id },
+      data: {
+        employeeName: employeeName ?? existing.employeeName,
+        tourDate: tourDate ? new Date(tourDate) : existing.tourDate,
+        description: description ?? existing.description,
+        clientName: clientName ?? existing.clientName,
+        debit: amount != null ? Number(amount) || 0 : existing.debit,
+        notes: notes ?? existing.notes,
+      },
+    });
+
+    // Recompute both old and new employee (in case employee changed)
+    await recompute(existing.periodId, existing.employeeName);
+    if (employeeName && employeeName !== existing.employeeName) {
+      await recompute(existing.periodId, employeeName);
+    }
+
+    return NextResponse.json({ ok: true, row: updated });
+  } catch (e) {
+    console.error("[sales-team:entry:PUT]", e);
+    return NextResponse.json({ error: String(e) }, { status: 500 });
+  }
+}
 export async function POST(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
