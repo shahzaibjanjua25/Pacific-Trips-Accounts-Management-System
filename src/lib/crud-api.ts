@@ -193,6 +193,10 @@ export function makeCrudHandlers(
       const data = enrich(modelName, body);
       delete data.id;
       delete data.team;
+      // ⬇️ NEW: strip periodId when this model isn't period-scoped
+      if (!periodScoped) {
+        delete data.periodId;
+      }
       const row = await model.create({ data });
       return NextResponse.json(row);
     } catch (e) {
@@ -214,7 +218,7 @@ export function makeCrudHandlers(
       delete data.team;
       delete data.createdAt;
       delete data.updatedAt;
-      delete data.periodId; // never move a record across periods on edit
+      delete data.periodId;   // ← already stripped here, good
       const row = await model.update({ where: { id }, data });
       return NextResponse.json(row);
     } catch (e) {
