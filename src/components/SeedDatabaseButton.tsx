@@ -72,7 +72,7 @@ export function SeedDatabaseButton() {
         } finally {
             setLoading(false);
         }
-    }
+    } //tst
 
     const hasData = !!counts && !counts.isEmpty;   // or: Boolean(counts && !counts.isEmpty)
 
