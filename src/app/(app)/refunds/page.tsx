@@ -1,17 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
-import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
-
-const fields: FieldDef[] = [
-  { key: "clientName", label: "Client Name", required: true },
-  { key: "amount", label: "Refund Amount", type: "number", required: true, money: true },
-  { key: "reason", label: "Reason" },
-  { key: "status", label: "Status", type: "select", options: ["Pending", "Paid"] },
-  { key: "paidDate", label: "Paid Date", type: "date" },
-  { key: "tripRef", label: "Trip / Booking Ref" },
-  { key: "notes", label: "Notes", type: "textarea", showInTable: false },
-];
+import { RefundsPanel } from "./RefundsPanel";
 
 export default async function Page({
   searchParams,
@@ -29,28 +19,42 @@ export default async function Page({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const rows = await prisma.refund.findMany({
-    where: { periodId: current.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const [rows, clients] = await Promise.all([
+    prisma.refund.findMany({
+      where: { periodId: current.id },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.client.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Refunds</h1>
-          <p className="text-sm text-slate-500">Keep open until money actually paid to client</p>
+          <p className="text-sm text-slate-500">
+            Keep open until money actually paid to client
+          </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
-      <CrudPanel
-        title="Refunds"
-        apiPath="/api/refunds"
+      <RefundsPanel
         periodId={current.id}
-        fields={fields}
-        rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
-        linkedEntityType="refund"
+        clients={clients}
+        rows={rows.map((r) => ({
+          id: r.id,
+          clientName: r.clientName,
+          amount: r.amount,
+          reason: r.reason,
+          status: r.status,
+          paidDate: r.paidDate ? r.paidDate.toISOString() : null,
+          tripRef: r.tripRef,
+          notes: r.notes,
+        }))}
       />
     </div>
   );
