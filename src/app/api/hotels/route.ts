@@ -109,21 +109,29 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const uid = await getSessionUserId();
-  if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const uid = await getSessionUserId();
+    if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const id = req.nextUrl.searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+    const id = req.nextUrl.searchParams.get("id");
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const hotel = await prisma.hotelBooking.findUnique({ where: { id } });
-  await prisma.hotelBooking.delete({ where: { id } });
-  if (hotel?.payableId) {
-    const stillLinked = await prisma.hotelBooking.findFirst({
-      where: { payableId: hotel.payableId },
-    });
-    if (!stillLinked) {
-      await prisma.payable.delete({ where: { id: hotel.payableId } }).catch(() => {});
+    const hotel = await prisma.hotelBooking.findUnique({ where: { id } });
+    if (!hotel) return NextResponse.json({ ok: true, alreadyGone: true });
+
+    await prisma.hotelBooking.delete({ where: { id } });
+
+    if (hotel.payableId) {
+      const stillLinked = await prisma.hotelBooking.findFirst({
+        where: { payableId: hotel.payableId },
+      });
+      if (!stillLinked) {
+        await prisma.payable.delete({ where: { id: hotel.payableId } }).catch(() => {});
+      }
     }
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    console.error("[hotels:DELETE]", e);
+    return NextResponse.json({ error: String(e) }, { status: 500 });
   }
-  return NextResponse.json({ ok: true });
 }
