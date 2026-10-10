@@ -131,9 +131,10 @@ export async function getDashboardData(periodId: string) {
   const ownerWithdrawals = ownerTxns.reduce((s, t) => s + t.amountOut, 0);
 
   return {
+    // src/lib/dashboard.ts
     cash: {
       hbl: bankBalances.find((b) => b.accountName.includes("HBL"))?.balance ?? 0,
-      Faysal: bankBalances.find((b) => b.accountName.includes("Faysal"))?.balance ?? 0,
+      faysal: bankBalances.find((b) => b.accountName.includes("Faysal"))?.balance ?? 0,  // ← lowercase
       meezan: bankBalances.find((b) => b.accountName.includes("Meezan"))?.balance ?? 0,
       ubl: bankBalances.find((b) => b.accountName.includes("UBL"))?.balance ?? 0,
       easypaisa: bankBalances.find((b) => b.accountName.includes("Easypaisa"))?.balance ?? 0,
@@ -143,7 +144,7 @@ export async function getDashboardData(periodId: string) {
       totalAvailable: totalAvailableCash,
       expectedCollections7d,
       committed,
-      freeCash,
+      freeCash, //tst
     },
     receivables: {
       clientOutstanding,
