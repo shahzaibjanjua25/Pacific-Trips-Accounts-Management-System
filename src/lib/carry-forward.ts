@@ -46,6 +46,8 @@ export async function getOrCreatePeriodWithCarryForward(year: number, month: num
 
     await carryForwardTx(tx, prevPeriod.id, period.id);
     return { period, carried: true };
+  }, {
+    timeout: 30000, // 30s — carry-forward can be slow with many records
   });
 
   return result;
@@ -53,255 +55,311 @@ export async function getOrCreatePeriodWithCarryForward(year: number, month: num
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string) {
-  const openRecv = await tx.receivable.findMany({
-    where: { periodId: fromPeriodId, remainingAmount: { gt: 0 } },
-  });
-  for (const r of openRecv) {
-    await tx.receivable.create({
-      data: {
-        periodId: toPeriodId,
-        clientId: r.clientId,
-        clientName: r.clientName,
-        contact: r.contact,
-        bookingDate: r.bookingDate,
-        tripDates: r.tripDates,
-        destination: r.destination,
-        totalPackage: r.remainingAmount,
-        amountToReceive: r.remainingAmount,
-        amountReceived: 0,
-        remainingAmount: r.remainingAmount,
-        dueDate: r.dueDate,
-        daysOverdue: r.daysOverdue,
-        tripStart: r.tripStart,
-        salesperson: r.salesperson,
-        discounts: 0,
-        additionalCharges: 0,
-        status: "Open",
-        notes: `Carried forward. Prior received: ${r.amountReceived}`,
-      },
+  try {
+    const openRecv = await tx.receivable.findMany({
+      where: { periodId: fromPeriodId, remainingAmount: { gt: 0 } },
     });
-  }
-
-  const openPay = await tx.payable.findMany({
-    where: { periodId: fromPeriodId, remaining: { gt: 0 } },
-  });
-  for (const p of openPay) {
-    await tx.payable.create({
-      data: {
-        periodId: toPeriodId,
-        supplierName: p.supplierName,
-        category: p.category,
-        description: p.description,
-        invoiceRef: p.invoiceRef,
-        originalAmount: p.remaining,
-        amountPaid: 0,
-        remaining: p.remaining,
-        dueDate: p.dueDate,
-        relatedTrip: p.relatedTrip,
-        status: "Open",
-        notes: "Carried forward",
-      },
-    });
-  }
-
-  const openHotels = await tx.hotelBooking.findMany({
-    where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
-    include: { payable: true },
-  });
-  for (const h of openHotels) {
-    const payable = await tx.payable.create({
-      data: {
-        periodId: toPeriodId,
-        supplierName: h.hotelName,
-        category: "Hotel",
-        description: h.clientName ? `Hotel for ${h.clientName}` : "Hotel booking",
-        originalAmount: h.payable?.remaining ?? 0,
-        amountPaid: 0,
-        remaining: h.payable?.remaining ?? 0,
-        relatedTrip: h.tripRef,
-        status: "Open",
-        notes: "Carried forward",
-      },
-    });
-    await tx.hotelBooking.create({
-      data: {
-        periodId: toPeriodId,
-        hotelName: h.hotelName,
-        clientName: h.clientName,
-        tripRef: h.tripRef,
-        checkIn: h.checkIn,
-        checkOut: h.checkOut,
-        nights: h.nights,
-        rooms: h.rooms,
-        status: "Booked",
-        notes: "Carried remaining",
-        payableId: payable.id,
-      },
-    });
-  }
-
-  const openTransport = await tx.transportJob.findMany({
-    where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
-    include: { payable: true },
-  });
-  for (const t of openTransport) {
-    const payable = await tx.payable.create({
-      data: {
-        periodId: toPeriodId,
-        supplierName: t.driverName || "Driver",
-        category: "Transport",
-        description: t.vehicle || "Transport job",
-        originalAmount: t.payable?.remaining ?? 0,
-        amountPaid: 0,
-        remaining: t.payable?.remaining ?? 0,
-        relatedTrip: t.tripRef,
-        status: "Open",
-        notes: "Carried forward",
-      },
-    });
-    await tx.transportJob.create({
-      data: {
-        periodId: toPeriodId,
-        driverName: t.driverName,
-        vehicle: t.vehicle,
-        clientName: t.clientName,
-        tripRef: t.tripRef,
-        fuelCost: 0,
-        status: "Pending",
-        notes: "Carried remaining",
-        payableId: payable.id,
-      },
-    });
-  }
-
-  const openAdv = await tx.supplierAdvance.findMany({
-    where: { periodId: fromPeriodId, remaining: { gt: 0 } },
-  });
-  for (const a of openAdv) {
-    await tx.supplierAdvance.create({
-      data: {
-        periodId: toPeriodId,
-        supplierName: a.supplierName,
-        amount: a.remaining,
-        adjustedAmount: 0,
-        remaining: a.remaining,
-        relatedTrip: a.relatedTrip,
-        notes: "Carried forward",
-      },
-    });
-  }
-
-  const pendingRefunds = await tx.refund.findMany({
-    where: { periodId: fromPeriodId, status: "Pending" },
-  });
-  for (const r of pendingRefunds) {
-    await tx.refund.create({
-      data: {
-        periodId: toPeriodId,
-        clientId: r.clientId,
-        clientName: r.clientName,
-        amount: r.amount,
-        reason: r.reason,
-        status: "Pending",
-        tripRef: r.tripRef,
-        notes: "Carried forward",
-      },
-    });
-  }
-
-  const prevPayroll = await tx.payrollEntry.findMany({
-    where: { periodId: fromPeriodId },
-  });
-  for (const p of prevPayroll) {
-    const installment = installmentFor(p.employeeName, p.loanInstallment);
-    const basic = p.basicSalary;
-    const tax = p.taxDeducted;
-    const other = p.otherDeductions;
-    const commissionAmt = await tx.commission.findFirst({
-      where: { periodId: fromPeriodId, employeeName: p.employeeName },
-    });
-    const comm = commissionAmt?.commissionAmt ?? 0;
-    const net = Math.max(0, basic + comm - tax - installment - other);
-
-    // Decrement the employee loan for the PRIOR period if it was fully paid.
-    // We treat "fully paid" as status === "Paid" AND remaining <= 0.
-    if (p.status === "Paid" && (p.remaining ?? 0) <= 0 && p.employeeId && installment > 0) {
-      const loan = await tx.employeeLoan.findFirst({
-        where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
+    for (const r of openRecv) {
+      await tx.receivable.create({
+        data: {
+          periodId: toPeriodId,
+          clientId: r.clientId,
+          clientName: r.clientName,
+          contact: r.contact,
+          bookingDate: r.bookingDate,
+          tripDates: r.tripDates,
+          destination: r.destination,
+          totalPackage: r.remainingAmount,
+          amountToReceive: r.remainingAmount,
+          amountReceived: 0,
+          remainingAmount: r.remainingAmount,
+          dueDate: r.dueDate,
+          daysOverdue: r.daysOverdue,
+          tripStart: r.tripStart,
+          salesperson: r.salesperson,
+          discounts: 0,
+          additionalCharges: 0,
+          status: "Open",
+          notes: `Carried forward. Prior received: ${r.amountReceived}`,
+        },
       });
-      if (loan) {
-        await tx.employeeLoan.update({
-          where: { id: loan.id },
-          data: {
-            remainingAmount: Math.max(0, loan.remainingAmount - installment),
-          },
-        });
-      }
     }
-
-    // Look up the NEW (post-decrement) loan balance for next month's row
-    const currentLoan = p.employeeId
-      ? await tx.employeeLoan.findFirst({
-        where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
-      })
-      : null;
-    const nextInstallment = currentLoan?.monthlyInstallment ?? installment;
-
-    await tx.payrollEntry.create({
-      data: {
-        periodId: toPeriodId,
-        employeeId: p.employeeId,
-        employeeName: p.employeeName,
-        basicSalary: basic,
-        taxDeducted: tax,
-        loanInstallment: nextInstallment,
-        otherDeductions: other,
-        netPayable: Math.max(0, basic + comm - tax - nextInstallment - other),
-        amountPaid: 0,
-        remaining: Math.max(0, basic + comm - tax - nextInstallment - other),
-        status: "Pending",
-        notes: p.notes ? `${p.notes} | Carried forward` : "Carried forward",
-      },
-    });
+  } catch (e) {
+    console.error("[carry-forward] receivables failed:", e);
   }
 
-
-  const prevOffice = await tx.officeExpense.findMany({
-    where: { periodId: fromPeriodId, recurring: true },
-  });
-  const seenCat = new Set<string>();
-  for (const o of prevOffice) {
-    if (seenCat.has(o.category)) continue;
-    seenCat.add(o.category);
-    await tx.officeExpense.create({
-      data: {
-        periodId: toPeriodId,
-        category: o.category,
-        description: o.description,
-        amount: o.amount,
-        vendor: o.vendor,
-        paymentMethod: o.paymentMethod,
-        recurring: true,
-        notes: "Carried template — edit if needed",
-      },
+  try {
+    const openPay = await tx.payable.findMany({
+      where: { periodId: fromPeriodId, remaining: { gt: 0 } },
     });
+    for (const p of openPay) {
+      await tx.payable.create({
+        data: {
+          periodId: toPeriodId,
+          supplierName: p.supplierName,
+          category: p.category,
+          description: p.description,
+          invoiceRef: p.invoiceRef,
+          originalAmount: p.remaining,
+          amountPaid: 0,
+          remaining: p.remaining,
+          dueDate: p.dueDate,
+          relatedTrip: p.relatedTrip,
+          status: "Open",
+          notes: "Carried forward",
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] payables failed:", e);
   }
 
-  const prevMkt = await tx.marketingExpense.findMany({
-    where: { periodId: fromPeriodId },
-  });
-  if (prevMkt.length > 0) {
-    const total = prevMkt.reduce((s: number, m: { amount: number }) => s + m.amount, 0);
-    await tx.marketingExpense.create({
-      data: {
-        periodId: toPeriodId,
-        channel: "Monthly Ads",
-        description: "Carried from previous month — edit if needed",
-        amount: total,
-        notes: "Carried template",
-      },
+  try {
+    const openHotels = await tx.hotelBooking.findMany({
+      where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
+      include: { payable: true },
     });
+    for (const h of openHotels) {
+      const payable = await tx.payable.create({
+        data: {
+          periodId: toPeriodId,
+          supplierName: h.hotelName,
+          category: "Hotel",
+          description: h.clientName ? `Hotel for ${h.clientName}` : "Hotel booking",
+          originalAmount: h.payable?.remaining ?? 0,
+          amountPaid: 0,
+          remaining: h.payable?.remaining ?? 0,
+          relatedTrip: h.tripRef,
+          status: "Open",
+          notes: "Carried forward",
+        },
+      });
+      await tx.hotelBooking.create({
+        data: {
+          periodId: toPeriodId,
+          hotelName: h.hotelName,
+          clientName: h.clientName,
+          tripRef: h.tripRef,
+          checkIn: h.checkIn,
+          checkOut: h.checkOut,
+          nights: h.nights,
+          rooms: h.rooms,
+          status: "Booked",
+          notes: "Carried remaining",
+          payableId: payable.id,
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] hotels failed:", e);
   }
+
+  // --- Transport ---
+  try {
+    const openTransport = await tx.transportJob.findMany({
+      where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
+      include: { payable: true },
+    });
+    for (const t of openTransport) {
+      const payable = await tx.payable.create({
+        data: {
+          periodId: toPeriodId,
+          supplierName: t.driverName || "Driver",
+          category: "Transport",
+          description: t.vehicle || "Transport job",
+          originalAmount: t.payable?.remaining ?? 0,
+          amountPaid: 0,
+          remaining: t.payable?.remaining ?? 0,
+          relatedTrip: t.tripRef,
+          status: "Open",
+          notes: "Carried forward",
+        },
+      });
+      await tx.transportJob.create({
+        data: {
+          periodId: toPeriodId,
+          driverName: t.driverName,
+          vehicle: t.vehicle,
+          clientName: t.clientName,
+          tripRef: t.tripRef,
+          fuelCost: 0,
+          status: "Pending",
+          notes: "Carried remaining",
+          payableId: payable.id,
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] transport failed:", e);
+  }
+
+  // --- Supplier Advances ---
+  try {
+    const openAdv = await tx.supplierAdvance.findMany({
+      where: { periodId: fromPeriodId, remaining: { gt: 0 } },
+    });
+    for (const a of openAdv) {
+      await tx.supplierAdvance.create({
+        data: {
+          periodId: toPeriodId,
+          supplierName: a.supplierName,
+          amount: a.remaining,
+          adjustedAmount: 0,
+          remaining: a.remaining,
+          relatedTrip: a.relatedTrip,
+          notes: "Carried forward",
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] advances failed:", e);
+  }
+
+  // --- Refunds ---
+  try {
+    const pendingRefunds = await tx.refund.findMany({
+      where: { periodId: fromPeriodId, status: "Pending" },
+    });
+    for (const r of pendingRefunds) {
+      await tx.refund.create({
+        data: {
+          periodId: toPeriodId,
+          clientId: r.clientId,
+          clientName: r.clientName,
+          amount: r.amount,
+          reason: r.reason,
+          status: "Pending",
+          tripRef: r.tripRef,
+          notes: "Carried forward",
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] refunds failed:", e);
+  }
+
+  // --- Payroll ---
+  try {
+    const prevPayroll = await tx.payrollEntry.findMany({
+      where: { periodId: fromPeriodId },
+    });
+    for (const p of prevPayroll) {
+      const installment = installmentFor(p.employeeName, p.loanInstallment);
+      const basic = p.basicSalary;
+      const tax = p.taxDeducted;
+      const other = p.otherDeductions;
+      const commissionAmt = await tx.commission.findFirst({
+        where: { periodId: fromPeriodId, employeeName: p.employeeName },
+      });
+      const comm = commissionAmt?.commissionAmt ?? 0;
+      const net = Math.max(0, basic + comm - tax - installment - other);
+
+      if (p.status === "Paid" && (p.remaining ?? 0) <= 0 && p.employeeId && installment > 0) {
+        const loan = await tx.employeeLoan.findFirst({
+          where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
+        });
+        if (loan) {
+          await tx.employeeLoan.update({
+            where: { id: loan.id },
+            data: {
+              remainingAmount: Math.max(0, loan.remainingAmount - installment),
+            },
+          });
+        }
+      }
+
+      const currentLoan = p.employeeId
+        ? await tx.employeeLoan.findFirst({
+          where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
+        })
+        : null;
+      const nextInstallment = currentLoan?.monthlyInstallment ?? installment;
+
+      await tx.payrollEntry.create({
+        data: {
+          periodId: toPeriodId,
+          employeeId: p.employeeId,
+          employeeName: p.employeeName,
+          basicSalary: basic,
+          taxDeducted: tax,
+          loanInstallment: nextInstallment,
+          otherDeductions: other,
+          netPayable: Math.max(0, basic + comm - tax - nextInstallment - other),
+          amountPaid: 0,
+          remaining: Math.max(0, basic + comm - tax - nextInstallment - other),
+          status: "Pending",
+          notes: p.notes ? `${p.notes} | Carried forward` : "Carried forward",
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] payroll failed:", e);
+  }
+
+  // --- Office Expenses ---
+  try {
+    const prevOffice = await tx.officeExpense.findMany({
+      where: { periodId: fromPeriodId, recurring: true },
+    });
+    const seenCat = new Set<string>();
+    for (const o of prevOffice) {
+      if (seenCat.has(o.category)) continue;
+      seenCat.add(o.category);
+      await tx.officeExpense.create({
+        data: {
+          periodId: toPeriodId,
+          category: o.category,
+          description: o.description,
+          amount: o.amount,
+          vendor: o.vendor,
+          paymentMethod: o.paymentMethod,
+          recurring: true,
+          notes: "Carried template — edit if needed",
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] office expenses failed:", e);
+  }
+
+  // --- Marketing ---
+  try {
+    const prevMkt = await tx.marketingExpense.findMany({
+      where: { periodId: fromPeriodId },
+    });
+    if (prevMkt.length > 0) {
+      const total = prevMkt.reduce((s: number, m: { amount: number }) => s + m.amount, 0);
+      await tx.marketingExpense.create({
+        data: {
+          periodId: toPeriodId,
+          channel: "Monthly Ads",
+          description: "Carried from previous month — edit if needed",
+          amount: total,
+          notes: "Carried template",
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] marketing failed:", e);
+  }
+
+  // --- Vadets ---
+  try {
+    const prevVadets = await tx.vadet.findMany({ where: { periodId: fromPeriodId } });
+    for (const v of prevVadets) {
+      await tx.vadet.create({
+        data: {
+          periodId: toPeriodId,
+          name: v.name,
+          amount: v.amount,
+          notes: "Carried forward",
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] vadets failed:", e);
+  }
+
 
   const prevVadets = await tx.vadet.findMany({ where: { periodId: fromPeriodId } });
   for (const v of prevVadets) {

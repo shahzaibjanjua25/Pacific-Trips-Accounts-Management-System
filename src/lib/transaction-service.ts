@@ -216,6 +216,7 @@ export async function postTransaction(input: TxnInput) {
   }
 
   // ---- CLIENT AUTO-CREATE / RECEIVABLE / LEDGER ----
+  // ---- CLIENT AUTO-CREATE / RECEIVABLE / LEDGER ----
   const isClientSide =
     cat.includes("receipt") ||
     cat.includes("client receipt") ||
@@ -250,22 +251,29 @@ export async function postTransaction(input: TxnInput) {
       });
 
       if (recv) {
-        const newReceived = recv.amountReceived + paidNow;
-        const newRemaining = Math.max(0, recv.totalPackage - newReceived);
+        // The Receivable was ALREADY updated by applyReceiptToReceivables().
+        // Do NOT subtract again. Only bump totalPackage if a new higher package
+        // value was supplied, and recompute remaining from the new total.
+        const newTotal = Math.max(recv.totalPackage, totalPackage);
+        const newRemaining = Math.max(0, newTotal - recv.amountReceived);
         await prisma.receivable.update({
           where: { id: recv.id },
           data: {
-            amountReceived: newReceived,
+            totalPackage: newTotal,
+            amountToReceive: newTotal,
             remainingAmount: newRemaining,
             status:
               newRemaining <= 0
                 ? "Settled"
-                : newReceived > 0
+                : recv.amountReceived > 0
                   ? "Partial"
                   : "Open",
           },
         });
       } else {
+        // No existing Receivable — create it fresh.
+        // applyReceiptToReceivables() found nothing to update, so this is the
+        // first and only write.
         const remaining = Math.max(0, totalPackage - paidNow);
         recv = await prisma.receivable.create({
           data: {
@@ -288,7 +296,6 @@ export async function postTransaction(input: TxnInput) {
       }
 
       // Ledger — payment received
-      // Ledger — payment received
       await prisma.clientLedger.create({
         data: {
           clientId: client.id,
@@ -306,7 +313,7 @@ export async function postTransaction(input: TxnInput) {
         },
       });
 
-      // Ledger — outstanding balance
+      // Ledger — outstanding balance (only the part still owed)
       const stillOwed = Math.max(0, totalPackage - paidNow);
       if (stillOwed > 0) {
         await prisma.clientLedger.create({
