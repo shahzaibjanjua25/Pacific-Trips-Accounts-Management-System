@@ -71,10 +71,9 @@ export function Sidebar() {
         )}
       >
         <div className="p-4 border-b border-slate-700 flex items-center gap-3">
-          <div className="w-12 h-12 rounded-lg bg-white overflow-hidden shrink-0 flex items-center justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
+          <div className="w-12 h-12 rounded-full bg-white overflow-hidden shrink-0 flex items-center justify-center">
             <img
-              src="/logo.jpg"
+              src="logo.jpg"
               alt="Pacific Trips"
               className="w-full h-full object-contain p-1"
             />

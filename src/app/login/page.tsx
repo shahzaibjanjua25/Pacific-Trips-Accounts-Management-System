@@ -97,10 +97,9 @@ function LoginInner() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 space-y-6">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-24 h-24 rounded-2xl bg-white border border-slate-200 overflow-hidden mb-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
+          <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-white border border-slate-200 overflow-hidden mb-3">
             <img
-              src="/logo.jpg"
+              src="logo.jpg"
               alt="Pacific Trips"
               className="w-full h-full object-contain p-2"
             />
