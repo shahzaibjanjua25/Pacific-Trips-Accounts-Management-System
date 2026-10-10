@@ -401,7 +401,67 @@ export async function applyRefundPayment(
     });
     return [{ entityType: "refund", entityId: r.id, appliedAmount: applied }];
 }
+/**
+ * Post or update a ClientLedger row for a refund.
+ * Called whenever a Refund is created or updated.
+ * - Pending  → creates an "Open" ledger credit row
+ * - Paid     → creates/updates the ledger row to "Paid"
+ * - Deleted  → ledger row is removed (handled by caller)
+ */
+export async function syncRefundToClientLedger(refundId: string) {
+    const refund = await prisma.refund.findUnique({ where: { id: refundId } });
+    if (!refund) return;
 
+    // Find or create the Client master row
+    let client = refund.clientId
+        ? await prisma.client.findUnique({ where: { id: refund.clientId } })
+        : null;
+    if (!client) {
+        client = await prisma.client.findFirst({ where: { name: refund.clientName } });
+    }
+    if (!client) {
+        client = await prisma.client.create({ data: { name: refund.clientName } });
+    }
+
+    // One ledger row per refund — match by receiptRef marker
+    const marker = `REFUND:${refund.id}`;
+    const existing = await prisma.clientLedger.findFirst({
+        where: { clientId: client.id, receiptRef: marker },
+    });
+
+    const ledgerData = {
+        clientId: client.id,
+        clientName: client.name,
+        tourDate: refund.paidDate ?? new Date(),
+        description: refund.reason
+            ? `Refund — ${refund.reason}`
+            : "Refund to client",
+        category: "Refund",
+        subCategory: refund.tripRef || null,
+        hotel: "Refund",
+        debit: 0,
+        credit: refund.amount,     // credit = money out to client
+        status: refund.status,     // "Pending" or "Paid"
+        receiptRef: marker,
+        enteredBy: null,
+        notes: refund.notes,
+    };
+
+    if (existing) {
+        await prisma.clientLedger.update({
+            where: { id: existing.id },
+            data: ledgerData,
+        });
+    } else {
+        await prisma.clientLedger.create({ data: ledgerData });
+    }
+}
+
+/** Remove the ledger row tied to a refund (used on refund delete). */
+export async function removeRefundFromClientLedger(refundId: string) {
+    const marker = `REFUND:${refundId}`;
+    await prisma.clientLedger.deleteMany({ where: { receiptRef: marker } });
+}
 export async function applyToAdvances(
     periodId: string,
     supplierName: string,
