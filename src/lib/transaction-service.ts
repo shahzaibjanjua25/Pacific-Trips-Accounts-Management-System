@@ -10,6 +10,7 @@ import {
   applyCommissionPayment,
   applyRefundPayment,
   applyToAdvances,
+  syncRefundToClientLedger,
   type AppliedLink,
 } from "./links-service";
 
@@ -109,9 +110,43 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   }
 
   if (cat.includes("refund")) {
-    return applyRefundPayment(periodId, party, amount);
-  }
+    const links = await applyRefundPayment(periodId, party, amount);
+    if (links.length > 0) return links;
 
+    // No pending refund matched → create one from this credit
+    if (input.credit > 0 && party) {
+      let client = await prisma.client.findFirst({ where: { name: party } });
+
+      // If the client already paid us (has received > 0), treat as a real refund
+      const recv = await prisma.receivable.findFirst({
+        where: {
+          periodId,
+          clientName: party,
+          amountReceived: { gt: 0 },
+        },
+      });
+
+      if (recv) {
+        const refund = await prisma.refund.create({
+          data: {
+            periodId,
+            clientId: client?.id ?? null,
+            clientName: party,
+            amount,
+            reason: input.description || "Refund issued",
+            status: "Paid",
+            paidDate: new Date(input.date),
+            tripRef: input.tripRef || null,
+            notes: input.notes || "Auto-created from transaction",
+          },
+        });
+        await syncRefundToClientLedger(refund.id);
+        return [{ entityType: "refund", entityId: refund.id, appliedAmount: amount }];
+      }
+    }
+
+    return links;
+  }
   if (cat.includes("advance") && !cat.includes("employee")) {
     if (input.credit > 0 && party) {
       const adv = await prisma.supplierAdvance.create({
