@@ -127,15 +127,36 @@ export function CrudPanel({
     if (!confirm("Delete this record?")) return;
     setLoading(true);
     try {
-      const res = await fetch(`${apiPath}?id=${id}`, { method: "DELETE" });
+      const res = await fetch(`${apiPath}?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+
+      // Try to read JSON first; fall back to text
+      const contentType = res.headers.get("content-type") || "";
+      const body = contentType.includes("application/json")
+        ? await res.json()
+        : await res.text();
+
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`${res.status} ${res.statusText}: ${text}`);
+        // Log the raw error and show a short version
+        console.error("[CrudPanel remove] failed", {
+          apiPath,
+          id,
+          status: res.status,
+          statusText: res.statusText,
+          body,
+        });
+        const short =
+          typeof body === "string"
+            ? body.slice(0, 200)
+            : body?.error || JSON.stringify(body).slice(0, 200);
+        alert(`Delete failed (${res.status}):\n${short}`);
+        return;
       }
       router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[CrudPanel remove] failed", { apiPath, id, err });
+      console.error("[CrudPanel remove] threw", { apiPath, id, err });
       alert("Delete failed:\n" + msg);
     } finally {
       setLoading(false);
@@ -346,9 +367,8 @@ function FragmentRow({
           return (
             <td
               key={f.key}
-              className={`px-3 py-2 whitespace-nowrap ${
-                f.money ? "text-right tabular-nums" : ""
-              }`}
+              className={`px-3 py-2 whitespace-nowrap ${f.money ? "text-right tabular-nums" : ""
+                }`}
             >
               {display}
             </td>
