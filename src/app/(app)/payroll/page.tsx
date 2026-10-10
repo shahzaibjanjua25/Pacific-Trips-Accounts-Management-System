@@ -19,7 +19,7 @@ const DESIGNATION: Record<string, string> = {
   "Demo staff member": "Sales",
   "Demo staff member": "Sales",
   "Demo staff member": "Grapich Designer",
-  "Faisal": "meta marketing",
+  "Demo staff member": "meta marketing",
   "Demo staff member": "CEO",
   "Demo staff member": "Acoountant",
   "Demo staff member": "Legal Team",

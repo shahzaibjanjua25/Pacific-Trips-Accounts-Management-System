@@ -43,7 +43,7 @@ export default async function DashboardPage({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Section title="1. Cash & Bank" color="bg-emerald-500">
           <Row label="HBL / Main" value={data.cash.hbl} />
-          <Row label="Faisal Bank" value={data.cash.faisal} />
+          <Row label="Faysal Bank" value={data.cash.faysal} />
           <Row label="Meezan Bank" value={data.cash.meezan} />
           <Row label="UBL" value={data.cash.ubl} />
           <Row label="Easypaisa" value={data.cash.easypaisa} />

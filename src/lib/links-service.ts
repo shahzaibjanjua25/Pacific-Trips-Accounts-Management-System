@@ -205,29 +205,32 @@ function nameMatch(a: string, b: string): boolean {
 }
 
 async function applyToPayable(
-    periodId: string,
-    payableId: string,
-    amount: number
+  periodId: string,
+  payableId: string,
+  amount: number
 ): Promise<number> {
-    const p = await prisma.payable.findUnique({ where: { id: payableId } });
-    if (!p || p.remaining <= 0) return 0;
-    const pay = Math.min(amount, p.remaining);
-    const newPaid = p.amountPaid + pay;
-    const newRem = Math.max(0, p.originalAmount - newPaid);
+  const p = await prisma.payable.findUnique({ where: { id: payableId } });
+  if (!p) return 0;
 
-    await prisma.payable.update({
-        where: { id: p.id },
-        data: {
-            amountPaid: newPaid,
-            remaining: newRem,
-            status: newRem <= 0 ? "Paid" : "Partial",
-        },
-    });
+  // If payable has no billed amount yet, treat this payment as the amount owed
+  const orig = p.originalAmount > 0 ? p.originalAmount : amount;
+  const pay = Math.min(amount, Math.max(0, orig - p.amountPaid));
+  const newPaid = p.amountPaid + pay;
+  const newRem = Math.max(0, orig - newPaid);
 
-    await propagatePayableToOperational(p.id);
-    return pay;
+  await prisma.payable.update({
+    where: { id: p.id },
+    data: {
+      originalAmount: orig,
+      amountPaid: newPaid,
+      remaining: newRem,
+      status: newRem <= 0 ? "Paid" : "Partial",
+    },
+  });
+
+  await propagatePayableToOperational(p.id);
+  return pay;
 }
-
 export async function applyPaymentToPayables(
     periodId: string,
     partyName: string,
@@ -456,7 +459,218 @@ export async function syncRefundToClientLedger(refundId: string) {
         await prisma.clientLedger.create({ data: ledgerData });
     }
 }
+/**
+ * Find or create a Payable + HotelBooking pair by hotel name.
+ * Used when a transaction names a hotel that doesn't exist yet.
+ */
+export async function findOrCreateHotelPayable(
+    periodId: string,
+    hotelName: string,
+    opts?: { description?: string; tripRef?: string }
+): Promise<string> {
+    // Look for an existing payable for this hotel in the period
+    let payable = await prisma.payable.findFirst({
+        where: {
+            periodId,
+            category: "Hotel",
+            supplierName: { equals: hotelName },
+        },
+        orderBy: { createdAt: "asc" },
+    });
 
+    if (payable) {
+        // Make sure a HotelBooking exists and is linked
+        const existingBooking = await prisma.hotelBooking.findFirst({
+            where: { payableId: payable.id },
+        });
+        if (!existingBooking) {
+            await prisma.hotelBooking.create({
+                data: {
+                    periodId,
+                    hotelName,
+                    status: "Booked",
+                    payableId: payable.id,
+                },
+            });
+        }
+        return payable.id;
+    }
+
+    // Create both
+    payable = await prisma.payable.create({
+        data: {
+            periodId,
+            supplierName: hotelName,
+            category: "Hotel",
+            description: opts?.description ?? "Hotel booking (auto-created)",
+            originalAmount: 0,
+            amountPaid: 0,
+            remaining: 0,
+            relatedTrip: opts?.tripRef ?? null,
+            status: "Open",
+            notes: "Auto-created from transaction",
+        },
+    });
+
+    await prisma.hotelBooking.create({
+        data: {
+            periodId,
+            hotelName,
+            tripRef: opts?.tripRef ?? null,
+            status: "Booked",
+            notes: "Auto-created from transaction",
+            payableId: payable.id,
+        },
+    });
+
+    return payable.id;
+}
+
+export async function findOrCreateTransportPayable(
+    periodId: string,
+    driverName: string,
+    opts?: { description?: string; tripRef?: string }
+): Promise<string> {
+    let payable = await prisma.payable.findFirst({
+        where: {
+            periodId,
+            category: "Transport",
+            supplierName: { equals: driverName },
+        },
+        orderBy: { createdAt: "asc" },
+    });
+
+    if (payable) {
+        const existing = await prisma.transportJob.findFirst({
+            where: { payableId: payable.id },
+        });
+        if (!existing) {
+            await prisma.transportJob.create({
+                data: {
+                    periodId,
+                    driverName,
+                    status: "Pending",
+                    payableId: payable.id,
+                },
+            });
+        }
+        return payable.id;
+    }
+
+    payable = await prisma.payable.create({
+        data: {
+            periodId,
+            supplierName: driverName,
+            category: "Transport",
+            description: opts?.description ?? "Transport job (auto-created)",
+            originalAmount: 0,
+            amountPaid: 0,
+            remaining: 0,
+            relatedTrip: opts?.tripRef ?? null,
+            status: "Open",
+            notes: "Auto-created from transaction",
+        },
+    });
+
+    await prisma.transportJob.create({
+        data: {
+            periodId,
+            driverName,
+            tripRef: opts?.tripRef ?? null,
+            status: "Pending",
+            notes: "Auto-created from transaction",
+            payableId: payable.id,
+        },
+    });
+
+    return payable.id;
+}
+
+/** Fallback: just create a bare Payable when nothing else applies. */
+export async function findOrCreateGenericPayable(
+    periodId: string,
+    supplierName: string,
+    category: string,
+    opts?: { description?: string; tripRef?: string }
+): Promise<string> {
+    let payable = await prisma.payable.findFirst({
+        where: {
+            periodId,
+            category,
+            supplierName: { equals: supplierName },
+        },
+        orderBy: { createdAt: "asc" },
+    });
+    if (payable) return payable.id;
+
+    payable = await prisma.payable.create({
+        data: {
+            periodId,
+            supplierName,
+            category,
+            description: opts?.description ?? `${category} payment (auto-created)`,
+            originalAmount: 0,
+            amountPaid: 0,
+            remaining: 0,
+            relatedTrip: opts?.tripRef ?? null,
+            status: "Open",
+            notes: "Auto-created from transaction",
+        },
+    });
+    return payable.id;
+}
+
+/**
+ * Apply a hotel payment: find-or-create the payable,
+ * then apply the payment to it.
+ */
+export async function applyHotelPayment(
+    periodId: string,
+    hotelName: string,
+    amount: number,
+    opts?: { description?: string; tripRef?: string }
+): Promise<AppliedLink[]> {
+    if (!hotelName || amount <= 0) return [];
+    const payableId = await findOrCreateHotelPayable(periodId, hotelName, opts);
+    const applied = await applyToPayable(periodId, payableId, amount);
+    return applied > 0
+        ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
+        : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
+}
+
+export async function applyTransportPayment(
+    periodId: string,
+    driverName: string,
+    amount: number,
+    opts?: { description?: string; tripRef?: string }
+): Promise<AppliedLink[]> {
+    if (!driverName || amount <= 0) return [];
+    const payableId = await findOrCreateTransportPayable(periodId, driverName, opts);
+    const applied = await applyToPayable(periodId, payableId, amount);
+    return applied > 0
+        ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
+        : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
+}
+
+export async function applyGenericPayablePayment(
+    periodId: string,
+    supplierName: string,
+    category: string,
+    amount: number,
+    opts?: { description?: string; tripRef?: string }
+): Promise<AppliedLink[]> {
+    if (!supplierName || amount <= 0) return [];
+    const payableId = await findOrCreateGenericPayable(
+        periodId,
+        supplierName,
+        category,
+        opts
+    );
+    const applied = await applyToPayable(periodId, payableId, amount);
+    return applied > 0
+        ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
+        : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
+}
 /** Remove the ledger row tied to a refund (used on refund delete). */
 export async function removeRefundFromClientLedger(refundId: string) {
     const marker = `REFUND:${refundId}`;
