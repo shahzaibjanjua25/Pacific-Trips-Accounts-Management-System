@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const periodId = req.nextUrl.searchParams.get("periodId");
 
   try {
-    // Hotel payments â€” return ALL hotels (paid + unpaid)
+    // Hotel payments - return ALL hotels (paid + unpaid)
     if (category.includes("hotel")) {
       const rows = await prisma.payable.findMany({
         where: {
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
         orderBy: [{ remaining: "desc" }, { supplierName: "asc" }],
       });
       const options: Option[] = rows.map((p) => ({
-        label: `${p.supplierName} â€” ${p.category || "Other"} ${
+        label: `${p.supplierName} - ${p.category || "Other"} ${
           p.remaining > 0 ? `(owing ${p.remaining.toLocaleString()})` : "(fully paid)"
         }`,
         value: p.supplierName,
@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
         orderBy: { createdAt: "desc" },
       });
       const options: Option[] = rows.map((t) => ({
-        label: `${t.airline || "Airline"} â€” ${t.clientName || "â€”"}`,
+        label: `${t.airline || "Airline"} - ${t.clientName || "-"}`,
         value: t.airline || t.clientName || "Ticketing",
         remaining: 0,
         id: t.id,
@@ -187,7 +187,7 @@ export async function GET(req: NextRequest) {
         orderBy: { employeeName: "asc" },
       });
       const options: Option[] = commissions.map((c) => ({
-        label: `${c.employeeName} â€” commission ${c.commissionAmt.toLocaleString()}`,
+        label: `${c.employeeName} - commission ${c.commissionAmt.toLocaleString()}`,
         value: c.employeeName,
         remaining: c.commissionAmt,
         id: c.id,
@@ -205,7 +205,7 @@ export async function GET(req: NextRequest) {
         },
       });
       const options: Option[] = refunds.map((r) => ({
-        label: `${r.clientName} â€” refund ${r.amount.toLocaleString()}`,
+        label: `${r.clientName} - refund ${r.amount.toLocaleString()}`,
         value: r.clientName,
         remaining: r.amount,
         id: r.id,
