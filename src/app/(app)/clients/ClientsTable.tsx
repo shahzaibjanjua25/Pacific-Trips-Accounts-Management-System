@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChevronRight, Pencil, Trash2, X, Plus } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
+import { LookupSelect } from "@/components/LookupSelect";
 
 type Row = {
   id: string;
@@ -18,6 +19,7 @@ type Row = {
   amountDue: number;
   status: string;
   tripInfo: string;
+  salesperson: string | null;
 };
 
 export function ClientsTable({
@@ -39,6 +41,7 @@ export function ClientsTable({
     notes: "",
     totalPackage: "",
     amountPaid: "",
+    salesperson: "",
   });
 
   function openAdd() {
@@ -52,6 +55,7 @@ export function ClientsTable({
       notes: "",
       totalPackage: "",
       amountPaid: "",
+      salesperson: "",
     });
   }
 
@@ -66,6 +70,7 @@ export function ClientsTable({
       notes: r.notes || "",
       totalPackage: String(r.totalPackage || 0),
       amountPaid: String(r.amountPaid || 0),
+      salesperson: r.salesperson || "",
     });
   }
 
@@ -86,6 +91,7 @@ export function ClientsTable({
             notes: form.notes || null,
             totalPackage: parseFloat(form.totalPackage) || 0,
             amountPaid: parseFloat(form.amountPaid) || 0,
+            salesperson: form.salesperson || null,
             periodId,
           }),
         });
@@ -107,6 +113,7 @@ export function ClientsTable({
             notes: form.notes || null,
             totalPackage: parseFloat(form.totalPackage) || 0,
             amountPaid: parseFloat(form.amountPaid) || 0,
+            salesperson: form.salesperson || null,
           }),
         });
         if (!res.ok) {
@@ -193,6 +200,19 @@ export function ClientsTable({
               value={form.amountPaid}
               onChange={(v) => setForm({ ...form, amountPaid: v })}
             />
+            <label className="block text-xs">
+              <span className="text-slate-600 font-medium">
+                Salesperson (who brought this client)
+              </span>
+              <div className="mt-1">
+                <LookupSelect
+                  lookupKey="salesEmployees"
+                  periodId={periodId}
+                  value={form.salesperson}
+                  onChange={(v) => setForm({ ...form, salesperson: v })}
+                />
+              </div>
+            </label>
             <div className="col-span-2 md:col-span-3">
               <Input
                 label="Notes"
@@ -201,6 +221,11 @@ export function ClientsTable({
               />
             </div>
           </div>
+          <p className="text-xs text-slate-600">
+            Selecting a salesperson with a Total Package records the sale
+            in the Sales Team page and adds 2.5% commission (or the Team
+            Lead tiered rate).
+          </p>
           <button
             type="submit"
             disabled={loading}
@@ -235,6 +260,7 @@ export function ClientsTable({
                     "Client Name",
                     "Phone",
                     "Email / Contact",
+                    "Salesperson",
                     "Trip / Package",
                     "Total Package",
                     "Amount Paid",
@@ -274,6 +300,9 @@ export function ClientsTable({
                       </td>
                       <td className="px-3 py-3 text-slate-600 max-w-[180px] truncate">
                         {r.email || r.contact || "-"}
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">
+                        {r.salesperson || "-"}
                       </td>
                       <td className="px-3 py-3 max-w-[180px] truncate">
                         {r.tripInfo}

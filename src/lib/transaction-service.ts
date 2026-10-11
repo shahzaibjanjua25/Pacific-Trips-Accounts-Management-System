@@ -44,6 +44,7 @@ export type TxnInput = {
   clientEmail?: string | null;
   clientNotes?: string | null;
   isNewClient?: boolean;
+  salesperson?: string | null;
 };
 
 /* ────── BANK ────── */
@@ -71,14 +72,6 @@ const cashDelta = (debit: number, credit: number) => debit - credit;
 
 /* ────── REFUND HELPERS ────── */
 
-/**
- * Handle a refund transaction:
- *   1. Create a Refund row (status "Paid", paidDate = txn date).
- *   2. Reduce the client's Receivable.amountReceived by the refund amount.
- *   3. Sync the ClientLedger row so the Refunds page + Clients page agree.
- *
- * Returns an array of AppliedLink with the new Refund row's id.
- */
 async function createRefundFromTransaction(opts: {
   periodId: string;
   clientName: string;
@@ -114,7 +107,6 @@ async function createRefundFromTransaction(opts: {
   // Cap the refund at what the client actually paid us.
   const cappedRefund = Math.min(amount, paidBefore);
   if (cappedRefund <= 0) {
-    // Nothing to refund — return early without creating a Refund row.
     return [];
   }
 
@@ -229,10 +221,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     return applyCommissionPayment(periodId, party, signedPayAmount);
   }
 
-  // ── REFUND: always create a Refund row + reduce receivable ──
-  // We ignore applyRefundPayment here (that one only flips an existing
-  // Pending refund to Paid) and instead build the refund from the
-  // transaction itself, which is what the user wants.
   if (cat.includes("refund")) {
     if (signedPayAmount <= 0 || !party) return [];
     return createRefundFromTransaction({
@@ -413,6 +401,8 @@ export async function postTransaction(input: TxnInput) {
     });
     if (openRecv) recv = openRecv;
 
+    let isNewReceivable = false;
+
     if (recv) {
       const newTotal =
         explicitPackage > 0
@@ -467,6 +457,10 @@ export async function postTransaction(input: TxnInput) {
                 : "Open",
           clientId: client.id,
           clientName: client.name,
+          // Tag the salesperson if we got one and it isn't already set
+          ...(input.salesperson && !recv.salesperson
+            ? { salesperson: input.salesperson }
+            : {}),
         },
       });
 
@@ -489,6 +483,7 @@ export async function postTransaction(input: TxnInput) {
           periodId: input.periodId,
           clientId: client.id,
           clientName: client.name,
+          salesperson: input.salesperson || null,
           totalPackage: packageVal,
           amountToReceive: packageVal,
           amountReceived: paidNow,
@@ -498,6 +493,32 @@ export async function postTransaction(input: TxnInput) {
           notes: "Auto-created from transaction",
         },
       });
+      isNewReceivable = true;
+    }
+
+    // ── Sales attribution ──
+    // Attribute to the salesperson when:
+    //   (a) a new Receivable was just created with a total package, OR
+    //   (b) the package was raised on an existing receivable (delta > 0)
+    if (input.salesperson && (explicitPackage > 0 || paidNow > 0)) {
+      const attributeAmount = isNewReceivable
+        ? explicitPackage > 0
+          ? explicitPackage
+          : paidNow
+        : 0; // For existing receivables we attribute the delta elsewhere
+      if (attributeAmount > 0) {
+        const { attributeSaleToSalesperson } = await import("./sales-attribution");
+        await attributeSaleToSalesperson({
+          periodId: input.periodId,
+          salesperson: input.salesperson,
+          clientName: client.name,
+          amount: attributeAmount,
+          tourDate: input.date,
+          description: input.description || `Sale to ${client.name}`,
+          tripRef: input.tripRef || null,
+          notes: input.notes || null,
+        });
+      }
     }
 
     if (paidNow > 0) {
@@ -669,16 +690,12 @@ async function reverseLink(link: {
     });
   }
 
-  // ── REFUND reversal ──
-  // The refund transaction reduced the client's amountReceived; when the
-  // transaction is deleted we must add it back.
   if (link.entityType === "refund") {
     const refund = await prisma.refund.findUnique({
       where: { id: link.entityId },
     });
     if (!refund) return;
 
-    // Re-add the refunded amount to the client's receivable
     const recv = await prisma.receivable.findFirst({
       where: {
         periodId: refund.periodId,
@@ -710,10 +727,7 @@ async function reverseLink(link: {
       });
     }
 
-    // Remove the ClientLedger row tied to this refund
     await removeRefundFromClientLedger(refund.id);
-
-    // Delete the Refund row itself
     await prisma.refund.delete({ where: { id: refund.id } }).catch(() => {});
   }
 }
