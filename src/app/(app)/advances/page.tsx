@@ -39,7 +39,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Supplier Advances</h1>
-          <p className="text-sm text-slate-500">Advances paid ahead â€” not yet adjusted against bookings</p>
+          <p className="text-sm text-slate-500">Advances paid ahead ” not yet adjusted against bookings</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>

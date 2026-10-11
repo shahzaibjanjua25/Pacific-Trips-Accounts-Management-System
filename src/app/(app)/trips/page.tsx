@@ -49,7 +49,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Trip PnL</h1>
-          <p className="text-sm text-slate-500">One row per trip â€” all direct costs â†’ Gross & Net Profit auto-calculate</p>
+          <p className="text-sm text-slate-500">One row per trip ” all direct costs â†’ Gross & Net Profit auto-calculate</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
