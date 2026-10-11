@@ -35,9 +35,16 @@ export default async function SalesTeamPage({
       }),
     ]);
 
-  const TEAM_LEAD_KEYWORDS = ["amad", "ammar"];
+  const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
   const isTeamLead = (name: string) =>
     TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
+
+  function leadPay(teamTotal: number) {
+    if (teamTotal < 700_000) return { amount: 55_000, rate: 0 };
+    if (teamTotal < 12_000_000) return { amount: teamTotal * 0.01, rate: 1 };
+    return { amount: teamTotal * 0.025, rate: 2.5 };
+  }
+
 
   const salesByPerson: Record<string, number> = {};
   for (const t of trips) {
@@ -72,7 +79,12 @@ export default async function SalesTeamPage({
     const comm = commissions.find((c) => c.employeeName === e.name);
     const pay = payroll.find((p) => p.employeeName === e.name);
     const saleBase = lead ? totalTeamSales : individual;
-    const commissionAmt = comm?.commissionAmt ?? saleBase * 0.025;
+    const leadCalc = lead ? leadPay(totalTeamSales) : null;
+    const commissionAmt =
+      comm?.commissionAmt ??
+      (lead ? leadCalc!.amount : saleBase * 0.025);
+    const commissionRate =
+      comm?.commissionRate ?? (lead ? leadCalc!.rate : 2.5);
 
     return {
       id: e.id,
@@ -81,7 +93,7 @@ export default async function SalesTeamPage({
       basicSalary: pay?.basicSalary ?? (lead ? 0 : 40000),
       individualSales: individual,
       saleBase,
-      commissionRate: 2.5,
+      commissionRate,
       commissionAmt,
       netPayable: pay?.netPayable ?? 0,
       amountPaid: pay?.amountPaid ?? 0,
@@ -125,3 +137,4 @@ export default async function SalesTeamPage({
     </div>
   );
 }
+

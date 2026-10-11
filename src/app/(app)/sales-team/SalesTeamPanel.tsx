@@ -251,7 +251,7 @@ export function SalesTeamPanel({
                 required
                 className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
               >
-                <option value="">— Select employee —</option>
+                <option value="">â€” Select employee â€”</option>
                 {employees.map((e) => (
                   <option key={e.id} value={e.name}>
                     {e.name} {e.isLead ? "(Team Lead)" : ""}
@@ -310,7 +310,7 @@ export function SalesTeamPanel({
             disabled={loading || !form.employeeName}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Saving…" : "Save Sale"}
+            {loading ? "Savingâ€¦" : "Save Sale"}
           </button>
         </form>
       )}
@@ -366,7 +366,7 @@ export function SalesTeamPanel({
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {r.isLead ? "—" : formatPKR(r.basicSalary)}
+                      {r.isLead ? "â€”" : formatPKR(r.basicSalary)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatPKR(r.individualSales)}
@@ -446,17 +446,17 @@ export function SalesTeamPanel({
                 filteredEntries.map((s) => (
                   <tr key={s.id} className="border-b border-slate-100">
                     <td className="px-3 py-2 whitespace-nowrap">
-                      {s.tourDate ? new Date(s.tourDate).toLocaleDateString("en-GB") : "—"}
+                      {s.tourDate ? new Date(s.tourDate).toLocaleDateString("en-GB") : "â€”"}
                     </td>
                     <td className="px-3 py-2 font-medium">{s.employeeName}</td>
-                    <td className="px-3 py-2">{s.clientName || "—"}</td>
+                    <td className="px-3 py-2">{s.clientName || "â€”"}</td>
                     <td className="px-3 py-2 max-w-[240px] truncate">
-                      {s.description || "—"}
+                      {s.description || "â€”"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-700 font-medium">
                       {formatPKR(s.amount)}
                     </td>
-                    <td className="px-3 py-2 max-w-[200px] truncate">{s.notes || "—"}</td>
+                    <td className="px-3 py-2 max-w-[200px] truncate">{s.notes || "â€”"}</td>
                     <td className="px-3 py-2 text-right">
                       <button
                         onClick={() => removeEntry(s.id)}
@@ -475,3 +475,4 @@ export function SalesTeamPanel({
     </div>
   );
 }
+

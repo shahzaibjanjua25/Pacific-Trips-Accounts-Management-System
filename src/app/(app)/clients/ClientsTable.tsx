@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ChevronRight, Pencil, Trash2, X } from "lucide-react";
+import { ChevronRight, Pencil, Trash2, X, Plus } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
 
 type Row = {
@@ -29,6 +29,7 @@ export function ClientsTable({
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<Row | null>(null);
+  const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -39,6 +40,20 @@ export function ClientsTable({
     totalPackage: "",
     amountPaid: "",
   });
+
+  function openAdd() {
+    setEditing(null);
+    setAdding(true);
+    setForm({
+      name: "",
+      phone: "",
+      contact: "",
+      email: "",
+      notes: "",
+      totalPackage: "",
+      amountPaid: "",
+    });
+  }
 
   function openEdit(r: Row) {
     if (r.id.startsWith("recv-")) return;
@@ -56,28 +71,50 @@ export function ClientsTable({
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (!editing) return;
+    if (!editing && !adding) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: editing.id,
-          name: form.name,
-          phone: form.phone || null,
-          contact: form.contact || null,
-          email: form.email || null,
-          notes: form.notes || null,
-          totalPackage: parseFloat(form.totalPackage) || 0,
-          amountPaid: parseFloat(form.amountPaid) || 0,
-        }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`${res.status} ${res.statusText}: ${text}`);
+      if (adding) {
+        const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: form.name,
+            phone: form.phone || null,
+            contact: form.contact || null,
+            email: form.email || null,
+            notes: form.notes || null,
+            totalPackage: parseFloat(form.totalPackage) || 0,
+            amountPaid: parseFloat(form.amountPaid) || 0,
+            periodId,
+          }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`${res.status} ${res.statusText}: ${text}`);
+        }
+        setAdding(false);
+      } else if (editing) {
+        const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editing.id,
+            name: form.name,
+            phone: form.phone || null,
+            contact: form.contact || null,
+            email: form.email || null,
+            notes: form.notes || null,
+            totalPackage: parseFloat(form.totalPackage) || 0,
+            amountPaid: parseFloat(form.amountPaid) || 0,
+          }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`${res.status} ${res.statusText}: ${text}`);
+        }
+        setEditing(null);
       }
-      setEditing(null);
       router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -103,14 +140,14 @@ export function ClientsTable({
 
   return (
     <div className="space-y-4">
-      {editing && (
+      {(editing || adding) && (
         <form
           onSubmit={save}
           className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3"
         >
           <div className="flex justify-between items-center">
-            <h3 className="font-semibold text-slate-800">Edit Client: {editing.name}</h3>
-            <button type="button" onClick={() => setEditing(null)}>
+            <h3 className="font-semibold text-slate-800">{adding ? "Add Client" : `Edit Client: ${editing?.name}`}</h3>
+            <button type="button" onClick={() => { setEditing(null); setAdding(false); }}>
               <X size={18} />
             </button>
           </div>
@@ -140,14 +177,24 @@ export function ClientsTable({
             disabled={loading}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Saving…" : "Update"}
+            {loading ? "Saving…" : adding ? "Create Client" : "Update"}
           </button>
         </form>
       )}
 
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={openAdd}
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+        >
+          <Plus size={16} /> Add Client
+        </button>
+      </div>
+
       {rows.length === 0 ? (
         <div className="bg-white rounded-xl border p-10 text-center text-slate-500 text-sm">
-          No clients yet. Add from Transactions or Receivables.
+          No clients yet. Click <strong>Add Client</strong> or post a Client Receipt in Transactions.
         </div>
       ) : (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
@@ -190,7 +237,7 @@ export function ClientsTable({
                         )}
                       </td>
                       <td className="px-3 py-3 text-slate-600">
-                        {r.phone || r.contact || "—"}
+                        {r.phone || r.contact || "â€”"}
                       </td>
                       <td className="px-3 py-3 max-w-[180px] truncate">{r.tripInfo}</td>
                       <td className="px-3 py-3 text-right tabular-nums">
@@ -283,3 +330,4 @@ function Input({
     </label>
   );
 }
+

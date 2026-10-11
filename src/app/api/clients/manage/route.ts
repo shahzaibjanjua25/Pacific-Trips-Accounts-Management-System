@@ -23,6 +23,58 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ client, receivable: recv });
 }
 
+
+export async function POST(req: NextRequest) {
+  const uid = await getSessionUserId();
+  if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    const body = await req.json();
+    const name = (body.name || "").trim();
+    if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
+
+    const existing = await prisma.client.findFirst({ where: { name } });
+    if (existing) {
+      return NextResponse.json({ error: "Client already exists", id: existing.id }, { status: 409 });
+    }
+
+    const client = await prisma.client.create({
+      data: {
+        name,
+        phone: body.phone || null,
+        contact: body.contact || null,
+        email: body.email || null,
+        notes: body.notes || null,
+      },
+    });
+
+    const periodId = req.nextUrl.searchParams.get("periodId") || body.periodId;
+    const tp = Number(body.totalPackage) || 0;
+    const paid = Number(body.amountPaid) || 0;
+    if (periodId && (tp > 0 || paid > 0)) {
+      const remaining = Math.max(0, tp - paid);
+      await prisma.receivable.create({
+        data: {
+          periodId,
+          clientId: client.id,
+          clientName: client.name,
+          totalPackage: tp || paid,
+          amountToReceive: tp || paid,
+          amountReceived: paid,
+          remainingAmount: remaining,
+          status: remaining <= 0 && paid > 0 ? "Settled" : paid > 0 ? "Partial" : "Open",
+          notes: "Created from Clients page",
+        },
+      });
+    }
+
+    return NextResponse.json(client);
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: String(e) }, { status: 500 });
+  }
+}
+
 export async function PUT(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -104,3 +156,4 @@ export async function DELETE(req: NextRequest) {
   await prisma.client.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }
+
