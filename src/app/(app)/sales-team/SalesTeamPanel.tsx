@@ -39,6 +39,13 @@ const emptySaleForm = {
   clientName: "",
   amount: "",
   notes: "",
+  // ── NEW ──
+  clientPhone: "",
+  clientContact: "",
+  clientEmail: "",
+  clientNotes: "",
+  clientTotalPackage: "",
+  clientAmountPaid: "",
 };
 
 export function SalesTeamPanel({
@@ -60,16 +67,12 @@ export function SalesTeamPanel({
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-
-  // ── Tab ──
   const [tab, setTab] = useState<"team" | "target">("team");
 
-  // ── Sale entry form ──
   const [open, setOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<SaleEntry | null>(null);
   const [form, setForm] = useState(emptySaleForm);
 
-  // ── Aggregated row edit ──
   const [editingRow, setEditingRow] = useState<Row | null>(null);
   const [rowForm, setRowForm] = useState({
     individualSales: "",
@@ -78,14 +81,12 @@ export function SalesTeamPanel({
     notes: "",
   });
 
-  // ── Target form ──
   const [targetForm, setTargetForm] = useState({
     targetAmount: String(monthlyTarget),
     notes: targetNotes || "",
   });
   const [savingTarget, setSavingTarget] = useState(false);
 
-  // ── Filters ──
   const [filterEmployee, setFilterEmployee] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [searchText, setSearchText] = useState("");
@@ -123,7 +124,6 @@ export function SalesTeamPanel({
   const totalPaid = filteredRows.reduce((s, r) => s + r.amountPaid, 0);
   const totalRemaining = filteredRows.reduce((s, r) => s + r.remaining, 0);
 
-  // ── Sale entry handlers ──
   function openAdd() {
     setEditingEntry(null);
     setForm({
@@ -145,6 +145,12 @@ export function SalesTeamPanel({
       clientName: s.clientName || "",
       amount: String(s.amount || 0),
       notes: s.notes || "",
+      clientPhone: "",
+      clientContact: "",
+      clientEmail: "",
+      clientNotes: "",
+      clientTotalPackage: "",
+      clientAmountPaid: "",
     });
     setOpen(true);
   }
@@ -162,6 +168,13 @@ export function SalesTeamPanel({
         clientName: form.clientName,
         amount,
         notes: form.notes,
+        // NEW — passed to API so a new Client is created/enriched
+        clientPhone: form.clientPhone || null,
+        clientContact: form.clientContact || null,
+        clientEmail: form.clientEmail || null,
+        clientNotes: form.clientNotes || null,
+        clientTotalPackage: parseFloat(form.clientTotalPackage) || 0,
+        clientAmountPaid: parseFloat(form.clientAmountPaid) || 0,
       };
       const res = await fetch("/api/sales-team/entry", {
         method: editingEntry ? "PUT" : "POST",
@@ -199,7 +212,6 @@ export function SalesTeamPanel({
     }
   }
 
-  // ── Aggregated row handlers ──
   function openEditRow(r: Row) {
     setEditingRow(r);
     setRowForm({
@@ -263,7 +275,6 @@ export function SalesTeamPanel({
     }
   }
 
-  // ── Target handler ──
   async function saveTarget(e: React.FormEvent) {
     e.preventDefault();
     setSavingTarget(true);
@@ -291,7 +302,6 @@ export function SalesTeamPanel({
 
   return (
     <div className="space-y-5">
-      {/* Tabs */}
       <div className="flex gap-2 border-b">
         <button
           onClick={() => setTab("team")}
@@ -317,7 +327,6 @@ export function SalesTeamPanel({
 
       {tab === "team" && (
         <>
-          {/* KPI strip */}
           <div className="flex flex-wrap gap-3 text-sm">
             <span className="bg-sky-100 text-sky-900 px-3 py-1.5 rounded-md">
               Team Sales: <strong>{formatPKR(totalTeamSales)}</strong>
@@ -340,7 +349,6 @@ export function SalesTeamPanel({
             </span>
           </div>
 
-          {/* Filter bar + Add Sale */}
           <div className="flex flex-wrap gap-3 items-end justify-between bg-white border rounded-xl p-3">
             <div className="flex flex-wrap gap-3 items-end">
               <label className="block text-xs">
@@ -395,7 +403,6 @@ export function SalesTeamPanel({
             </button>
           </div>
 
-          {/* New / Edit Sale Entry form */}
           {open && (
             <form
               onSubmit={saveEntry}
@@ -417,6 +424,7 @@ export function SalesTeamPanel({
               </div>
               <p className="text-xs text-slate-600">
                 Commission (2.5%) is auto-added to this employee&apos;s payroll row.
+                The client is created/updated in the Clients master automatically.
               </p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <label className="block text-xs">
@@ -458,6 +466,66 @@ export function SalesTeamPanel({
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                   />
                 </label>
+
+                {/* ── NEW: optional client detail fields ── */}
+                <label className="block text-xs">
+                  <span className="text-slate-600 font-medium">Client Phone</span>
+                  <input
+                    value={form.clientPhone}
+                    onChange={(e) =>
+                      setForm({ ...form, clientPhone: e.target.value })
+                    }
+                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="block text-xs">
+                  <span className="text-slate-600 font-medium">Client Contact / Ref</span>
+                  <input
+                    value={form.clientContact}
+                    onChange={(e) =>
+                      setForm({ ...form, clientContact: e.target.value })
+                    }
+                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="block text-xs">
+                  <span className="text-slate-600 font-medium">Client Email</span>
+                  <input
+                    value={form.clientEmail}
+                    onChange={(e) =>
+                      setForm({ ...form, clientEmail: e.target.value })
+                    }
+                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                  />
+                </label>
+
+                <label className="block text-xs">
+                  <span className="text-slate-600 font-medium">
+                    Total Package (PKR)
+                  </span>
+                  <input
+                    type="number"
+                    value={form.clientTotalPackage}
+                    onChange={(e) =>
+                      setForm({ ...form, clientTotalPackage: e.target.value })
+                    }
+                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                  />
+                </label>
+                <label className="block text-xs">
+                  <span className="text-slate-600 font-medium">
+                    Amount Paid (PKR)
+                  </span>
+                  <input
+                    type="number"
+                    value={form.clientAmountPaid}
+                    onChange={(e) =>
+                      setForm({ ...form, clientAmountPaid: e.target.value })
+                    }
+                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                  />
+                </label>
+
                 <label className="block text-xs col-span-2">
                   <span className="text-slate-600 font-medium">Description</span>
                   <input
@@ -482,7 +550,21 @@ export function SalesTeamPanel({
                 </label>
                 <div className="col-span-2 md:col-span-3">
                   <label className="block text-xs">
-                    <span className="text-slate-600 font-medium">Notes</span>
+                    <span className="text-slate-600 font-medium">
+                      Client Notes / Sale Notes
+                    </span>
+                    <input
+                      value={form.clientNotes}
+                      onChange={(e) =>
+                        setForm({ ...form, clientNotes: e.target.value })
+                      }
+                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
+                <div className="col-span-2 md:col-span-3">
+                  <label className="block text-xs">
+                    <span className="text-slate-600 font-medium">Entry Notes</span>
                     <input
                       value={form.notes}
                       onChange={(e) => setForm({ ...form, notes: e.target.value })}
@@ -501,7 +583,6 @@ export function SalesTeamPanel({
             </form>
           )}
 
-          {/* Aggregated row edit form */}
           {editingRow && (
             <form
               onSubmit={saveRow}
@@ -576,7 +657,6 @@ export function SalesTeamPanel({
             </form>
           )}
 
-          {/* Aggregated sales team table */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -698,7 +778,6 @@ export function SalesTeamPanel({
             </div>
           </div>
 
-          {/* Sale entries list */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="bg-slate-50 px-4 py-2 border-b flex justify-between items-center">
               <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
@@ -818,7 +897,6 @@ export function SalesTeamPanel({
             </div>
           </div>
 
-          {/* Progress bar */}
           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
             <div
               className={`h-3 rounded-full transition-all ${

@@ -146,16 +146,41 @@ export function ClientsTable({
           className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3"
         >
           <div className="flex justify-between items-center">
-            <h3 className="font-semibold text-slate-800">{adding ? "Add Client" : `Edit Client: ${editing?.name}`}</h3>
-            <button type="button" onClick={() => { setEditing(null); setAdding(false); }}>
+            <h3 className="font-semibold text-slate-800">
+              {adding ? "Add Client" : `Edit Client: ${editing?.name}`}
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(null);
+                setAdding(false);
+              }}
+            >
               <X size={18} />
             </button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <Input label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
-            <Input label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
-            <Input label="Contact / Ref" value={form.contact} onChange={(v) => setForm({ ...form, contact: v })} />
-            <Input label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+            <Input
+              label="Name"
+              value={form.name}
+              onChange={(v) => setForm({ ...form, name: v })}
+              required
+            />
+            <Input
+              label="Phone"
+              value={form.phone}
+              onChange={(v) => setForm({ ...form, phone: v })}
+            />
+            <Input
+              label="Contact / Ref"
+              value={form.contact}
+              onChange={(v) => setForm({ ...form, contact: v })}
+            />
+            <Input
+              label="Email"
+              value={form.email}
+              onChange={(v) => setForm({ ...form, email: v })}
+            />
             <Input
               label="Total Package (PKR)"
               type="number"
@@ -169,7 +194,11 @@ export function ClientsTable({
               onChange={(v) => setForm({ ...form, amountPaid: v })}
             />
             <div className="col-span-2 md:col-span-3">
-              <Input label="Notes" value={form.notes} onChange={(v) => setForm({ ...form, notes: v })} />
+              <Input
+                label="Notes"
+                value={form.notes}
+                onChange={(v) => setForm({ ...form, notes: v })}
+              />
             </div>
           </div>
           <button
@@ -205,6 +234,7 @@ export function ClientsTable({
                   {[
                     "Client Name",
                     "Phone",
+                    "Email / Contact",
                     "Trip / Package",
                     "Total Package",
                     "Amount Paid",
@@ -229,7 +259,10 @@ export function ClientsTable({
                     <tr key={r.id} className="border-b border-slate-100 hover:bg-emerald-50/40">
                       <td className="px-3 py-3 font-medium text-slate-900">
                         {editable ? (
-                          <Link href={href} className="text-slate-900 hover:text-emerald-700">
+                          <Link
+                            href={href}
+                            className="text-slate-900 hover:text-emerald-700"
+                          >
                             {r.name}
                           </Link>
                         ) : (
@@ -237,9 +270,14 @@ export function ClientsTable({
                         )}
                       </td>
                       <td className="px-3 py-3 text-slate-600">
-                        {r.phone || r.contact || "-"}
+                        {r.phone || "-"}
                       </td>
-                      <td className="px-3 py-3 max-w-[180px] truncate">{r.tripInfo}</td>
+                      <td className="px-3 py-3 text-slate-600 max-w-[180px] truncate">
+                        {r.email || r.contact || "-"}
+                      </td>
+                      <td className="px-3 py-3 max-w-[180px] truncate">
+                        {r.tripInfo}
+                      </td>
                       <td className="px-3 py-3 text-right tabular-nums">
                         {formatPKR(r.totalPackage)}
                       </td>
@@ -330,4 +368,3 @@ function Input({
     </label>
   );
 }
-

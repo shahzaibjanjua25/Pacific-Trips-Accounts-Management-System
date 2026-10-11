@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { formatPKR } from "@/lib/utils";
 import { Pencil, Trash2, Plus, X, ChevronDown, ChevronRight } from "lucide-react";
 import { LinkedTransactions } from "./LinkedTransactions";
+import { LookupSelect } from "./LookupSelect";
 
 export type FieldDef = {
   key: string;
@@ -17,6 +18,8 @@ export type FieldDef = {
   transient?: boolean;
   /** Display in table only — never sent to the form or the API */
   readOnly?: boolean;
+  /** Load options dynamically from /api/lookup?key=<lookupKey> */
+  lookupKey?: string;
 };
 
 type Row = Record<string, unknown> & { id: string };
@@ -131,14 +134,12 @@ export function CrudPanel({
         method: "DELETE",
       });
 
-      // Try to read JSON first; fall back to text
       const contentType = res.headers.get("content-type") || "";
       const body = contentType.includes("application/json")
         ? await res.json()
         : await res.text();
 
       if (!res.ok) {
-        // Log the raw error and show a short version
         console.error("[CrudPanel remove] failed", {
           apiPath,
           id,
@@ -207,7 +208,16 @@ export function CrudPanel({
               return (
                 <label key={f.key} className="block text-xs">
                   <span className="text-slate-600 font-medium">{f.label}</span>
-                  {f.type === "select" ? (
+
+                  {f.lookupKey ? (
+                    <LookupSelect
+                      lookupKey={f.lookupKey}
+                      periodId={periodId}
+                      value={form[f.key] || ""}
+                      onChange={(v) => setForm({ ...form, [f.key]: v })}
+                      required={f.required}
+                    />
+                  ) : f.type === "select" ? (
                     <select
                       value={form[f.key] || ""}
                       onChange={(e) =>
@@ -367,8 +377,9 @@ function FragmentRow({
           return (
             <td
               key={f.key}
-              className={`px-3 py-2 whitespace-nowrap ${f.money ? "text-right tabular-nums" : ""
-                }`}
+              className={`px-3 py-2 whitespace-nowrap ${
+                f.money ? "text-right tabular-nums" : ""
+              }`}
             >
               {display}
             </td>

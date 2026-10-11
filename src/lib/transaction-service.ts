@@ -1,22 +1,3 @@
-/**
- * Full cascade: transactions update related modules AND record
- * TransactionLink rows so payment history is permanently traceable.
- *
- * SIGN CONVENTIONS
- *
- *   CLIENT receipt / revenue  (money from client to us):
- *     DEBIT  = money IN  → increases Receivable.amountReceived
- *     CREDIT = money OUT → reduces  Receivable.amountReceived
- *
- *   OUTBOUND categories (Hotel / Transport / Supplier / Salary / Commission /
- *   Ticketing / Advance / Refund) — money between us and a supplier/employee:
- *     DEBIT  = money we received back from them → reduces  Payable.amountPaid
- *     CREDIT = money we paid them              → increases Payable.amountPaid
- *
- *   The signed amount passed to payable helpers is:
- *       signedPayAmount = credit − debit
- *   (positive = we paid, negative = they refunded us)
- */
 import { prisma } from "./prisma";
 import {
   applyPaymentToPayables,
@@ -57,6 +38,12 @@ export type TxnInput = {
   clientTotalPackage?: number;
   clientAmountPaid?: number;
   hotelAgreedCost?: number;
+  // ── New client fields (used when the caller is creating a party on the fly) ──
+  clientPhone?: string | null;
+  clientContact?: string | null;
+  clientEmail?: string | null;
+  clientNotes?: string | null;
+  isNewClient?: boolean;
 };
 
 /* ────── BANK ────── */
@@ -88,7 +75,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const party = input.party || input.subCategory || "";
   const periodId = input.periodId;
 
-  // Explicit payable link
   if (input.relatedPayableId) {
     const signedPayAmount = (input.credit || 0) - (input.debit || 0);
     return applyPaymentToPayables(periodId, party, signedPayAmount).then((links) => {
@@ -103,7 +89,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-  // CLIENT receipt / revenue — DEBIT counts as money IN
   if (
     cat.includes("receipt") ||
     cat.includes("client receipt") ||
@@ -114,7 +99,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     return applyReceiptToReceivables(periodId, party, debitAmount);
   }
 
-  // OUTBOUND categories: credit = paid (positive), debit = received back (negative)
   const signedPayAmount = (input.credit || 0) - (input.debit || 0);
 
   if (cat.includes("hotel")) {
@@ -205,57 +189,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
 
   return [];
 }
-// At the top of postTransaction, before prisma.transaction.create:
-async function assertNotOverpaying(input: TxnInput) {
-  const cat = (input.category || "").toLowerCase();
-  const party = input.party || input.subCategory || "";
-  const amount = Math.abs(input.debit || 0) || Math.abs(input.credit || 0);
-  if (!party || amount <= 0) return;
 
-  let outstanding: number | null = null;
-
-  if (cat.includes("salary") || cat.includes("payroll")) {
-    const rows = await prisma.payrollEntry.findMany({ where: { periodId: input.periodId } });
-    const e = rows.find((r) => r.employeeName.toLowerCase() === party.toLowerCase());
-    if (e) outstanding = Math.max(0, e.netPayable - (e.amountPaid ?? 0));
-  } else if (cat.includes("hotel")) {
-    const p = await prisma.payable.findFirst({
-      where: { periodId: input.periodId, category: { contains: "Hotel" }, supplierName: party },
-    });
-    if (p) outstanding = p.remaining;
-  } else if (cat.includes("transport") || cat.includes("driver")) {
-    const p = await prisma.payable.findFirst({
-      where: { periodId: input.periodId, category: { contains: "Transport" }, supplierName: party },
-    });
-    if (p) outstanding = p.remaining;
-  } else if (cat.includes("ticketing")) {
-    const p = await prisma.payable.findFirst({
-      where: { periodId: input.periodId, category: { contains: "Ticketing" }, supplierName: party },
-    });
-    if (p) outstanding = p.remaining;
-  } else if (cat.includes("supplier") || cat.includes("payable")) {
-    const p = await prisma.payable.findFirst({
-      where: { periodId: input.periodId, supplierName: party },
-    });
-    if (p) outstanding = p.remaining;
-  } else if (cat.includes("commission")) {
-    const c = await prisma.commission.findFirst({
-      where: { periodId: input.periodId, employeeName: party, status: "Accrued" },
-    });
-    if (c) outstanding = c.commissionAmt;
-  } else if (cat.includes("refund")) {
-    const r = await prisma.refund.findFirst({
-      where: { periodId: input.periodId, clientName: party, status: "Pending" },
-    });
-    if (r) outstanding = r.amount;
-  }
-
-  if (outstanding != null && amount > outstanding) {
-    throw new Error(
-      `Overpayment blocked: ${party} outstanding is ${outstanding}, but ${amount} was entered.`
-    );
-  }
-}
 /* ────── POST ────── */
 export async function postTransaction(input: TxnInput) {
   const txn = await prisma.transaction.create({
@@ -345,10 +279,33 @@ export async function postTransaction(input: TxnInput) {
     cat.includes("revenue");
 
   if (isClientSide && party) {
+    // ── Find or create client with extended fields ──
     let client = await prisma.client.findFirst({ where: { name: party } });
     const isNewClient = !client;
     if (!client) {
-      client = await prisma.client.create({ data: { name: party } });
+      client = await prisma.client.create({
+        data: {
+          name: party,
+          phone: input.clientPhone || null,
+          contact: input.clientContact || null,
+          email: input.clientEmail || null,
+          notes: input.clientNotes || null,
+        },
+      });
+    } else if (input.isNewClient) {
+      // If caller explicitly says "new", enrich existing row with any
+      // fields that are still blank.
+      const updates: Record<string, string> = {};
+      if (!client.phone && input.clientPhone) updates.phone = input.clientPhone;
+      if (!client.contact && input.clientContact) updates.contact = input.clientContact;
+      if (!client.email && input.clientEmail) updates.email = input.clientEmail;
+      if (!client.notes && input.clientNotes) updates.notes = input.clientNotes;
+      if (Object.keys(updates).length > 0) {
+        client = await prisma.client.update({
+          where: { id: client.id },
+          data: updates,
+        });
+      }
     }
 
     const paidNow =
@@ -401,9 +358,25 @@ export async function postTransaction(input: TxnInput) {
 
       let newReceived = recv.amountReceived;
       if (paidNow > 0 && !alreadyLinked) {
-        newReceived = Math.min(newTotal, newReceived + paidNow);   // ← caps!
+        const wouldBe = newReceived + paidNow;
+        // Only block if this is NOT a brand-new client — a new client
+        // legitimately needs the receipt to seed the receivable.
+        if (wouldBe > newTotal && !input.isNewClient) {
+          const over = wouldBe - newTotal;
+          await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
+          await adjustBank(
+            input.bankAccount,
+            -cashDelta(input.debit || 0, input.credit || 0)
+          ).catch(() => {});
+          throw new Error(
+            `Overpayment blocked: ${party} owes ${newTotal - newReceived} ` +
+              `but ${paidNow} was entered (excess ${over}).`
+          );
+        }
+        // For a brand-new client, extend the total to fit what was paid
+        newReceived = wouldBe;
       }
-      newReceived = Math.min(newTotal, newReceived);               // ← caps again!
+      newReceived = Math.min(newTotal, newReceived);
       if (creditedNow > 0) newReceived -= creditedNow;
 
       newReceived = Math.max(0, Math.min(newTotal, newReceived));
@@ -482,8 +455,7 @@ export async function postTransaction(input: TxnInput) {
           clientId: client.id,
           clientName: client.name,
           tourDate: new Date(input.date),
-          description:
-            input.description || "Credit / amount returned to client",
+          description: input.description || "Credit / amount returned to client",
           category: input.category,
           hotel: "Credit",
           debit: 0,
@@ -548,7 +520,6 @@ async function reverseLink(link: {
   if (link.entityType === "payable") {
     const p = await prisma.payable.findUnique({ where: { id: link.entityId } });
     if (!p) return;
-    // amt is signed: reversing (+100) subtracts 100; reversing (−50) adds 50
     const newPaid = Math.max(0, Math.min(p.originalAmount, p.amountPaid - amt));
     const newRem = Math.max(0, p.originalAmount - newPaid);
     await prisma.payable.update({

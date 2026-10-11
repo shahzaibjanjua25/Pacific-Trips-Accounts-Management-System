@@ -23,6 +23,8 @@ type Txn = {
 };
 
 type Option = { label: string; value: string; remaining: number; id?: string };
+type Account = { id: string; name: string; balance: number };
+type Outstanding = { value: number | null; exists: boolean; reason?: string } | null;
 
 const CATEGORIES = [
   "Client Receipt",
@@ -44,8 +46,8 @@ const CATEGORIES = [
   "Other",
 ];
 
-// Categories where we look up an outstanding balance and warn on overpayment.
-const OUTSTANDING_CATEGORIES = [
+// ── Categories where money leaves US ──
+const OUTBOUND_CHECK_CATEGORIES = [
   "Salary Payment",
   "Hotel Payment",
   "Supplier Payment",
@@ -53,6 +55,19 @@ const OUTSTANDING_CATEGORIES = [
   "Ticketing Payment",
   "Commission Payment",
   "Refund to Client",
+  "Supplier Advance",
+  "Employee Loan",
+];
+
+// Categories where money comes IN (client side)
+const INBOUND_CATEGORIES = ["Client Receipt", "Revenue"];
+
+const FALLBACK_ACCOUNTS: Account[] = [
+  { id: "fallback-ubl", name: "UBL", balance: 0 },
+  { id: "fallback-faysal", name: "Faysal Bank", balance: 0 },
+  { id: "fallback-meezan", name: "Meezan Bank", balance: 0 },
+  { id: "fallback-easypaisa", name: "Easypaisa", balance: 0 },
+  { id: "fallback-jazzcash", name: "Jazzcash", balance: 0 },
 ];
 
 const empty = {
@@ -64,8 +79,10 @@ const empty = {
   tripRef: "",
   debit: "",
   credit: "",
-  paymentMethod: "Bank",
+  paymentMethod: "Faysal Bank",
   bankAccount: "Faysal Bank",
+  accountMode: "Faysal Bank",
+  otherAccount: "",
   status: "Completed",
   enteredBy: "",
   notes: "",
@@ -73,6 +90,10 @@ const empty = {
   clientTotalPackage: "",
   clientAmountPaid: "",
   hotelAgreedCost: "",
+  clientPhone: "",
+  clientContact: "",
+  clientEmail: "",
+  clientNotes: "",
 };
 
 export function TransactionManager({
@@ -89,17 +110,37 @@ export function TransactionManager({
   const [form, setForm] = useState(empty);
   const [options, setOptions] = useState<Option[]>([]);
   const [showOther, setShowOther] = useState(false);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [outstanding, setOutstanding] = useState<Outstanding>(null);
 
-  // Generic outstanding lookup (salary / hotel / supplier / transport / ticketing / commission / refund)
-  const [outstanding, setOutstanding] = useState<number | null>(null);
-
-  const isClientCategory =
-    form.category === "Client Receipt" || form.category === "Revenue";
-
+  const isClientCategory = INBOUND_CATEGORIES.includes(form.category);
   const isHotelCategory = form.category === "Hotel Payment";
+  const isOutboundCategory = OUTBOUND_CHECK_CATEGORIES.includes(form.category);
+  const shouldCheckOutstanding = isClientCategory || isOutboundCategory;
 
-  const needsOutstandingCheck = OUTSTANDING_CATEGORIES.includes(form.category);
+  // ── Load bank accounts ──
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/accounts");
+        if (!res.ok) throw new Error("failed");
+        const data = await res.json();
+        if (cancelled) return;
+        const list: Account[] =
+          Array.isArray(data) && data.length > 0 ? data : FALLBACK_ACCOUNTS;
+        setAccounts(list);
+      } catch {
+        if (!cancelled) setAccounts(FALLBACK_ACCOUNTS);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  // ── Load party options ──
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -121,15 +162,15 @@ export function TransactionManager({
     };
   }, [form.category, periodId, open]);
 
-  // Fetch the current outstanding whenever the party/category changes for an
-  // outstanding-based category (salary, hotel, supplier, transport, ticketing,
-  // commission, refund).
+  // ── Fetch outstanding ──
   useEffect(() => {
-    if (!open || !needsOutstandingCheck) {
+    if (!open || !shouldCheckOutstanding) {
       setOutstanding(null);
       return;
     }
-    const partyName = showOther ? form.otherName : form.party || form.subCategory;
+    const partyName = showOther
+      ? form.otherName
+      : form.party || form.subCategory;
     if (!partyName) {
       setOutstanding(null);
       return;
@@ -148,9 +189,12 @@ export function TransactionManager({
         }
         const data = await res.json();
         if (!cancelled) {
-          setOutstanding(
-            typeof data.outstanding === "number" ? data.outstanding : null
-          );
+          setOutstanding({
+            value:
+              typeof data.outstanding === "number" ? data.outstanding : null,
+            exists: data.exists !== false,
+            reason: typeof data.reason === "string" ? data.reason : undefined,
+          });
         }
       } catch {
         if (!cancelled) setOutstanding(null);
@@ -161,7 +205,7 @@ export function TransactionManager({
     };
   }, [
     open,
-    needsOutstandingCheck,
+    shouldCheckOutstanding,
     form.category,
     form.party,
     form.subCategory,
@@ -179,6 +223,7 @@ export function TransactionManager({
 
   function openEdit(t: Txn) {
     setEditing(t);
+    const acc = t.bankAccount || t.paymentMethod || "";
     setForm({
       ...empty,
       date: new Date(t.date).toISOString().slice(0, 10),
@@ -189,8 +234,10 @@ export function TransactionManager({
       tripRef: t.tripRef || "",
       debit: String(t.debit || 0),
       credit: String(t.credit || 0),
-      paymentMethod: t.paymentMethod || "Bank",
+      paymentMethod: t.paymentMethod || "Faysal Bank",
       bankAccount: t.bankAccount || "Faysal Bank",
+      accountMode: acc,
+      otherAccount: "",
       status: t.status || "Completed",
       enteredBy: t.enteredBy || "",
       notes: t.notes || "",
@@ -219,14 +266,78 @@ export function TransactionManager({
 
     const debitAmount = parseFloat(form.debit) || 0;
     const creditAmount = parseFloat(form.credit) || 0;
-    const paymentAmount = debitAmount > 0 ? debitAmount : creditAmount;
 
     const party = showOther && form.otherName ? form.otherName : form.party;
     const subCategory =
       showOther && form.otherName ? form.otherName : form.subCategory || party;
 
-    // ── HARD BLOCK: overpayment check for outstanding-based categories ──
-    if (needsOutstandingCheck && paymentAmount > 0 && party) {
+    const resolvedAccount =
+      form.accountMode === "__other__"
+        ? form.otherAccount.trim()
+        : form.accountMode;
+
+    if (!party) {
+      alert("Please choose or type a party.");
+      return;
+    }
+    if (!resolvedAccount) {
+      alert("Please choose or type an account.");
+      return;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // DIRECTION SANITY CHECK
+    //   OUTBOUND categories must put money in CREDIT
+    //   INBOUND categories must put money in DEBIT
+    // ════════════════════════════════════════════════════════════
+    if (isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
+      const ok = confirm(
+        `⚠️ Wrong direction\n\n` +
+          `"${form.category}" is a payment OUT of the company, so the amount ` +
+          `belongs in the **Credit** column, not Debit.\n\n` +
+          `You entered ${formatPKR(debitAmount)} in Debit.\n\n` +
+          `Click OK to move it to Credit automatically, or Cancel to fix it yourself.`
+      );
+      if (!ok) return;
+      // Auto-move
+      setForm((f) => ({ ...f, credit: String(debitAmount), debit: "" }));
+      // Continue with the corrected value
+      return save(new Event("submit") as unknown as React.FormEvent);
+    }
+
+    if (isClientCategory && creditAmount > 0 && debitAmount === 0) {
+      const ok = confirm(
+        `⚠️ Wrong direction\n\n` +
+          `"${form.category}" is money IN from a client, so the amount ` +
+          `belongs in the **Debit** column, not Credit.\n\n` +
+          `You entered ${formatPKR(creditAmount)} in Credit.\n\n` +
+          `Click OK to move it to Debit automatically, or Cancel to fix it yourself.`
+      );
+      if (!ok) return;
+      setForm((f) => ({ ...f, debit: String(creditAmount), credit: "" }));
+      return save(new Event("submit") as unknown as React.FormEvent);
+    }
+
+    const isClientReceipt = isClientCategory;
+    const paidOut = creditAmount;
+    const receivedIn = debitAmount;
+    const movingAmount = isClientReceipt ? receivedIn : paidOut;
+
+    // ════════════════════════════════════════════════════════════
+    // HARD BLOCK: overpayment guard
+    //
+    // Skip ONLY when BOTH are true:
+    //   1. user typed a new name via "Other…"
+    //   2. the API confirms no such record exists (exists === false)
+    // In every other case, enforce the block.
+    // ════════════════════════════════════════════════════════════
+    const isTypedNew = showOther && form.otherName.trim().length > 0;
+
+    if (movingAmount > 0 && shouldCheckOutstanding) {
+      let liveOutstanding: number | null = null;
+      let liveExists = true;
+      let liveReason: string | undefined;
+
       try {
         const res = await fetch(
           `/api/outstanding?periodId=${periodId}&category=${encodeURIComponent(
@@ -235,25 +346,71 @@ export function TransactionManager({
         );
         if (res.ok) {
           const data = await res.json();
-          const liveOutstanding =
+          liveOutstanding =
             typeof data.outstanding === "number" ? data.outstanding : null;
-
-          if (liveOutstanding != null && paymentAmount > liveOutstanding) {
-            const over = paymentAmount - liveOutstanding;
-            alert(
-              `❌ Overpayment blocked\n\n` +
-              `${party} (${form.category})\n` +
-              `Outstanding: ${formatPKR(liveOutstanding)}\n` +
-              `You entered: ${formatPKR(paymentAmount)}\n` +
-              `Over by: ${formatPKR(over)}\n\n` +
-              `Reduce the amount to ${formatPKR(liveOutstanding)} or less, ` +
-              `or fix the outstanding balance first.`
-            );
-            return; // ⛔ HARD STOP — do not save
-          }
+          liveExists = data.exists !== false;
+          liveReason = typeof data.reason === "string" ? data.reason : undefined;
         }
       } catch {
-        // If the check fails, proceed — we don't want to block on network errors
+        liveOutstanding = outstanding?.value ?? null;
+        liveExists = outstanding?.exists ?? true;
+        liveReason = outstanding?.reason;
+      }
+
+      // Skip only for genuinely-new parties
+      const treatAsNew = isTypedNew && !liveExists;
+
+      // Block if the amount exceeds what's owed AND we know the outstanding
+      if (!treatAsNew && liveOutstanding != null && movingAmount > liveOutstanding) {
+        const over = movingAmount - liveOutstanding;
+        if (isClientReceipt) {
+          alert(
+            `❌ Cannot add transaction — amount exceeds what the client owes\n\n` +
+              `Client: ${party}\n` +
+              `Client owes (remaining): ${formatPKR(liveOutstanding)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(over)}\n\n` +
+              `Reduce the amount to ${formatPKR(liveOutstanding)} or less, ` +
+              `or increase the client's Total Package on the Receivables page first.`
+          );
+        } else {
+          alert(
+            `❌ Cannot add transaction — amount exceeds what we owe\n\n` +
+              `Party: ${party} (${form.category})\n` +
+              `Net payable (remaining): ${formatPKR(liveOutstanding)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(over)}\n\n` +
+              `Reduce the amount to ${formatPKR(liveOutstanding)} or less.`
+          );
+        }
+        return; // ⛔ HARD STOP
+      }
+
+      // If the API says a record exists but the name didn't match,
+      // shout loudly instead of letting a huge overpay through.
+      if (!treatAsNew && liveExists && liveReason === "no-name-match") {
+        const ok = confirm(
+          `⚠️ Warning\n\n` +
+            `No exact match found for "${party}" in ${form.category} for this month, ` +
+            `but similar records exist.\n\n` +
+            `You are about to save ${formatPKR(movingAmount)}.\n\n` +
+            `Click OK to proceed anyway, or Cancel to go back and pick the ` +
+            `party from the dropdown.`
+        );
+        if (!ok) return;
+      }
+    }
+
+    // For a NEW client, check against Total Package if provided
+    if (isClientReceipt) {
+      const pkg = parseFloat(form.clientTotalPackage) || 0;
+      if (pkg > 0 && receivedIn > pkg) {
+        alert(
+          `❌ Client package is ${formatPKR(pkg)}, but receipt is ${formatPKR(
+            receivedIn
+          )}.\n\nEither lower the receipt or raise the Total Package.`
+        );
+        return;
       }
     }
 
@@ -264,18 +421,36 @@ export function TransactionManager({
         periodId,
         party,
         subCategory,
+        paymentMethod: resolvedAccount,
+        bankAccount: resolvedAccount,
         debit: parseFloat(form.debit) || 0,
         credit: parseFloat(form.credit) || 0,
         clientTotalPackage: parseFloat(form.clientTotalPackage) || 0,
         clientAmountPaid: parseFloat(form.clientAmountPaid) || 0,
         hotelAgreedCost: parseFloat(form.hotelAgreedCost) || 0,
+        clientPhone: form.clientPhone || null,
+        clientContact: form.clientContact || null,
+        clientEmail: form.clientEmail || null,
+        clientNotes: form.clientNotes || null,
+        isNewClient: isTypedNew,
       };
       const res = await fetch("/api/transactions", {
         method: editing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editing ? { ...payload, id: editing.id } : payload),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = text;
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed?.error) msg = parsed.error;
+        } catch {
+          /* keep raw text */
+        }
+        alert("❌ Cannot add transaction\n\n" + msg);
+        return;
+      }
       setOpen(false);
       router.refresh();
     } catch (err) {
@@ -285,7 +460,6 @@ export function TransactionManager({
     }
   }
 
-  
   async function remove(id: string) {
     if (!confirm("Delete this transaction? Bank balance will be reversed.")) return;
     setLoading(true);
@@ -304,6 +478,84 @@ export function TransactionManager({
   const totalCredit = txns.reduce((s, t) => s + t.credit, 0);
 
   const debitNum = parseFloat(form.debit) || 0;
+  const creditNum = parseFloat(form.credit) || 0;
+
+  // ── Live hint ──
+  const liveHint = (() => {
+    if (!shouldCheckOutstanding) return null;
+    const movingAmount = isClientCategory ? debitNum : creditNum;
+
+    // Wrong-direction hint (before any outstanding check)
+    if (isOutboundCategory && debitNum > 0 && creditNum === 0) {
+      return (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+          ⚠️ You put the amount in <strong>Debit</strong>, but{" "}
+          <strong>{form.category}</strong> is money going OUT. Put it in{" "}
+          <strong>Credit</strong>. (It will be auto-moved on save.)
+        </p>
+      );
+    }
+    if (isClientCategory && creditNum > 0 && debitNum === 0) {
+      return (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+          ⚠️ You put the amount in <strong>Credit</strong>, but{" "}
+          <strong>{form.category}</strong> is money coming IN. Put it in{" "}
+          <strong>Debit</strong>. (It will be auto-moved on save.)
+        </p>
+      );
+    }
+
+    if (movingAmount <= 0) return null;
+    if (outstanding == null) return null;
+
+    if (!outstanding.exists) {
+      if (isClientCategory) {
+        const pkg = parseFloat(form.clientTotalPackage) || 0;
+        if (pkg > 0) {
+          if (movingAmount > pkg) {
+            return (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+                ⚠️ Receipt ({formatPKR(movingAmount)}) exceeds Total Package (
+                {formatPKR(pkg)}). Saving will be blocked.
+              </p>
+            );
+          }
+          return (
+            <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+              New client — package {formatPKR(pkg)}, paying {formatPKR(movingAmount)},
+              remaining {formatPKR(Math.max(0, pkg - movingAmount))}
+            </p>
+          );
+        }
+      }
+      return (
+        <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+          No existing record for this party in this month — will be treated as new.
+        </p>
+      );
+    }
+
+    if (outstanding.value == null) return null;
+
+    if (movingAmount > outstanding.value) {
+      return (
+        <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+          ⚠️ Amount exceeds what is owed. Outstanding is{" "}
+          <strong>{formatPKR(outstanding.value)}</strong>, but you entered{" "}
+          <strong>{formatPKR(movingAmount)}</strong>. Saving will be blocked.
+        </p>
+      );
+    }
+
+    return (
+      <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+        Outstanding: <strong>{formatPKR(outstanding.value)}</strong>
+        {" · "}
+        Remaining after this:{" "}
+        <strong>{formatPKR(Math.max(0, outstanding.value - movingAmount))}</strong>
+      </p>
+    );
+  })();
 
   return (
     <div className="space-y-4">
@@ -333,7 +585,10 @@ export function TransactionManager({
       </div>
 
       {open && (
-        <form onSubmit={save} className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3">
+        <form
+          onSubmit={save}
+          className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3"
+        >
           <div className="flex justify-between items-center">
             <h3 className="font-semibold text-slate-800">
               {editing ? "Edit Transaction" : "New Transaction"}
@@ -343,8 +598,9 @@ export function TransactionManager({
             </button>
           </div>
           <p className="text-xs text-slate-600">
-            Choose <strong>Category</strong> first - Sub-Category / Party lists hotels, suppliers,
-            clients or staff you owe / who owe you. Pick <strong>Other...</strong> to type a new name.
+            Choose <strong>Category</strong> first — Sub-Category / Party lists hotels, suppliers,
+            clients or staff you owe / who owe you. Pick <strong>Other…</strong> to type a new name.
+            {" "}<strong>Debit = money IN &middot; Credit = money OUT.</strong>
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field
@@ -365,7 +621,12 @@ export function TransactionManager({
               <select
                 value={form.category}
                 onChange={(e) => {
-                  setForm({ ...form, category: e.target.value, party: "", subCategory: "" });
+                  setForm({
+                    ...form,
+                    category: e.target.value,
+                    party: "",
+                    subCategory: "",
+                  });
                   setShowOther(false);
                 }}
                 className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -387,7 +648,7 @@ export function TransactionManager({
                 onChange={(e) => onPartySelect(e.target.value)}
                 className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="">- Select -</option>
+                <option value="">— Select —</option>
                 {options.map((o) => (
                   <option key={o.value + o.label} value={o.value}>
                     {o.label}
@@ -400,7 +661,9 @@ export function TransactionManager({
               <Field
                 label="Name of Other (will be saved)"
                 value={form.otherName}
-                onChange={(v) => setForm({ ...form, otherName: v, party: v, subCategory: v })}
+                onChange={(v) =>
+                  setForm({ ...form, otherName: v, party: v, subCategory: v })
+                }
                 required
               />
             )}
@@ -438,6 +701,34 @@ export function TransactionManager({
               </>
             )}
 
+            {isClientCategory && showOther && (
+              <>
+                <Field
+                  label="New Client Phone"
+                  value={form.clientPhone}
+                  onChange={(v) => setForm({ ...form, clientPhone: v })}
+                />
+                <Field
+                  label="New Client Contact / Ref"
+                  value={form.clientContact}
+                  onChange={(v) => setForm({ ...form, clientContact: v })}
+                />
+                <Field
+                  label="New Client Email"
+                  value={form.clientEmail}
+                  onChange={(v) => setForm({ ...form, clientEmail: v })}
+                />
+                <Field
+                  label="New Client Notes"
+                  value={form.clientNotes}
+                  onChange={(v) => setForm({ ...form, clientNotes: v })}
+                />
+                <p className="text-xs text-emerald-800 col-span-2 md:col-span-4 -mt-1">
+                  A new Client will be created in the Clients master with these details.
+                </p>
+              </>
+            )}
+
             {isHotelCategory && (
               <>
                 <Field
@@ -447,43 +738,57 @@ export function TransactionManager({
                   onChange={(v) => setForm({ ...form, hotelAgreedCost: v })}
                 />
                 <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
-                  Total agreed amount with the hotel. Debit = amount paid now.
+                  Total agreed amount with the hotel. Credit = amount paid now.
                   Enter the full booking cost here so the hotel&apos;s remaining
                   payable is calculated correctly.
                 </p>
               </>
             )}
 
-            {/* Outstanding-based overpayment live hints */}
-            {needsOutstandingCheck && outstanding != null && debitNum > outstanding && (
-              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-                ⚠️ Overpayment: outstanding is{" "}
-                <strong>{formatPKR(outstanding)}</strong>, but you are about to pay{" "}
-                <strong>{formatPKR(debitNum)}</strong>. You will be asked to confirm on save.
-              </p>
+            {liveHint}
+
+            <label className="block text-xs col-span-2">
+              <span className="text-slate-600 font-medium">
+                Account (Payment Method)
+              </span>
+              <select
+                value={form.accountMode}
+                onChange={(e) =>
+                  setForm({ ...form, accountMode: e.target.value })
+                }
+                className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {accounts.length > 0 && (
+                  <optgroup label="Bank / Cash Accounts (from Bank page)">
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.name}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+
+                <optgroup label="Cash">
+                  <option value="Cash">Cash</option>
+                  <option value="Petty Cash">Petty Cash</option>
+                </optgroup>
+
+                <optgroup label="Other">
+                  <option value="Cheque">Cheque</option>
+                  <option value="__other__">Other…</option>
+                </optgroup>
+              </select>
+            </label>
+
+            {form.accountMode === "__other__" && (
+              <Field
+                label="Enter account name (will be saved)"
+                value={form.otherAccount}
+                onChange={(v) => setForm({ ...form, otherAccount: v })}
+                required
+              />
             )}
 
-            {needsOutstandingCheck && outstanding != null && debitNum > 0 && debitNum <= outstanding && (
-              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-                Outstanding: <strong>{formatPKR(outstanding)}</strong>
-                {" · "}
-                Remaining after this payment:{" "}
-                <strong>{formatPKR(Math.max(0, outstanding - debitNum))}</strong>
-              </p>
-            )}
-
-            <Select
-              label="Payment Method"
-              value={form.paymentMethod}
-              onChange={(v) => setForm({ ...form, paymentMethod: v })}
-              options={["Bank", "Cash", "Jazzcash", "Easypaisa", "Cheque", "Other"]}
-            />
-            <Select
-              label="Bank / Cash Account"
-              value={form.bankAccount}
-              onChange={(v) => setForm({ ...form, bankAccount: v })}
-              options={["UBL", "Faysal Bank", "Meezan Bank", "Easypaisa", "Jazzcash", "Petty Cash", "HBL Main"]}
-            />
             <Select
               label="Status"
               value={form.status}
@@ -496,7 +801,11 @@ export function TransactionManager({
               onChange={(v) => setForm({ ...form, enteredBy: v })}
             />
           </div>
-          <Field label="Notes" value={form.notes} onChange={(v) => setForm({ ...form, notes: v })} />
+          <Field
+            label="Notes"
+            value={form.notes}
+            onChange={(v) => setForm({ ...form, notes: v })}
+          />
           <button
             type="submit"
             disabled={loading}
@@ -539,13 +848,20 @@ export function TransactionManager({
               </thead>
               <tbody>
                 {txns.map((t) => (
-                  <tr key={t.id} className="border-b border-slate-100 hover:bg-slate-50/80">
+                  <tr
+                    key={t.id}
+                    className="border-b border-slate-100 hover:bg-slate-50/80"
+                  >
                     <td className="px-3 py-2 whitespace-nowrap">
                       {new Date(t.date).toLocaleDateString("en-GB")}
                     </td>
-                    <td className="px-3 py-2 max-w-[200px] truncate">{t.description}</td>
+                    <td className="px-3 py-2 max-w-[200px] truncate">
+                      {t.description}
+                    </td>
                     <td className="px-3 py-2">{t.category}</td>
-                    <td className="px-3 py-2">{t.party || t.subCategory || "-"}</td>
+                    <td className="px-3 py-2">
+                      {t.party || t.subCategory || "-"}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {t.debit ? formatPKR(t.debit) : "-"}
                     </td>
