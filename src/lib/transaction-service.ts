@@ -205,7 +205,57 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
 
   return [];
 }
+// At the top of postTransaction, before prisma.transaction.create:
+async function assertNotOverpaying(input: TxnInput) {
+  const cat = (input.category || "").toLowerCase();
+  const party = input.party || input.subCategory || "";
+  const amount = Math.abs(input.debit || 0) || Math.abs(input.credit || 0);
+  if (!party || amount <= 0) return;
 
+  let outstanding: number | null = null;
+
+  if (cat.includes("salary") || cat.includes("payroll")) {
+    const rows = await prisma.payrollEntry.findMany({ where: { periodId: input.periodId } });
+    const e = rows.find((r) => r.employeeName.toLowerCase() === party.toLowerCase());
+    if (e) outstanding = Math.max(0, e.netPayable - (e.amountPaid ?? 0));
+  } else if (cat.includes("hotel")) {
+    const p = await prisma.payable.findFirst({
+      where: { periodId: input.periodId, category: { contains: "Hotel" }, supplierName: party },
+    });
+    if (p) outstanding = p.remaining;
+  } else if (cat.includes("transport") || cat.includes("driver")) {
+    const p = await prisma.payable.findFirst({
+      where: { periodId: input.periodId, category: { contains: "Transport" }, supplierName: party },
+    });
+    if (p) outstanding = p.remaining;
+  } else if (cat.includes("ticketing")) {
+    const p = await prisma.payable.findFirst({
+      where: { periodId: input.periodId, category: { contains: "Ticketing" }, supplierName: party },
+    });
+    if (p) outstanding = p.remaining;
+  } else if (cat.includes("supplier") || cat.includes("payable")) {
+    const p = await prisma.payable.findFirst({
+      where: { periodId: input.periodId, supplierName: party },
+    });
+    if (p) outstanding = p.remaining;
+  } else if (cat.includes("commission")) {
+    const c = await prisma.commission.findFirst({
+      where: { periodId: input.periodId, employeeName: party, status: "Accrued" },
+    });
+    if (c) outstanding = c.commissionAmt;
+  } else if (cat.includes("refund")) {
+    const r = await prisma.refund.findFirst({
+      where: { periodId: input.periodId, clientName: party, status: "Pending" },
+    });
+    if (r) outstanding = r.amount;
+  }
+
+  if (outstanding != null && amount > outstanding) {
+    throw new Error(
+      `Overpayment blocked: ${party} outstanding is ${outstanding}, but ${amount} was entered.`
+    );
+  }
+}
 /* ────── POST ────── */
 export async function postTransaction(input: TxnInput) {
   const txn = await prisma.transaction.create({
@@ -350,7 +400,10 @@ export async function postTransaction(input: TxnInput) {
       const alreadyLinked = (linked._sum.appliedAmount ?? 0) > 0;
 
       let newReceived = recv.amountReceived;
-      if (paidNow > 0 && !alreadyLinked) newReceived += paidNow;
+      if (paidNow > 0 && !alreadyLinked) {
+        newReceived = Math.min(newTotal, newReceived + paidNow);   // ← caps!
+      }
+      newReceived = Math.min(newTotal, newReceived);               // ← caps again!
       if (creditedNow > 0) newReceived -= creditedNow;
 
       newReceived = Math.max(0, Math.min(newTotal, newReceived));
