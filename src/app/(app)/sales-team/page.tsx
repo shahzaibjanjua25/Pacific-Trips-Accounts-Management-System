@@ -19,7 +19,7 @@ export default async function SalesTeamPage({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [employees, trips, receivables, commissions, payroll, salesEntries] =
+  const [employees, trips, receivables, commissions, payroll, salesEntries, targetRow] =
     await Promise.all([
       prisma.employee.findMany({
         where: { isActive: true, role: "Sales" },
@@ -33,18 +33,22 @@ export default async function SalesTeamPage({
         where: { periodId: current.id },
         orderBy: { createdAt: "desc" },
       }),
+      prisma.salesTarget.findUnique({ where: { periodId: current.id } }),
     ]);
+
+  const monthlyTarget = targetRow?.targetAmount ?? 12_000_000;
+  const targetNotes = targetRow?.notes ?? "";
 
   const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
   const isTeamLead = (name: string) =>
     TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
 
-  function leadPay(teamTotal: number) {
-    if (teamTotal < 700_000) return { amount: 55_000, rate: 0 };
-    if (teamTotal < 12_000_000) return { amount: teamTotal * 0.01, rate: 1 };
+  // 3-tier lead pay: <70L = 55k flat, <target = 1%, >=target = 2.5%
+  function leadPay(teamTotal: number, target: number) {
+    if (teamTotal < 7_000_000) return { amount: 55_000, rate: 0 };
+    if (teamTotal < target) return { amount: teamTotal * 0.01, rate: 1 };
     return { amount: teamTotal * 0.025, rate: 2.5 };
   }
-
 
   const salesByPerson: Record<string, number> = {};
   for (const t of trips) {
@@ -58,7 +62,6 @@ export default async function SalesTeamPage({
     }
   }
 
-  // Also add explicit sales entries (from the sales-team page)
   const entriesByPerson: Record<string, number> = {};
   for (const e of salesEntries) {
     entriesByPerson[e.employeeName] =
@@ -68,7 +71,8 @@ export default async function SalesTeamPage({
   const totalTeamSales = employees
     .filter((e) => !isTeamLead(e.name))
     .reduce(
-      (s, e) => s + (salesByPerson[e.name] || 0) + (entriesByPerson[e.name] || 0),
+      (s, e) =>
+        s + (salesByPerson[e.name] || 0) + (entriesByPerson[e.name] || 0),
       0
     );
 
@@ -79,10 +83,9 @@ export default async function SalesTeamPage({
     const comm = commissions.find((c) => c.employeeName === e.name);
     const pay = payroll.find((p) => p.employeeName === e.name);
     const saleBase = lead ? totalTeamSales : individual;
-    const leadCalc = lead ? leadPay(totalTeamSales) : null;
+    const leadCalc = lead ? leadPay(totalTeamSales, monthlyTarget) : null;
     const commissionAmt =
-      comm?.commissionAmt ??
-      (lead ? leadCalc!.amount : saleBase * 0.025);
+      comm?.commissionAmt ?? (lead ? leadCalc!.amount : saleBase * 0.025);
     const commissionRate =
       comm?.commissionRate ?? (lead ? leadCalc!.rate : 2.5);
 
@@ -109,7 +112,8 @@ export default async function SalesTeamPage({
         <div>
           <h1 className="text-2xl font-bold">Sales Team Performance</h1>
           <p className="text-sm text-slate-500">
-            Individual sales, 2.5% commission, and payout status. Sales entered here sync to payroll.
+            Individual sales, 2.5% commission, and Team Lead tiered override.
+            Sales entered here sync to payroll.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
@@ -119,6 +123,8 @@ export default async function SalesTeamPage({
         periodId={current.id}
         rows={rows}
         totalTeamSales={totalTeamSales}
+        monthlyTarget={monthlyTarget}
+        targetNotes={targetNotes}
         employees={employees.map((e) => ({
           id: e.id,
           name: e.name,
@@ -137,4 +143,3 @@ export default async function SalesTeamPage({
     </div>
   );
 }
-
