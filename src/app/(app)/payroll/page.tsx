@@ -182,7 +182,7 @@ export default async function Page({
 
       <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
         <h2 className="font-semibold text-emerald-900 mb-2">
-          Sales Team ({salesStaff.length}) â€” 2.5% commission
+          Sales Team ({salesStaff.length}) ” 2.5% commission
         </h2>
         <div className="flex flex-wrap gap-2">
           {salesStaff.map((e) => {
@@ -287,7 +287,7 @@ export default async function Page({
 
       <div>
         <h2 className="text-lg font-semibold mb-2 text-slate-700">
-          Other Staff â€” no commission ({otherPayroll.length})
+          Other Staff's no commission ({otherPayroll.length})
         </h2>
         {otherPayroll.length === 0 ? (
           <div className="bg-white border rounded-xl p-6 text-sm text-slate-500">

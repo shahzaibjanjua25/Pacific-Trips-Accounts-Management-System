@@ -40,7 +40,7 @@ export async function syncPayrollForEmployee(
     // Determine basic
     const basic = isLead ? 0 : emp.basicSalary || (emp.role === "Sales" ? 40000 : 0);
 
-    // Tax / other deductions â€” preserve whatever the user set
+    // Tax / other deductions ” preserve whatever the user set
     const tax = pay?.taxDeducted ?? 0;
     const other = pay?.otherDeductions ?? 0;
 
@@ -79,8 +79,8 @@ export async function syncPayrollForEmployee(
                 remaining: netPayable,
                 status: "Pending",
                 notes: isLead
-                    ? "Team Lead â€” 2.5% of team sales"
-                    : "Sales â€” 40k + 2.5% of own sales",
+                    ? "Team Lead ” 2.5% of team sales"
+                    : "Sales ” 40k + 2.5% of own sales",
             },
         });
     }
@@ -506,7 +506,7 @@ export async function syncRefundToClientLedger(refundId: string) {
         client = await prisma.client.create({ data: { name: refund.clientName } });
     }
 
-    // One ledger row per refund â€” match by receiptRef marker
+    // One ledger row per refund ” match by receiptRef marker
     const marker = `REFUND:${refund.id}`;
     const existing = await prisma.clientLedger.findFirst({
         where: { clientId: client.id, receiptRef: marker },
@@ -517,7 +517,7 @@ export async function syncRefundToClientLedger(refundId: string) {
         clientName: client.name,
         tourDate: refund.paidDate ?? new Date(),
         description: refund.reason
-            ? `Refund â€” ${refund.reason}`
+            ? `Refund ” ${refund.reason}`
             : "Refund to client",
         category: "Refund",
         subCategory: refund.tripRef || null,

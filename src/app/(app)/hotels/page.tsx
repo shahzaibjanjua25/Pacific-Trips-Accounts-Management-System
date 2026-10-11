@@ -63,7 +63,7 @@ export default async function Page({
         <div>
           <h1 className="text-2xl font-bold">Hotels</h1>
           <p className="text-sm text-slate-500">
-            Operational view â€” money owed is tracked on the linked Payable. Click a row to see payments.
+            Operational view ” money owed is tracked on the linked Payable. Click a row to see payments.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
