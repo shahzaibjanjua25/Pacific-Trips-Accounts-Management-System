@@ -33,7 +33,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Bank Accounts</h1>
-          <p className="text-sm text-slate-500">HBL, Meezan, UBL, Easypaisa, Jazzcash — balance must match statement</p>
+          <p className="text-sm text-slate-500">Account balances. Updated automatically when you post Transactions with a bank account. You can also set balances manually to match the bank statement.</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
@@ -48,3 +48,5 @@ export default async function Page({
     </div>
   );
 }
+
+

@@ -9,7 +9,7 @@ const fields: FieldDef[] = [
   { key: "description", label: "Description" },
   { key: "originalAmount", label: "Original Amount", type: "number" as const, required: true, money: true },
   { key: "amountPaid", label: "Amount Paid / Repaid", type: "number" as const, money: true },
-  { key: "outstanding", label: "Outstanding Balance", type: "number" as const, money: true },
+  { key: "outstanding", label: "Outstanding Balance", type: "number" as const, money: true, readOnly: true },
   { key: "dueDate", label: "Due Date", type: "date" as const },
   { key: "interest", label: "Interest", type: "number" as const, money: true },
   { key: "relatedRef", label: "Related Ref" },
@@ -59,3 +59,5 @@ export default async function Page({
     </div>
   );
 }
+
+

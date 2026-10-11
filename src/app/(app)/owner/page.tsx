@@ -9,7 +9,7 @@ const fields: FieldDef[] = [
   { key: "description", label: "Description" },
   { key: "amountIn", label: "Amount In (Capital)", type: "number" as const, money: true },
   { key: "amountOut", label: "Amount Out (Withdrawal)", type: "number" as const, money: true },
-  { key: "runningBalance", label: "Running Balance", type: "number" as const, money: true },
+  { key: "runningBalance", label: "Running Balance", type: "number" as const, money: true, readOnly: true },
   { key: "mode", label: "Mode" },
   { key: "recordedBy", label: "Recorded By" },
   { key: "supportingDoc", label: "Supporting Doc" },
@@ -42,7 +42,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Owner / Director Account</h1>
-          <p className="text-sm text-slate-500">Capital introduced & withdrawals — NEVER mix with revenue or expenses</p>
+          <p className="text-sm text-slate-500">Capital introduced & withdrawals â€” NEVER mix with revenue or expenses</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
@@ -57,3 +57,5 @@ export default async function Page({
     </div>
   );
 }
+
+

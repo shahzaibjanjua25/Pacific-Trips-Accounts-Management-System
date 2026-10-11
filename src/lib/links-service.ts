@@ -4,12 +4,12 @@
  */
 import { prisma } from "./prisma";
 
-/* ─────────────────────────────────────────────
- * PAYABLE ← OPERATIONAL SYNC
- * ───────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * PAYABLE â† OPERATIONAL SYNC
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /**
  * Recompute a payroll entry from scratch based on:
- *   basic + commission − tax − loan installment − other deductions
+ *   basic + commission âˆ’ tax âˆ’ loan installment âˆ’ other deductions
  * Then set netPayable / remaining / status correctly.
  *
  * If `amountPaid` > 0 and status becomes fully Paid, decrement the linked
@@ -40,7 +40,7 @@ export async function syncPayrollForEmployee(
     // Determine basic
     const basic = isLead ? 0 : emp.basicSalary || (emp.role === "Sales" ? 40000 : 0);
 
-    // Tax / other deductions — preserve whatever the user set
+    // Tax / other deductions â€” preserve whatever the user set
     const tax = pay?.taxDeducted ?? 0;
     const other = pay?.otherDeductions ?? 0;
 
@@ -79,8 +79,8 @@ export async function syncPayrollForEmployee(
                 remaining: netPayable,
                 status: "Pending",
                 notes: isLead
-                    ? "Team Lead — 2.5% of team sales"
-                    : "Sales — 40k + 2.5% of own sales",
+                    ? "Team Lead â€” 2.5% of team sales"
+                    : "Sales â€” 40k + 2.5% of own sales",
             },
         });
     }
@@ -179,9 +179,9 @@ export async function propagatePayableToOperational(payableId: string) {
     }
 }
 
-/* ─────────────────────────────────────────────
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * PAYMENT APPLICATION
- * ───────────────────────────────────────────── */
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export type AppliedLink = {
     entityType:
@@ -308,6 +308,22 @@ export async function applyReceiptToReceivables(
 
 /** Apply a partial (or full) payment to a payroll entry. */
 /** Apply a partial (or full) payment to a payroll entry. */
+/** Resolve employee display name → canonical Employee row (fuzzy). */
+async function resolveEmployee(employeeName: string) {
+    const all = await prisma.employee.findMany({ where: { isActive: true } });
+    return (
+        all.find((e) => nameMatch(e.name, employeeName)) ??
+        all.find((e) => {
+            const a = e.name.toLowerCase().trim().split(/\s+/);
+            const b = employeeName.toLowerCase().trim().split(/\s+/);
+            const lastA = a[a.length - 1];
+            const lastB = b[b.length - 1];
+            return !!lastA && lastA === lastB && lastA.length > 2;
+        }) ??
+        null
+    );
+}
+
 export async function applyPayrollPayment(
     periodId: string,
     employeeName: string,
@@ -315,26 +331,85 @@ export async function applyPayrollPayment(
 ): Promise<AppliedLink[]> {
     if (!employeeName || amount <= 0) return [];
 
-    const entry = await prisma.payrollEntry.findFirst({
-        where: {
-            periodId,
-            employeeName: { contains: employeeName.split(" ")[0] || employeeName },
-            status: { in: ["Pending", "Partial"] },
-        },
+    const matchEntry = (
+        rows: { id: string; employeeName: string; netPayable: number; amountPaid: number | null; status: string; employeeId: string | null; loanInstallment: number; paidDate: Date | null }[]
+    ) =>
+        rows.find((e) => nameMatch(e.employeeName, employeeName)) ??
+        rows.find((e) => {
+            const a = e.employeeName.toLowerCase().trim().split(/\s+/);
+            const b = employeeName.toLowerCase().trim().split(/\s+/);
+            const lastA = a[a.length - 1];
+            const lastB = b[b.length - 1];
+            return !!lastA && lastA === lastB && lastA.length > 2;
+        });
+
+    // Prefer open rows; also consider any row for this person (incl. Paid) so we can still link
+    let candidates = await prisma.payrollEntry.findMany({
+        where: { periodId, status: { in: ["Pending", "Partial"] } },
         orderBy: { createdAt: "asc" },
     });
-    if (!entry) return [];
+    let entry = matchEntry(candidates);
+
+    // Auto-create payroll row when missing (user may not have clicked Init Payroll)
+    if (!entry) {
+        const emp = await resolveEmployee(employeeName);
+        const canonicalName = emp?.name ?? employeeName.trim();
+        // Ensure base row exists (basic + commission − loan)
+        await syncPayrollForEmployee(periodId, canonicalName);
+        candidates = await prisma.payrollEntry.findMany({
+            where: { periodId },
+            orderBy: { createdAt: "asc" },
+        });
+        entry = matchEntry(candidates);
+        if (!entry) {
+            // Last resort: create a minimal row so payment is not lost
+            const loan = emp
+                ? await prisma.employeeLoan.findFirst({
+                      where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
+                  })
+                : null;
+            const isLead =
+                canonicalName.toLowerCase().includes("amad") ||
+                canonicalName.toLowerCase().includes("ammar");
+            const basic = isLead ? 0 : emp?.basicSalary || 0;
+            const installment = loan?.monthlyInstallment ?? 0;
+            const net = Math.max(0, basic - installment);
+            entry = await prisma.payrollEntry.create({
+                data: {
+                    periodId,
+                    employeeId: emp?.id ?? null,
+                    employeeName: canonicalName,
+                    basicSalary: basic,
+                    loanInstallment: installment,
+                    netPayable: net,
+                    amountPaid: 0,
+                    remaining: net,
+                    status: "Pending",
+                    notes: "Auto-created from salary payment transaction",
+                },
+            });
+        }
+    }
 
     const outstanding = Math.max(0, entry.netPayable - (entry.amountPaid ?? 0));
-    if (outstanding <= 0) return [];
-
-    const applied = Math.min(amount, outstanding);
-    const newPaid = (entry.amountPaid ?? 0) + applied;
-    const newRemaining = Math.max(0, entry.netPayable - newPaid);
-    const fullyPaid = newRemaining <= 0;
-
-    // If we're about to flip from Partial/Pending to Paid for the first time,
-    // decrement the loan by this month's installment.
+    // If net was 0 (e.g. lead with no commission yet), still record payment against net
+    // by treating payment as raising amountPaid (remaining stays 0 or increases net if needed)
+    let applied: number;
+    let newPaid: number;
+    let newRemaining: number;
+    if (outstanding <= 0 && entry.netPayable <= 0) {
+        // Nothing owed on paper — still apply payment as amountPaid so history is kept
+        applied = amount;
+        newPaid = (entry.amountPaid ?? 0) + applied;
+        newRemaining = 0;
+    } else if (outstanding <= 0) {
+        return [];
+    } else {
+        applied = Math.min(amount, outstanding);
+        newPaid = (entry.amountPaid ?? 0) + applied;
+        newRemaining = Math.max(0, entry.netPayable - newPaid);
+    }
+    const fullyPaid = newRemaining <= 0 && newPaid > 0;
     const wasFullyPaidBefore = entry.status === "Paid";
 
     await prisma.payrollEntry.update({
@@ -342,12 +417,12 @@ export async function applyPayrollPayment(
         data: {
             amountPaid: newPaid,
             remaining: newRemaining,
-            status: fullyPaid ? "Paid" : "Partial",
+            status: fullyPaid ? "Paid" : newPaid > 0 ? "Partial" : "Pending",
             paidDate: fullyPaid ? new Date() : entry.paidDate,
         },
     });
 
-    // Only decrement the loan ONCE — when the row first transitions to Paid
+    // Decrement loan only once when row first becomes fully Paid
     if (fullyPaid && !wasFullyPaidBefore && entry.employeeId && entry.loanInstallment > 0) {
         const loan = await prisma.employeeLoan.findFirst({
             where: { employeeId: entry.employeeId, remainingAmount: { gt: 0 } },
@@ -370,13 +445,18 @@ export async function applyCommissionPayment(
     employeeName: string,
     amount: number
 ): Promise<AppliedLink[]> {
-    const c = await prisma.commission.findFirst({
-        where: {
-            periodId,
-            employeeName: { contains: employeeName.split(" ")[0] || employeeName },
-            status: "Accrued",
-        },
+    if (!employeeName || amount <= 0) return [];
+
+    const candidates = await prisma.commission.findMany({
+        where: { periodId, status: "Accrued" },
     });
+    const c =
+        candidates.find((row) => nameMatch(row.employeeName, employeeName)) ??
+        candidates.find((row) => {
+            const a = row.employeeName.toLowerCase().trim().split(/\s+/);
+            const b = employeeName.toLowerCase().trim().split(/\s+/);
+            return a[a.length - 1] === b[b.length - 1] && a[a.length - 1].length > 2;
+        });
     if (!c) return [];
 
     const applied = Math.min(amount, c.commissionAmt);
@@ -407,9 +487,9 @@ export async function applyRefundPayment(
 /**
  * Post or update a ClientLedger row for a refund.
  * Called whenever a Refund is created or updated.
- * - Pending  → creates an "Open" ledger credit row
- * - Paid     → creates/updates the ledger row to "Paid"
- * - Deleted  → ledger row is removed (handled by caller)
+ * - Pending  â†’ creates an "Open" ledger credit row
+ * - Paid     â†’ creates/updates the ledger row to "Paid"
+ * - Deleted  â†’ ledger row is removed (handled by caller)
  */
 export async function syncRefundToClientLedger(refundId: string) {
     const refund = await prisma.refund.findUnique({ where: { id: refundId } });
@@ -426,7 +506,7 @@ export async function syncRefundToClientLedger(refundId: string) {
         client = await prisma.client.create({ data: { name: refund.clientName } });
     }
 
-    // One ledger row per refund — match by receiptRef marker
+    // One ledger row per refund â€” match by receiptRef marker
     const marker = `REFUND:${refund.id}`;
     const existing = await prisma.clientLedger.findFirst({
         where: { clientId: client.id, receiptRef: marker },
@@ -437,7 +517,7 @@ export async function syncRefundToClientLedger(refundId: string) {
         clientName: client.name,
         tourDate: refund.paidDate ?? new Date(),
         description: refund.reason
-            ? `Refund — ${refund.reason}`
+            ? `Refund â€” ${refund.reason}`
             : "Refund to client",
         category: "Refund",
         subCategory: refund.tripRef || null,
@@ -708,3 +788,4 @@ export async function applyToAdvances(
 
     return links;
 }
+

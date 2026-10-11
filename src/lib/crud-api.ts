@@ -224,7 +224,13 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     const loan = Number(d.loanInstallment) || 0;
     const other = Number(d.otherDeductions) || 0;
     const paid = Number(d.amountPaid) || 0;
-    d.netPayable = Math.max(0, basic + bonus - tax - loan - other);
+    // Keep client-supplied netPayable when present (includes commission from page).
+    // Only recompute from components when netPayable was omitted.
+    if (d.netPayable == null || d.netPayable === "") {
+      d.netPayable = Math.max(0, basic + bonus - tax - loan - other);
+    } else {
+      d.netPayable = Number(d.netPayable) || 0;
+    }
     d.remaining = Math.max(0, (d.netPayable as number) - paid);
     if ((d.remaining as number) === 0 && paid > 0) d.status = "Paid";
     else if (paid > 0) d.status = "Partial";
@@ -282,6 +288,47 @@ export function makeCrudHandlers(
     return NextResponse.json(rows);
   }
 
+  async function applyPettyCashBalance(
+    data: Record<string, unknown>,
+    periodId: string | null | undefined,
+    excludeId?: string
+  ) {
+    if (modelName !== "pettyCashTxn") return data;
+    const amountOut = Number(data.amountOut) || 0;
+    const amountIn = Number(data.amountIn) || 0;
+    // Latest prior balance in this period (exclude self on update)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = periodId ? { periodId } : {};
+    if (excludeId) where.id = { not: excludeId };
+    const prev = await prisma.pettyCashTxn.findFirst({
+      where,
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    });
+    const prevBal = prev?.balanceAfter ?? 0;
+    data.balanceAfter = prevBal + amountIn - amountOut;
+    return data;
+  }
+
+  async function applyOwnerRunningBalance(
+    data: Record<string, unknown>,
+    periodId: string | null | undefined,
+    excludeId?: string
+  ) {
+    if (modelName !== "ownerTxn") return data;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = periodId ? { periodId } : {};
+    if (excludeId) where.id = { not: excludeId };
+    const prev = await prisma.ownerTxn.findFirst({
+      where,
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    });
+    const prevBal = prev?.runningBalance ?? 0;
+    const amountIn = Number(data.amountIn) || 0;
+    const amountOut = Number(data.amountOut) || 0;
+    data.runningBalance = prevBal + amountIn - amountOut;
+    return data;
+  }
+
   async function POST(req: NextRequest) {
     const uid = await getSessionUserId();
     if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -289,13 +336,15 @@ export function makeCrudHandlers(
       const model = getModel(modelName);
       const body = await req.json();
       const cleaned = pickAllowed(modelName, body);
-      const data = enrich(modelName, cleaned);
+      let data = enrich(modelName, cleaned);
       delete data.id;
       delete data.team;
-      // ⬇️ NEW: strip periodId when this model isn't period-scoped
       if (!periodScoped) {
         delete data.periodId;
       }
+      const pid = (data.periodId as string) || body.periodId || null;
+      data = await applyPettyCashBalance(data, pid);
+      data = await applyOwnerRunningBalance(data, pid);
       const row = await model.create({ data });
       return NextResponse.json(row);
     } catch (e) {
@@ -312,13 +361,16 @@ export function makeCrudHandlers(
       const body = await req.json();
       if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
       const cleaned = pickAllowed(modelName, body);
-      const data = enrich(modelName, cleaned);
-      const id = data.id as string;
+      let data = enrich(modelName, cleaned);
+      const id = (data.id as string) || body.id;
       delete data.id;
       delete data.team;
       delete data.createdAt;
       delete data.updatedAt;
-      delete data.periodId;   // ← already stripped here, good
+      const pid = body.periodId || null;
+      delete data.periodId;
+      data = await applyPettyCashBalance(data, pid, id);
+      data = await applyOwnerRunningBalance(data, pid, id);
       const row = await model.update({ where: { id }, data });
       return NextResponse.json(row);
     } catch (e) {
@@ -352,3 +404,4 @@ export function makeCrudHandlers(
 
   return { GET, POST, PUT, DELETE };
 }
+
