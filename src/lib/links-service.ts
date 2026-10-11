@@ -22,30 +22,37 @@ export async function syncPayrollForEmployee(
     const emp = await prisma.employee.findFirst({ where: { name: employeeName } });
     if (!emp) return;
 
+    // Only Sales role employees earn commission
+    const isSales = emp.role === "Sales";
+
     const isLead =
-        employeeName.toLowerCase().includes("ahmad") ||
-        employeeName.toLowerCase().includes("amad") ||
-        employeeName.toLowerCase().includes("ammar");
+        isSales &&
+        (employeeName.toLowerCase().includes("ahmad") ||
+            employeeName.toLowerCase().includes("amad") ||
+            employeeName.toLowerCase().includes("ammar"));
 
     // Get or create the payroll row for this period
     let pay = await prisma.payrollEntry.findFirst({
         where: { periodId, employeeName },
     });
 
-    // Pull the current commission (if any)
-    const commission = await prisma.commission.findFirst({
-        where: { periodId, employeeName },
-    });
-    const commissionAmt = commission?.commissionAmt ?? 0;
+    // Commission only for Sales team
+    let commissionAmt = 0;
+    if (isSales) {
+        const commission = await prisma.commission.findFirst({
+            where: { periodId, employeeName },
+        });
+        commissionAmt = commission?.commissionAmt ?? 0;
+    }
 
     // Determine basic
-    const basic = isLead ? 0 : emp.basicSalary || (emp.role === "Sales" ? 40000 : 0);
+    const basic = isLead ? 0 : emp.basicSalary || (isSales ? 40000 : 0);
 
     // Tax / other deductions - preserve whatever the user set
     const tax = pay?.taxDeducted ?? 0;
     const other = pay?.otherDeductions ?? 0;
 
-    // Loan installment: use the employee loan's monthly installment if present
+    // Loan installment
     const loan = await prisma.employeeLoan.findFirst({
         where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
     });
@@ -79,13 +86,16 @@ export async function syncPayrollForEmployee(
                 amountPaid: 0,
                 remaining: netPayable,
                 status: "Pending",
-                notes: isLead
-                    ? "Team Lead - 2.5% of team sales"
-                    : "Sales - 40k + 2.5% of own sales",
+                notes: isSales
+                    ? isLead
+                        ? "Team Lead - 2.5% of team sales"
+                        : "Sales - 40k + 2.5% of own sales"
+                    : `${emp.role} - no commission`,
             },
         });
     }
 }
+
 /** Ensure a Payable exists for a HotelBooking. Returns payable id. */
 export async function ensurePayableForHotel(hotelId: string): Promise<string | null> {
     const hotel = await prisma.hotelBooking.findUnique({ where: { id: hotelId } });

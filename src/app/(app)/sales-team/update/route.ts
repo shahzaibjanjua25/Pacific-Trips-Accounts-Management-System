@@ -31,6 +31,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
 
+    // Only Sales role gets commission
+    if (emp.role !== "Sales") {
+      return NextResponse.json(
+        { error: "Commission only applies to Sales team members" },
+        { status: 400 }
+      );
+    }
+
     const isLead =
       employeeName.toLowerCase().includes("amad") ||
       employeeName.toLowerCase().includes("ammar");
