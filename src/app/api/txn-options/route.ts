@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const periodId = req.nextUrl.searchParams.get("periodId");
 
   try {
-    // Hotel payments â€” return ALL hotels (paid + unpaid)
+    // Hotel payments - return ALL hotels (paid + unpaid)
     if (category.includes("hotel")) {
       const rows = await prisma.payable.findMany({
         where: {
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
           entityType: "payable",
         });
       }
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
         id: p.id,
         entityType: "payable",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
         orderBy: [{ remaining: "desc" }, { supplierName: "asc" }],
       });
       const options: Option[] = rows.map((p) => ({
-        label: `${p.supplierName} â€” ${p.category || "Other"} ${
+        label: `${p.supplierName} - ${p.category || "Other"} ${
           p.remaining > 0 ? `(owing ${p.remaining.toLocaleString()})` : "(fully paid)"
         }`,
         value: p.supplierName,
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
         id: p.id,
         entityType: "payable",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -93,13 +93,13 @@ export async function GET(req: NextRequest) {
         orderBy: { createdAt: "desc" },
       });
       const options: Option[] = rows.map((t) => ({
-        label: `${t.airline || "Airline"} â€” ${t.clientName || "â€”"}`,
+        label: `${t.airline || "Airline"} - ${t.clientName || "-"}`,
         value: t.airline || t.clientName || "Ticketing",
         remaining: 0,
         id: t.id,
         entityType: "ticketing",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -137,7 +137,7 @@ export async function GET(req: NextRequest) {
           });
         }
       }
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -187,13 +187,13 @@ export async function GET(req: NextRequest) {
         orderBy: { employeeName: "asc" },
       });
       const options: Option[] = commissions.map((c) => ({
-        label: `${c.employeeName} â€” commission ${c.commissionAmt.toLocaleString()}`,
+        label: `${c.employeeName} - commission ${c.commissionAmt.toLocaleString()}`,
         value: c.employeeName,
         remaining: c.commissionAmt,
         id: c.id,
         entityType: "commission",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -205,13 +205,13 @@ export async function GET(req: NextRequest) {
         },
       });
       const options: Option[] = refunds.map((r) => ({
-        label: `${r.clientName} â€” refund ${r.amount.toLocaleString()}`,
+        label: `${r.clientName} - refund ${r.amount.toLocaleString()}`,
         value: r.clientName,
         remaining: r.amount,
         id: r.id,
         entityType: "refund",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -227,11 +227,11 @@ export async function GET(req: NextRequest) {
         id: e.id,
         entityType: "employee",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
-    return NextResponse.json([{ label: "Otherâ€¦", value: "__other__", remaining: 0 }]);
+    return NextResponse.json([{ label: "Other...", value: "__other__", remaining: 0 }]);
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
