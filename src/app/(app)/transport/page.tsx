@@ -11,7 +11,7 @@ const fields: FieldDef[] = [
   { key: "agreedCost", label: "Agreed Cost", type: "number", money: true },
   { key: "fuelCost", label: "Fuel Cost (our cost)", type: "number", money: true },
   { key: "finalSettlement", label: "Amount Paid", type: "number", money: true },
-  { key: "remaining", label: "Remaining", type: "number", money: true, showInTable: false },
+  { key: "remaining", label: "Remaining", type: "number", money: true, readOnly: true },
   { key: "status", label: "Status", type: "select", options: ["Pending", "Partial", "Settled", "Cancelled"] },
   { key: "notes", label: "Notes", type: "textarea", showInTable: false },
 ];
@@ -59,7 +59,7 @@ export default async function Page({
         <div>
           <h1 className="text-2xl font-bold">Transport</h1>
           <p className="text-sm text-slate-500">
-            Operational view — money owed tracked on linked Payable.
+            Operational view â€” money owed tracked on linked Payable.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
@@ -76,3 +76,4 @@ export default async function Page({
     </div>
   );
 }
+

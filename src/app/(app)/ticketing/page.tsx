@@ -9,7 +9,7 @@ const fields: FieldDef[] = [
   { key: "tripRef", label: "Trip / Booking Ref" },
   { key: "ticketCost", label: "Ticket Cost (paid)", type: "number" as const, required: true, money: true },
   { key: "chargedToClient", label: "Charged to Clients", type: "number" as const, money: true },
-  { key: "profit", label: "Ticketing Profit", type: "number" as const, money: true },
+  { key: "profit", label: "Ticketing Profit", type: "number" as const, money: true, readOnly: true },
   { key: "status", label: "Status", type: "select" as const, options: ["Booked", "Issued", "Cancelled"] },
   { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
@@ -40,7 +40,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Ticketing</h1>
-          <p className="text-sm text-slate-500">Airline tickets — cost paid, charged to client, profit</p>
+          <p className="text-sm text-slate-500">Airline tickets â€” cost paid, charged to client, profit</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
@@ -55,3 +55,5 @@ export default async function Page({
     </div>
   );
 }
+
+

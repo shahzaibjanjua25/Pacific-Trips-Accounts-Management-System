@@ -10,9 +10,9 @@ const fields: FieldDef[] = [
   { key: "invoiceRef", label: "Invoice / Doc Ref" },
   { key: "originalAmount", label: "Original Amount", type: "number", required: true, money: true },
   { key: "amountPaid", label: "Amount Paid", type: "number", money: true },
-  { key: "remaining", label: "Remaining", type: "number", money: true },
+  { key: "remaining", label: "Remaining", type: "number", money: true, readOnly: true },
   { key: "dueDate", label: "Due Date", type: "date" },
-  { key: "daysOverdue", label: "Days Overdue", type: "number" },
+  { key: "daysOverdue", label: "Days Overdue", type: "number", readOnly: true },
   { key: "relatedTrip", label: "Trip / Booking Ref" },
   { key: "status", label: "Status", type: "select", options: ["Open", "Partial", "Paid", "Overdue"] },
   { key: "notes", label: "Notes", type: "textarea", showInTable: false },
@@ -62,3 +62,4 @@ export default async function Page({
     </div>
   );
 }
+

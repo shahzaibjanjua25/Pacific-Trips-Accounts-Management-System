@@ -11,7 +11,7 @@ const fields: FieldDef[] = [
   { key: "amountIn", label: "Amount In", type: "number" as const, money: true },
   { key: "purpose", label: "Purpose" },
   { key: "receiptRef", label: "Receipt / Doc" },
-  { key: "balanceAfter", label: "Balance After", type: "number" as const, money: true },
+  { key: "balanceAfter", label: "Balance After (auto)", type: "number" as const, money: true, readOnly: true },
   { key: "approvedBy", label: "Approved By" },
   { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
 ];
@@ -57,3 +57,5 @@ export default async function Page({
     </div>
   );
 }
+
+

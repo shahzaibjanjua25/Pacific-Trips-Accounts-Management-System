@@ -11,7 +11,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const force = !!body.force;
-
     const result = await runSeed(force);
     if (!result.ok) {
       return NextResponse.json(result, { status: 409 });

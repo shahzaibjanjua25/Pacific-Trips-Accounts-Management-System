@@ -43,7 +43,7 @@ export type TxnInput = {
   clientAmountPaid?: number;
 };
 
-/* ── BANK (normalized) ── */
+/* â”€â”€ BANK (normalized) â”€â”€ */
 async function adjustBank(accountName: string | null | undefined, delta: number) {
   if (!accountName || delta === 0) {
     console.log("[adjustBank] skipped", { accountName, delta });
@@ -72,7 +72,7 @@ async function adjustBank(accountName: string | null | undefined, delta: number)
 }
 const cashDelta = (debit: number, credit: number) => debit - credit;
 
-/* ── LINK RESOLUTION ── */
+/* â”€â”€ LINK RESOLUTION â”€â”€ */
 async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const cat = (input.category || "").toLowerCase();
   const party = input.party || input.subCategory || "";
@@ -188,7 +188,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   return [];
 }
 
-/* ── POST ── */
+/* â”€â”€ POST â”€â”€ */
 export async function postTransaction(input: TxnInput) {
   const txn = await prisma.transaction.create({
     data: {
@@ -378,7 +378,7 @@ export async function postTransaction(input: TxnInput) {
   return txn;
 }
 
-/* ── DELETE ── */
+/* â”€â”€ DELETE â”€â”€ */
 export async function deleteTransaction(id: string) {
   const txn = await prisma.transaction.findUnique({ where: { id } });
   if (!txn) return null;
@@ -414,6 +414,9 @@ async function reverseLink(link: {
         status: newRem <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Open",
       },
     });
+    // Keep Hotel / Transport operational status in sync when payment is reversed
+    const { propagatePayableToOperational } = await import("./links-service");
+    await propagatePayableToOperational(p.id);
   }
 
   if (link.entityType === "receivable") {
@@ -434,17 +437,33 @@ async function reverseLink(link: {
   if (link.entityType === "payroll") {
     const p = await prisma.payrollEntry.findUnique({ where: { id: link.entityId } });
     if (!p) return;
+    const wasFullyPaid = p.status === "Paid";
     const newPaid = Math.max(0, (p.amountPaid ?? 0) - amt);
     const newRemaining = Math.max(0, p.netPayable - newPaid);
+    const nowFullyPaid = newRemaining <= 0 && newPaid > 0;
     await prisma.payrollEntry.update({
       where: { id: p.id },
       data: {
         amountPaid: newPaid,
         remaining: newRemaining,
-        status: newRemaining <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Pending",
-        paidDate: newRemaining <= 0 ? p.paidDate : null,
+        status: nowFullyPaid ? "Paid" : newPaid > 0 ? "Partial" : "Pending",
+        paidDate: nowFullyPaid ? p.paidDate : null,
       },
     });
+    // If we undid a full payment, restore the loan installment that was deducted
+    if (wasFullyPaid && !nowFullyPaid && p.employeeId && p.loanInstallment > 0) {
+      const loan = await prisma.employeeLoan.findFirst({
+        where: { employeeId: p.employeeId },
+      });
+      if (loan) {
+        await prisma.employeeLoan.update({
+          where: { id: loan.id },
+          data: {
+            remainingAmount: loan.remainingAmount + p.loanInstallment,
+          },
+        });
+      }
+    }
   }
 
   if (link.entityType === "commission") {
@@ -462,7 +481,7 @@ async function reverseLink(link: {
   }
 }
 
-/* ── UPDATE ── */
+/* â”€â”€ UPDATE â”€â”€ */
 export async function updateTransaction(id: string, input: Partial<TxnInput>) {
   const old = await prisma.transaction.findUnique({ where: { id } });
   if (!old) return null;
@@ -521,3 +540,4 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
 
   return updated;
 }
+

@@ -14,10 +14,10 @@ const fields: FieldDef[] = [
   { key: "transportCost", label: "Transport & Drivers", type: "number" as const, money: true },
   { key: "ticketingCost", label: "Ticketing / Airline", type: "number" as const, money: true },
   { key: "otherDirectCost", label: "Other Direct Costs", type: "number" as const, money: true },
-  { key: "totalDirectCost", label: "Total Direct Cost", type: "number" as const, money: true },
-  { key: "grossProfit", label: "Gross Profit", type: "number" as const, money: true },
+  { key: "totalDirectCost", label: "Total Direct Cost", type: "number" as const, money: true, readOnly: true },
+  { key: "grossProfit", label: "Gross Profit", type: "number" as const, money: true, readOnly: true },
   { key: "overheadAlloc", label: "Overhead Alloc", type: "number" as const, money: true },
-  { key: "netProfit", label: "Net Profit", type: "number" as const, money: true },
+  { key: "netProfit", label: "Net Profit", type: "number" as const, money: true, readOnly: true },
   { key: "salesperson", label: "Salesperson" },
   { key: "status", label: "Status", type: "select" as const, options: ["Planned", "Ongoing", "Completed", "Cancelled"] },
   { key: "notes", label: "Notes", type: "textarea" as const, showInTable: false },
@@ -49,7 +49,7 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Trip PnL</h1>
-          <p className="text-sm text-slate-500">One row per trip — all direct costs → Gross & Net Profit auto-calculate</p>
+          <p className="text-sm text-slate-500">One row per trip â€” all direct costs â†’ Gross & Net Profit auto-calculate</p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
@@ -64,3 +64,5 @@ export default async function Page({
     </div>
   );
 }
+
+

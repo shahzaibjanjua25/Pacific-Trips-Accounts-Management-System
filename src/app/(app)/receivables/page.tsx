@@ -10,11 +10,11 @@ const fields: FieldDef[] = [
   { key: "tripDates", label: "Trip Dates" },
   { key: "destination", label: "Destination" },
   { key: "totalPackage", label: "Total Package", type: "number", required: true, money: true },
-  { key: "amountToReceive", label: "Amount to Receive", type: "number", money: true },
+  { key: "amountToReceive", label: "Amount to Receive", type: "number", money: true, readOnly: true },
   { key: "amountReceived", label: "Amount Received", type: "number", money: true },
-  { key: "remainingAmount", label: "Remaining", type: "number", money: true },
+  { key: "remainingAmount", label: "Remaining", type: "number", money: true, readOnly: true },
   { key: "dueDate", label: "Due Date", type: "date" },
-  { key: "daysOverdue", label: "Days Overdue", type: "number" },
+  { key: "daysOverdue", label: "Days Overdue", type: "number", readOnly: true },
   { key: "tripStart", label: "Trip Start", type: "date" },
   { key: "salesperson", label: "Salesperson" },
   { key: "discounts", label: "Discounts", type: "number", money: true },
@@ -51,7 +51,7 @@ export default async function Page({
         <div>
           <h1 className="text-2xl font-bold">Client Receivables</h1>
           <p className="text-sm text-slate-500">
-            Track every client: Total Sale → Received → Outstanding → Settlement
+            Track every client: Total Sale â†’ Received â†’ Outstanding â†’ Settlement
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
@@ -68,3 +68,4 @@ export default async function Page({
     </div>
   );
 }
+
