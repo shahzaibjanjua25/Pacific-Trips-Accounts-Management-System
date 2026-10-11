@@ -214,7 +214,7 @@ export function TransactionManager({
               : "bg-amber-100 text-amber-800"
               }`}
           >
-            Balance (Dâˆ’C): <strong>{formatPKR(totalDebit - totalCredit)}</strong>
+            Balance (D−C): <strong>{formatPKR(totalDebit - totalCredit)}</strong>
           </span>
         </div>
         <button
