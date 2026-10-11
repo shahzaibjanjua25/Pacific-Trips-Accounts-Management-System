@@ -9,6 +9,13 @@ async function recompute(periodId: string, employeeName: string) {
   const emp = await prisma.employee.findFirst({ where: { name: employeeName } });
   if (!emp) return;
 
+  // Non-Sales employees never earn commission
+  if (emp.role !== "Sales") {
+    // Still sync payroll so basic/deductions are correct
+    await syncPayrollForEmployee(periodId, employeeName);
+    return;
+  }
+
   const isLead =
     employeeName.toLowerCase().includes("amad") ||
     employeeName.toLowerCase().includes("ammar");
@@ -37,8 +44,6 @@ async function recompute(periodId: string, employeeName: string) {
 
   const saleBase = isLead ? teamTotal : individualTotal;
   const commission = saleBase * RATE;
-  // src/app/api/sales-team/entry/route.ts
-  // ADD this PUT handler (keep existing POST and DELETE)
 
   // Upsert commission record
   const existingComm = await prisma.commission.findFirst({
@@ -67,11 +72,10 @@ async function recompute(periodId: string, employeeName: string) {
     });
   }
 
-  // ---- THE KEY FIX: sync the payroll row ----
-  if (emp.role === "Sales") {
-    await syncPayrollForEmployee(periodId, employeeName);
-  }
+  // Sync the payroll row
+  await syncPayrollForEmployee(periodId, employeeName);
 }
+
 export async function PUT(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

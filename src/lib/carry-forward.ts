@@ -239,19 +239,31 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
   }
 
   // --- Payroll ---
+  // --- Payroll ---
   try {
     const prevPayroll = await tx.payrollEntry.findMany({
       where: { periodId: fromPeriodId },
     });
     for (const p of prevPayroll) {
+      const emp = p.employeeId
+        ? await tx.employee.findUnique({ where: { id: p.employeeId } })
+        : null;
+      const isSales = emp?.role === "Sales";
+
       const installment = installmentFor(p.employeeName, p.loanInstallment);
       const basic = p.basicSalary;
       const tax = p.taxDeducted;
       const other = p.otherDeductions;
-      const commissionAmt = await tx.commission.findFirst({
-        where: { periodId: fromPeriodId, employeeName: p.employeeName },
-      });
-      const comm = commissionAmt?.commissionAmt ?? 0;
+
+      // Commission only for Sales staff
+      let comm = 0;
+      if (isSales) {
+        const commissionRow = await tx.commission.findFirst({
+          where: { periodId: fromPeriodId, employeeName: p.employeeName },
+        });
+        comm = commissionRow?.commissionAmt ?? 0;
+      }
+
       const net = Math.max(0, basic + comm - tax - installment - other);
 
       if (p.status === "Paid" && (p.remaining ?? 0) <= 0 && p.employeeId && installment > 0) {

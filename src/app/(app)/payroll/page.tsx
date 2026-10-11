@@ -143,10 +143,14 @@ export default async function Page({
     }
   }
 
-  // Commission lookup
+  // Commission lookup - ONLY for Sales role
   const commissionByEmp: Record<string, number> = {};
   for (const c of commissions) {
-    commissionByEmp[c.employeeName] = (commissionByEmp[c.employeeName] || 0) + c.commissionAmt;
+    const empRole = roleByName[c.employeeName];
+    if (empRole === "Sales") {
+      commissionByEmp[c.employeeName] =
+        (commissionByEmp[c.employeeName] || 0) + c.commissionAmt;
+    }
   }
 
   const enriched = rows.map((r) => ({
