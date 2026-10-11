@@ -2,13 +2,20 @@
  * Full cascade: transactions update related modules AND record
  * TransactionLink rows so payment history is permanently traceable.
  *
- * CLIENT RULES:
- *   DEBIT  = money IN from client  → increases amountReceived (reduces remaining)
- *   CREDIT = money OUT to client   → reduces amountReceived (increases remaining)
+ * SIGN CONVENTIONS
  *
- * HOTEL RULE:
- *   Category "Hotel Payment": user may supply `hotelAgreedCost`, which sets the
- *   Payable.originalAmount. Debit = amount paid now.
+ *   CLIENT receipt / revenue  (money from client to us):
+ *     DEBIT  = money IN  → increases Receivable.amountReceived
+ *     CREDIT = money OUT → reduces  Receivable.amountReceived
+ *
+ *   OUTBOUND categories (Hotel / Transport / Supplier / Salary / Commission /
+ *   Ticketing / Advance / Refund) — money between us and a supplier/employee:
+ *     DEBIT  = money we received back from them → reduces  Payable.amountPaid
+ *     CREDIT = money we paid them              → increases Payable.amountPaid
+ *
+ *   The signed amount passed to payable helpers is:
+ *       signedPayAmount = credit − debit
+ *   (positive = we paid, negative = they refunded us)
  */
 import { prisma } from "./prisma";
 import {
@@ -49,31 +56,25 @@ export type TxnInput = {
   relatedAdvanceId?: string | null;
   clientTotalPackage?: number;
   clientAmountPaid?: number;
-  hotelAgreedCost?: number;      // ← NEW
+  hotelAgreedCost?: number;
 };
 
-/* ────── BANK (normalized) ────── */
+/* ────── BANK ────── */
 async function adjustBank(accountName: string | null | undefined, delta: number) {
-  if (!accountName || delta === 0) {
-    console.log("[adjustBank] skipped", { accountName, delta });
-    return;
-  }
+  if (!accountName || delta === 0) return;
   const trimmed = accountName.trim();
   const normalized = trimmed.toLowerCase();
   const all = await prisma.bankBalance.findMany();
-  console.log("[adjustBank] looking for", normalized, "in", all.map(b => b.accountName));
 
   const existing = all.find(
     (b) => b.accountName.trim().toLowerCase() === normalized
   );
   if (existing) {
-    console.log("[adjustBank] updating", existing.accountName, existing.balance, "+", delta);
     await prisma.bankBalance.update({
       where: { id: existing.id },
       data: { balance: existing.balance + delta },
     });
   } else {
-    console.log("[adjustBank] creating new account", trimmed, delta);
     await prisma.bankBalance.create({
       data: { accountName: trimmed, balance: Math.max(0, delta) },
     });
@@ -87,10 +88,10 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const party = input.party || input.subCategory || "";
   const periodId = input.periodId;
 
-  // Explicit payable link wins
+  // Explicit payable link
   if (input.relatedPayableId) {
-    const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
-    return applyPaymentToPayables(periodId, party, amount).then((links) => {
+    const signedPayAmount = (input.credit || 0) - (input.debit || 0);
+    return applyPaymentToPayables(periodId, party, signedPayAmount).then((links) => {
       if (!links.find((l) => l.entityId === input.relatedPayableId)) {
         links.unshift({
           entityType: "payable",
@@ -102,7 +103,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-  // CLIENT RECEIPT / REVENUE
+  // CLIENT receipt / revenue — DEBIT counts as money IN
   if (
     cat.includes("receipt") ||
     cat.includes("client receipt") ||
@@ -113,51 +114,51 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     return applyReceiptToReceivables(periodId, party, debitAmount);
   }
 
-  // All other categories: whichever side has the amount
-  const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
+  // OUTBOUND categories: credit = paid (positive), debit = received back (negative)
+  const signedPayAmount = (input.credit || 0) - (input.debit || 0);
 
   if (cat.includes("hotel")) {
-    return applyHotelPayment(periodId, party, amount, {
+    return applyHotelPayment(periodId, party, signedPayAmount, {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
-      agreedCost: input.hotelAgreedCost,   // ← NEW
+      agreedCost: input.hotelAgreedCost,
     });
   }
 
   if (cat.includes("transport") || cat.includes("driver")) {
-    return applyTransportPayment(periodId, party, amount, {
+    return applyTransportPayment(periodId, party, signedPayAmount, {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
     });
   }
 
   if (cat.includes("ticketing")) {
-    return applyGenericPayablePayment(periodId, party, "Ticketing", amount, {
+    return applyGenericPayablePayment(periodId, party, "Ticketing", signedPayAmount, {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
     });
   }
 
   if (cat.includes("supplier") || cat.includes("payable")) {
-    return applyGenericPayablePayment(periodId, party, "Other", amount, {
+    return applyGenericPayablePayment(periodId, party, "Other", signedPayAmount, {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
     });
   }
 
   if (cat.includes("salary") || cat.includes("payroll")) {
-    return applyPayrollPayment(periodId, party, amount);
+    return applyPayrollPayment(periodId, party, signedPayAmount);
   }
 
   if (cat.includes("commission")) {
-    return applyCommissionPayment(periodId, party, amount);
+    return applyCommissionPayment(periodId, party, signedPayAmount);
   }
 
   if (cat.includes("refund")) {
-    const links = await applyRefundPayment(periodId, party, amount);
+    const links = await applyRefundPayment(periodId, party, signedPayAmount);
     if (links.length > 0) return links;
 
-    if (input.credit > 0 && party) {
+    if (signedPayAmount > 0 && party) {
       const client = await prisma.client.findFirst({ where: { name: party } });
       const recv = await prisma.receivable.findFirst({
         where: { periodId, clientName: party, amountReceived: { gt: 0 } },
@@ -168,7 +169,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
             periodId,
             clientId: client?.id ?? null,
             clientName: party,
-            amount,
+            amount: signedPayAmount,
             reason: input.description || "Refund issued",
             status: "Paid",
             paidDate: new Date(input.date),
@@ -178,7 +179,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
         });
         await syncRefundToClientLedger(refund.id);
         return [
-          { entityType: "refund", entityId: refund.id, appliedAmount: amount },
+          { entityType: "refund", entityId: refund.id, appliedAmount: signedPayAmount },
         ];
       }
     }
@@ -186,19 +187,19 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   }
 
   if (cat.includes("advance") && !cat.includes("employee")) {
-    if (input.credit > 0 && party) {
+    if (signedPayAmount > 0 && party) {
       const adv = await prisma.supplierAdvance.create({
         data: {
           periodId,
           supplierName: party,
-          amount,
+          amount: signedPayAmount,
           adjustedAmount: 0,
-          remaining: amount,
+          remaining: signedPayAmount,
           dateGiven: new Date(input.date),
           notes: input.description,
         },
       });
-      return [{ entityType: "advance", entityId: adv.id, appliedAmount: amount }];
+      return [{ entityType: "advance", entityId: adv.id, appliedAmount: signedPayAmount }];
     }
   }
 
@@ -349,12 +350,8 @@ export async function postTransaction(input: TxnInput) {
       const alreadyLinked = (linked._sum.appliedAmount ?? 0) > 0;
 
       let newReceived = recv.amountReceived;
-      if (paidNow > 0 && !alreadyLinked) {
-        newReceived += paidNow;
-      }
-      if (creditedNow > 0) {
-        newReceived -= creditedNow;
-      }
+      if (paidNow > 0 && !alreadyLinked) newReceived += paidNow;
+      if (creditedNow > 0) newReceived -= creditedNow;
 
       newReceived = Math.max(0, Math.min(newTotal, newReceived));
       const newRemaining = Math.max(0, newTotal - newReceived);
@@ -498,7 +495,8 @@ async function reverseLink(link: {
   if (link.entityType === "payable") {
     const p = await prisma.payable.findUnique({ where: { id: link.entityId } });
     if (!p) return;
-    const newPaid = Math.max(0, p.amountPaid - amt);
+    // amt is signed: reversing (+100) subtracts 100; reversing (−50) adds 50
+    const newPaid = Math.max(0, Math.min(p.originalAmount, p.amountPaid - amt));
     const newRem = Math.max(0, p.originalAmount - newPaid);
     await prisma.payable.update({
       where: { id: p.id },
@@ -543,17 +541,29 @@ async function reverseLink(link: {
         paidDate: nowFullyPaid ? p.paidDate : null,
       },
     });
-    if (wasFullyPaid && !nowFullyPaid && p.employeeId && p.loanInstallment > 0) {
-      const loan = await prisma.employeeLoan.findFirst({
-        where: { employeeId: p.employeeId },
-      });
-      if (loan) {
-        await prisma.employeeLoan.update({
-          where: { id: loan.id },
-          data: {
-            remainingAmount: loan.remainingAmount + p.loanInstallment,
-          },
+    if (p.employeeId && p.loanInstallment > 0) {
+      if (wasFullyPaid && !nowFullyPaid) {
+        const loan = await prisma.employeeLoan.findFirst({
+          where: { employeeId: p.employeeId },
         });
+        if (loan) {
+          await prisma.employeeLoan.update({
+            where: { id: loan.id },
+            data: { remainingAmount: loan.remainingAmount + p.loanInstallment },
+          });
+        }
+      } else if (!wasFullyPaid && nowFullyPaid) {
+        const loan = await prisma.employeeLoan.findFirst({
+          where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
+        });
+        if (loan) {
+          await prisma.employeeLoan.update({
+            where: { id: loan.id },
+            data: {
+              remainingAmount: Math.max(0, loan.remainingAmount - p.loanInstallment),
+            },
+          });
+        }
       }
     }
   }
@@ -624,7 +634,7 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
     tripRef: updated.tripRef,
     debit: updated.debit,
     credit: updated.credit,
-    hotelAgreedCost: input.hotelAgreedCost,   // ← NEW
+    hotelAgreedCost: input.hotelAgreedCost,
   });
 
   for (const link of newLinks) {
@@ -639,7 +649,6 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
     });
   }
 
-  // Re-run the client-side ledger / receivable block for updates too
   const cat = (updated.category || "").toLowerCase();
   const isClientSide =
     cat.includes("receipt") ||
@@ -654,7 +663,7 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
       const paidNow = updated.debit > 0 ? updated.debit : 0;
       const creditedNow = updated.credit > 0 ? Math.abs(updated.credit) : 0;
 
-      let recv = await prisma.receivable.findFirst({
+      const recv = await prisma.receivable.findFirst({
         where: {
           periodId: updated.periodId,
           OR: [{ clientId: client.id }, { clientName: client.name }],

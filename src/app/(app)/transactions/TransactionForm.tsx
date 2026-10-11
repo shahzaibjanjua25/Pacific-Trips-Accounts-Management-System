@@ -54,15 +54,14 @@ const empty = {
   debit: "",
   credit: "",
   paymentMethod: "Bank",
-  bankAccount: "Faysal Bank",  // was "Faysal / Meezan"
-
+  bankAccount: "Faysal Bank",
   status: "Completed",
   enteredBy: "",
   notes: "",
   otherName: "",
   clientTotalPackage: "",
   clientAmountPaid: "",
-  hotelAgreedCost: "",           // ← NEW
+  hotelAgreedCost: "",
 };
 
 export function TransactionManager({
@@ -82,7 +81,7 @@ export function TransactionManager({
 
   const isClientCategory =
     form.category === "Client Receipt" || form.category === "Revenue";
-  const isHotelCategory = form.category === "Hotel Payment";   // ← NEW
+  const isHotelCategory = form.category === "Hotel Payment";
 
   useEffect(() => {
     if (!open) return;
@@ -162,14 +161,14 @@ export function TransactionManager({
       debit: String(t.debit || 0),
       credit: String(t.credit || 0),
       paymentMethod: t.paymentMethod || "Bank",
-      bankAccount: t.bankAccount || "Faysal Bank",  // was "Faysal / Meezan"
+      bankAccount: t.bankAccount || "Faysal Bank",
       status: t.status || "Completed",
       enteredBy: t.enteredBy || "",
       notes: t.notes || "",
       otherName: "",
       clientTotalPackage: "",
       clientAmountPaid: "",
-      hotelAgreedCost: "",   // ← NEW (prefilled by effect above)
+      hotelAgreedCost: "",
     });
     setShowOther(false);
     setOpen(true);
@@ -206,7 +205,7 @@ export function TransactionManager({
         credit: parseFloat(form.credit) || 0,
         clientTotalPackage: parseFloat(form.clientTotalPackage) || 0,
         clientAmountPaid: parseFloat(form.clientAmountPaid) || 0,
-        hotelAgreedCost: parseFloat(form.hotelAgreedCost) || 0,   // ← NEW
+        hotelAgreedCost: parseFloat(form.hotelAgreedCost) || 0,
       };
       const res = await fetch("/api/transactions", {
         method: editing ? "PUT" : "POST",
@@ -345,18 +344,38 @@ export function TransactionManager({
               value={form.tripRef}
               onChange={(v) => setForm({ ...form, tripRef: v })}
             />
-            <Field
-              label="Debit - money IN (PKR)"
-              type="number"
-              value={form.debit}
-              onChange={(v) => setForm({ ...form, debit: v })}
-            />
-            <Field
-              label="Credit - money OUT (PKR)"
-              type="number"
-              value={form.credit}
-              onChange={(v) => setForm({ ...form, credit: v })}
-            />
+
+            {isClientCategory ? (
+              <>
+                <Field
+                  label="Debit — money received from client (PKR)"
+                  type="number"
+                  value={form.debit}
+                  onChange={(v) => setForm({ ...form, debit: v })}
+                />
+                <Field
+                  label="Credit — money returned to client (PKR)"
+                  type="number"
+                  value={form.credit}
+                  onChange={(v) => setForm({ ...form, credit: v })}
+                />
+              </>
+            ) : (
+              <>
+                <Field
+                  label="Debit — received back from supplier (PKR)"
+                  type="number"
+                  value={form.debit}
+                  onChange={(v) => setForm({ ...form, debit: v })}
+                />
+                <Field
+                  label="Credit — paid out to supplier (PKR)"
+                  type="number"
+                  value={form.credit}
+                  onChange={(v) => setForm({ ...form, credit: v })}
+                />
+              </>
+            )}
 
             {isClientCategory && (
               <>
@@ -382,9 +401,10 @@ export function TransactionManager({
                   onChange={(v) => setForm({ ...form, hotelAgreedCost: v })}
                 />
                 <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
-                  Total agreed amount with the hotel. Debit = amount paid now.
-                  Enter the full booking cost here so the hotel&apos;s remaining
-                  payable is calculated correctly.
+                  Total agreed amount with the hotel. <strong>Credit = amount you paid</strong> the
+                  hotel (adds to Amount Paid). <strong>Debit = amount the hotel returned</strong>
+                  &nbsp;to you (subtracts from Amount Paid). Enter the full booking cost here so the
+                  remaining payable is calculated correctly.
                 </p>
               </>
             )}
