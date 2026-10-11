@@ -1,32 +1,31 @@
 /**
  * Sales team payroll rules (Pacific Trips policy):
  * - Each sales member: Basic 40,000 PKR + 2.5% commission on THEIR individual sales
- * - Team Lead "Ahmad Amjad" (also matched as Amad/Ammar):
- *     team sales < 700,000        → fixed salary 55,000
- *     700,000 ≤ sales < 12,000,000 → 1% of team sales
- *     sales ≥ 12,000,000 (target)  → 2.5% of team sales
- *   Target this month: 1 crore 20 lacs (12,000,000 PKR)
+ * - Team Lead "Amad/Ahmad/Ammar Amjad":
+ *     team sales < 70 lacs              → fixed salary 55,000
+ *     70 lacs ≤ sales < monthly target  → 1% of team sales
+ *     sales ≥ monthly target            → 2.5% of team sales
+ *   Target is stored per period in the SalesTarget table.
  */
 
 import { prisma } from "./prisma";
 import { syncPayrollForEmployee } from "./links-service";
 
 const COMMISSION_RATE = 0.025;
-const LEAD_TARGET = 12_000_000; // 1 crore 20 lacs
-const LEAD_FLOOR = 700_000;
+const LEAD_FLOOR = 7_000_000;       // 70 lacs
 const LEAD_MIN_SALARY = 55_000;
+const DEFAULT_LEAD_TARGET = 12_000_000;  // 1.2 crore fallback
 
 export function isTeamLeadName(name: string): boolean {
   const n = name.toLowerCase();
-  return (
-    n.includes("ahmad") ||
-    n.includes("amad") ||
-    n.includes("ammar")
-  );
+  return n.includes("ahmad") || n.includes("amad") || n.includes("ammar");
 }
 
 /** Team-lead pay from total non-lead sales team revenue */
-export function computeLeadPay(teamTotal: number): {
+export function computeLeadPay(
+  teamTotal: number,
+  target: number = DEFAULT_LEAD_TARGET
+): {
   amount: number;
   ratePct: number;
   note: string;
@@ -35,26 +34,29 @@ export function computeLeadPay(teamTotal: number): {
     return {
       amount: LEAD_MIN_SALARY,
       ratePct: 0,
-      note: `Team Lead — fixed ${LEAD_MIN_SALARY.toLocaleString()} (team sales < 700k)`,
+      note: `Team Lead — fixed ${LEAD_MIN_SALARY.toLocaleString()} (team sales < 70 lacs)`,
     };
   }
-  if (teamTotal < LEAD_TARGET) {
+  if (teamTotal < target) {
     const amount = teamTotal * 0.01;
     return {
       amount,
       ratePct: 1,
-      note: `Team Lead — 1% of team sales (700k–1.2cr)`,
+      note: `Team Lead — 1% of team sales (70 lacs – ${(target / 1e7).toFixed(2)} cr)`,
     };
   }
   const amount = teamTotal * COMMISSION_RATE;
   return {
     amount,
     ratePct: 2.5,
-    note: `Team Lead — 2.5% of team sales (target ${LEAD_TARGET.toLocaleString()}+ achieved)`,
+    note: `Team Lead — 2.5% of team sales (target ${target.toLocaleString()}+ achieved)`,
   };
 }
 
 export async function computeSalesPayroll(periodId: string) {
+  const targetRow = await prisma.salesTarget.findUnique({ where: { periodId } });
+  const leadTarget = targetRow?.targetAmount ?? DEFAULT_LEAD_TARGET;
+
   const employees = await prisma.employee.findMany({
     where: { isActive: true, role: "Sales" },
   });
@@ -98,7 +100,7 @@ export async function computeSalesPayroll(periodId: string) {
 
     if (isLead) {
       saleBase = teamTotal;
-      const lead = computeLeadPay(teamTotal);
+      const lead = computeLeadPay(teamTotal, leadTarget);
       commission = lead.amount;
       ratePct = lead.ratePct;
       leadNote = lead.note;

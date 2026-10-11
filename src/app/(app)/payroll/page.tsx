@@ -144,6 +144,7 @@ export default async function Page({
   }
 
   // Commission lookup - ONLY for Sales role
+  // Commission lookup — only for Sales role
   const commissionByEmp: Record<string, number> = {};
   for (const c of commissions) {
     const empRole = roleByName[c.employeeName];
@@ -177,8 +178,8 @@ export default async function Page({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Payroll & Commissions</h1>
-          <p className="text-sm text-slate-500">
-            Commission only for Sales / Team Lead-Sales. Amad Amjad = 2.5% of all team sales (no basic).
+                    <p className="text-sm text-slate-500">
+            Commission only for Sales / Team Lead-Sales. Team Lead: 55,000 flat under 70 lacs, 1% from 70 lacs to target, 2.5% at/above target (no basic).
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />

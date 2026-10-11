@@ -35,7 +35,7 @@ export async function runSeed(force: boolean = false) {
   // ── Employees ──
   const empData = [
     { name: "Mr Ahsaan",     role: "Sales",            basicSalary: 40000 },
-    { name: "Amad Amjad",    role: "Sales",            basicSalary: 0     },
+    { name: "Ahmad Amjad",    role: "Sales",            basicSalary: 0     },
     { name: "Maira",         role: "Sales",            basicSalary: 40000 },
     { name: "Zunaira",       role: "Sales",            basicSalary: 40000 },
     { name: "Awais",         role: "Sales",            basicSalary: 40000 },
@@ -60,7 +60,7 @@ export async function runSeed(force: boolean = false) {
   // ── Employee Loans ──
   const loans = [
     { name: "Mr Ahsaan",  original: 630000, remaining: 630000, installment: 30000 },
-    { name: "Amad Amjad", original: 200000, remaining: 200000, installment: 20000 },
+    { name: "Ahmad Amjad", original: 200000, remaining: 200000, installment: 20000 },
     { name: "Awais",      original: 110000, remaining: 110000, installment: 20000 },
   ];
   for (const l of loans) {
@@ -80,7 +80,7 @@ export async function runSeed(force: boolean = false) {
   // ── Payroll ──
   const payroll = [
     { name: "Mr Ahsaan",    basic: 40000, bonus: 0,     loan: 30000, net: 10000 },
-    { name: "Amad Amjad",   basic: 0,     bonus: 0,     loan: 20000, net: 0     },
+    { name: "Ahmad Amjad",   basic: 0,     bonus: 0,     loan: 20000, net: 0     },
     { name: "Maira",        basic: 40000, bonus: 0,     loan: 0,     net: 40000 },
     { name: "Zunaira",      basic: 40000, bonus: 0,     loan: 0,     net: 40000 },
     { name: "Awais",        basic: 40000, bonus: 0,     loan: 20000, net: 20000 },
@@ -206,7 +206,7 @@ export async function runSeed(force: boolean = false) {
     { assetName: "Naimal Laptop",      category: "Laptop",    purchaseCost: 35000 },
     { assetName: "Kamran Laptop",      category: "Laptop",    purchaseCost: 40000, notes: "To be paid yet" },
     { assetName: "Ahsaan Phone",       category: "Phone",     purchaseCost: 400000 },
-    { assetName: "Amad Amjad Phone",   category: "Phone",     purchaseCost: 40000 },
+    { assetName: "Ahmad Amjad Phone",   category: "Phone",     purchaseCost: 40000 },
     { assetName: "Maira Phone",        category: "Phone",     purchaseCost: 40000 },
     { assetName: "Zunaira Phone",      category: "Phone",     purchaseCost: 40000 },
     { assetName: "Awais Phone",        category: "Phone",     purchaseCost: 40000 },
@@ -255,7 +255,7 @@ export async function runSeed(force: boolean = false) {
       received: 169000,
       totalPackage: 169000,
       remaining: 0,
-      salesperson: "Amad Amjad",
+      salesperson: "Ahmad Amjad",
       destination: "Skardu",
       ledger: [
         { hotel: "Qayyam (2x nights)", credit: 34650 },
@@ -269,7 +269,7 @@ export async function runSeed(force: boolean = false) {
       tourDate: new Date("2026-10-17"),
       desc: "8 Days, Hunza Skardu Trip By Road",
       received: 330000, totalPackage: 650000, remaining: 320000,
-      salesperson: "Amad Amjad", destination: "Hunza + Skardu",
+      salesperson: "Ahmad Amjad", destination: "Hunza + Skardu",
     },
     {
       name: "Dr Ali",

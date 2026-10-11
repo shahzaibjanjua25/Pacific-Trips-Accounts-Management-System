@@ -5,7 +5,7 @@ const LOAN_INSTALLMENTS: Record<string, number> = {
   ahsaan: 30000,
   "mr ahsaan": 30000,
   amjad: 20000,
-  "amad amjad": 20000,
+  "Ahmad Amjad": 20000,
   "ammar amjad": 20000,
   awais: 20000,
 };
@@ -240,6 +240,7 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
 
   // --- Payroll ---
   // --- Payroll ---
+  // --- Payroll ---
   try {
     const prevPayroll = await tx.payrollEntry.findMany({
       where: { periodId: fromPeriodId },
@@ -255,7 +256,7 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
       const tax = p.taxDeducted;
       const other = p.otherDeductions;
 
-      // Commission only for Sales staff
+      // Commission only for Sales role
       let comm = 0;
       if (isSales) {
         const commissionRow = await tx.commission.findFirst({
@@ -266,7 +267,12 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
 
       const net = Math.max(0, basic + comm - tax - installment - other);
 
-      if (p.status === "Paid" && (p.remaining ?? 0) <= 0 && p.employeeId && installment > 0) {
+      if (
+        p.status === "Paid" &&
+        (p.remaining ?? 0) <= 0 &&
+        p.employeeId &&
+        installment > 0
+      ) {
         const loan = await tx.employeeLoan.findFirst({
           where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
         });
@@ -274,7 +280,10 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
           await tx.employeeLoan.update({
             where: { id: loan.id },
             data: {
-              remainingAmount: Math.max(0, loan.remainingAmount - installment),
+              remainingAmount: Math.max(
+                0,
+                loan.remainingAmount - installment
+              ),
             },
           });
         }
@@ -296,9 +305,15 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
           taxDeducted: tax,
           loanInstallment: nextInstallment,
           otherDeductions: other,
-          netPayable: Math.max(0, basic + comm - tax - nextInstallment - other),
+          netPayable: Math.max(
+            0,
+            basic + comm - tax - nextInstallment - other
+          ),
           amountPaid: 0,
-          remaining: Math.max(0, basic + comm - tax - nextInstallment - other),
+          remaining: Math.max(
+            0,
+            basic + comm - tax - nextInstallment - other
+          ),
           status: "Pending",
           notes: p.notes ? `${p.notes} | Carried forward` : "Carried forward",
         },

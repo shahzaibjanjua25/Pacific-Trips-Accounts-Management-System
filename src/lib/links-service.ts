@@ -15,6 +15,12 @@ import { prisma } from "./prisma";
  * If `amountPaid` > 0 and status becomes fully Paid, decrement the linked
  * EmployeeLoan by the current month's installment.
  */
+/**
+ * Recompute a payroll entry from scratch based on:
+ *   basic + commission − tax − loan installment − other deductions
+ *
+ * Commission is only applied to Sales-role employees.
+ */
 export async function syncPayrollForEmployee(
     periodId: string,
     employeeName: string
@@ -22,7 +28,7 @@ export async function syncPayrollForEmployee(
     const emp = await prisma.employee.findFirst({ where: { name: employeeName } });
     if (!emp) return;
 
-    // Only Sales role employees earn commission
+    // Commission only for Sales-role employees
     const isSales = emp.role === "Sales";
 
     const isLead =
@@ -31,12 +37,10 @@ export async function syncPayrollForEmployee(
             employeeName.toLowerCase().includes("amad") ||
             employeeName.toLowerCase().includes("ammar"));
 
-    // Get or create the payroll row for this period
     let pay = await prisma.payrollEntry.findFirst({
         where: { periodId, employeeName },
     });
 
-    // Commission only for Sales team
     let commissionAmt = 0;
     if (isSales) {
         const commission = await prisma.commission.findFirst({
@@ -45,23 +49,30 @@ export async function syncPayrollForEmployee(
         commissionAmt = commission?.commissionAmt ?? 0;
     }
 
-    // Determine basic
-    const basic = isLead ? 0 : emp.basicSalary || (isSales ? 40000 : 0);
+    const basic = isLead
+        ? 0
+        : emp.basicSalary || (isSales ? 40000 : 0);
 
-    // Tax / other deductions - preserve whatever the user set
     const tax = pay?.taxDeducted ?? 0;
     const other = pay?.otherDeductions ?? 0;
 
-    // Loan installment
     const loan = await prisma.employeeLoan.findFirst({
         where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
     });
     const installment = loan?.monthlyInstallment ?? 0;
 
-    const netPayable = Math.max(0, basic + commissionAmt - tax - installment - other);
+    const netPayable = Math.max(
+        0,
+        basic + commissionAmt - tax - installment - other
+    );
     const amountPaid = pay?.amountPaid ?? 0;
     const remaining = Math.max(0, netPayable - amountPaid);
-    const status = remaining <= 0 && amountPaid > 0 ? "Paid" : amountPaid > 0 ? "Partial" : "Pending";
+    const status =
+        remaining <= 0 && amountPaid > 0
+            ? "Paid"
+            : amountPaid > 0
+              ? "Partial"
+              : "Pending";
 
     if (pay) {
         await prisma.payrollEntry.update({
@@ -88,9 +99,9 @@ export async function syncPayrollForEmployee(
                 status: "Pending",
                 notes: isSales
                     ? isLead
-                        ? "Team Lead - 2.5% of team sales"
-                        : "Sales - 40k + 2.5% of own sales"
-                    : `${emp.role} - no commission`,
+                        ? "Team Lead — tiered override on team sales"
+                        : "Sales — 40k + 2.5% of own sales"
+                    : `${emp.role} — no commission`,
             },
         });
     }
@@ -216,31 +227,31 @@ function nameMatch(a: string, b: string): boolean {
 }
 
 async function applyToPayable(
-  periodId: string,
-  payableId: string,
-  amount: number
+    periodId: string,
+    payableId: string,
+    amount: number
 ): Promise<number> {
-  const p = await prisma.payable.findUnique({ where: { id: payableId } });
-  if (!p) return 0;
+    const p = await prisma.payable.findUnique({ where: { id: payableId } });
+    if (!p) return 0;
 
-  // If payable has no billed amount yet, treat this payment as the amount owed
-  const orig = p.originalAmount > 0 ? p.originalAmount : amount;
-  const pay = Math.min(amount, Math.max(0, orig - p.amountPaid));
-  const newPaid = p.amountPaid + pay;
-  const newRem = Math.max(0, orig - newPaid);
+    // If payable has no billed amount yet, treat this payment as the amount owed
+    const orig = p.originalAmount > 0 ? p.originalAmount : amount;
+    const pay = Math.min(amount, Math.max(0, orig - p.amountPaid));
+    const newPaid = p.amountPaid + pay;
+    const newRem = Math.max(0, orig - newPaid);
 
-  await prisma.payable.update({
-    where: { id: p.id },
-    data: {
-      originalAmount: orig,
-      amountPaid: newPaid,
-      remaining: newRem,
-      status: newRem <= 0 ? "Paid" : "Partial",
-    },
-  });
+    await prisma.payable.update({
+        where: { id: p.id },
+        data: {
+            originalAmount: orig,
+            amountPaid: newPaid,
+            remaining: newRem,
+            status: newRem <= 0 ? "Paid" : "Partial",
+        },
+    });
 
-  await propagatePayableToOperational(p.id);
-  return pay;
+    await propagatePayableToOperational(p.id);
+    return pay;
 }
 export async function applyPaymentToPayables(
     periodId: string,
@@ -376,8 +387,8 @@ export async function applyPayrollPayment(
             // Last resort: create a minimal row so payment is not lost
             const loan = emp
                 ? await prisma.employeeLoan.findFirst({
-                      where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
-                  })
+                    where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
+                })
                 : null;
             const isLead =
                 canonicalName.toLowerCase().includes("ahmad") ||

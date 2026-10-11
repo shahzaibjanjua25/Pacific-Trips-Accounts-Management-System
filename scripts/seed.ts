@@ -34,7 +34,7 @@ async function main() {
   // ── Employees ──
   const empData = [
     { name: "Mr Ahsaan", role: "Sales", basicSalary: 40000 },
-    { name: "Amad Amjad", role: "Sales", basicSalary: 0 },
+    { name: "Ahmad Amjad", role: "Sales", basicSalary: 0 },
     { name: "Maira", role: "Sales", basicSalary: 40000 },
     { name: "Zunaira", role: "Sales", basicSalary: 40000 },
     { name: "Awais", role: "Sales", basicSalary: 40000 },
@@ -59,7 +59,7 @@ async function main() {
   // ── Loans ──
   const loans = [
     { name: "Mr Ahsaan", original: 630000, remaining: 600000, installment: 30000 },
-    { name: "Amad Amjad", original: 200000, remaining: 180000, installment: 20000 },
+    { name: "Ahmad Amjad", original: 200000, remaining: 180000, installment: 20000 },
     { name: "Awais", original: 110000, remaining: 90000, installment: 20000 },
   ];
   for (const l of loans) {
@@ -79,7 +79,7 @@ async function main() {
   // ── Payroll ──
   const payroll = [
     { name: "Mr Ahsaan", basic: 40000, bonus: 0, loan: 30000, net: 10000, notes: "Loan 630k, installment 30k" },
-    { name: "Amad Amjad", basic: 0, bonus: 0, loan: 20000, net: 0, notes: "Team Lead — commission via Compute button" },
+    { name: "Ahmad Amjad", basic: 0, bonus: 0, loan: 20000, net: 0, notes: "Team Lead — commission via Compute button" },
     { name: "Maira", basic: 40000, bonus: 0, loan: 0, net: 40000 },
     { name: "Zunaira", basic: 40000, bonus: 0, loan: 0, net: 40000 },
     { name: "Awais", basic: 40000, bonus: 0, loan: 20000, net: 20000, notes: "Loan 110k, installment 20k" },
@@ -218,7 +218,7 @@ const banks = [
     { assetName: "Naimal Laptop", category: "Laptop", purchaseCost: 35000 },
     { assetName: "Kamran Laptop", category: "Laptop", purchaseCost: 40000, notes: "To be paid yet" },
     { assetName: "Ahsaan Phone", category: "Phone", purchaseCost: 400000 },
-    { assetName: "Amad Amjad Phone", category: "Phone", purchaseCost: 40000 },
+    { assetName: "Ahmad Amjad Phone", category: "Phone", purchaseCost: 40000 },
     { assetName: "Maira Phone", category: "Phone", purchaseCost: 40000 },
     { assetName: "Zunaira Phone", category: "Phone", purchaseCost: 40000 },
     { assetName: "Awais Phone", category: "Phone", purchaseCost: 40000 },

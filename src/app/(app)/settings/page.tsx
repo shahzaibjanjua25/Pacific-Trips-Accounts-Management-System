@@ -27,7 +27,7 @@ export default async function SettingsPage({
         <div>
           <h1 className="text-2xl font-bold">Settings & Employees</h1>
           <p className="text-sm text-slate-500">
-            Manage staff. Sales role gets 40k + 2.5% commission. Name &quot;Amad Amjad&quot; = team lead (2.5% of all sales, no basic).
+            Manage staff. Sales role gets 40k + 2.5% commission. Name &quot;Ahmad Amjad&quot; = team lead (2.5% of all sales, no basic).
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />

@@ -46,10 +46,22 @@ model Period {
   vadets            Vadet[]
   monthlyClosings   MonthlyClosing[]
   salesPerformance  SalesPerformance[]
+  salesTarget       SalesTarget?                    // ← ADD
 
   @@unique([year, month])
 }
-
+// ─────────────────────────────────────────────
+// SALES TARGET (drives Team Lead commission tier)
+// ─────────────────────────────────────────────
+model SalesTarget {
+  id           String   @id @default(cuid())
+  periodId     String   @unique
+  period       Period   @relation(fields: [periodId], references: [id])
+  targetAmount Float    @default(12000000)  // 1.2 crore default
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
 // ─────────────────────────────────────────────
 // CLIENTS
 // ─────────────────────────────────────────────

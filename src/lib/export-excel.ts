@@ -384,7 +384,7 @@ export async function buildSalesTeamWorkbook(periodId: string) {
   policy.getCell("A4").value = "Team Lead (Amad / Ammar Amjad): NO basic salary; 2.5% of ALL sales team sales";
   policy.getCell("A6").value = "Monthly loan installments deducted from salary:";
   policy.getCell("A7").value = "• Ahsaan: 30,000 PKR / month";
-  policy.getCell("A8").value = "• Amjad (Amad Amjad): 20,000 PKR / month";
+  policy.getCell("A8").value = "• Amjad (Ahmad Amjad): 20,000 PKR / month";
   policy.getCell("A9").value = "• Awais: 20,000 PKR / month";
   policy.getColumn(1).width = 80;
 
