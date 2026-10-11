@@ -38,6 +38,7 @@ export default async function ClientsPage({
     amountDue: number;
     status: string;
     tripInfo: string;
+    salesperson: string | null;
   };
 
   const rows: Row[] = clients.map((c) => {
@@ -46,12 +47,12 @@ export default async function ClientsPage({
     );
     const ledger = ledgers.filter((l) => l.clientId === c.id);
 
-    // Prefer the Receivable row when it exists - it's the source of truth
     let totalPackage = 0;
     let amountPaid = 0;
     let amountDue = 0;
     let tripInfo = "-";
     let status = "-";
+    let salesperson: string | null = null;
 
     if (recv.length > 0) {
       totalPackage = recv.reduce((s, r) => s + r.totalPackage, 0);
@@ -61,9 +62,11 @@ export default async function ClientsPage({
         recv.find((r) => r.tripDates)?.tripDates ||
         recv.find((r) => r.destination)?.destination ||
         "-";
-      status = amountDue <= 0 && amountPaid > 0 ? "Settled" : amountPaid > 0 ? "Partial" : "Open";
+      salesperson =
+        recv.find((r) => r.salesperson)?.salesperson || null;
+      status =
+        amountDue <= 0 && amountPaid > 0 ? "Settled" : amountPaid > 0 ? "Partial" : "Open";
     } else if (ledger.length > 0) {
-      // Fall back to ledger sums
       const paidRows = ledger.filter(
         (l) =>
           l.hotel === "Payment" ||
@@ -97,6 +100,7 @@ export default async function ClientsPage({
       amountDue,
       status,
       tripInfo,
+      salesperson,
     };
   });
 
@@ -117,6 +121,7 @@ export default async function ClientsPage({
       amountDue: r.remainingAmount,
       status: r.status || "Open",
       tripInfo: r.tripDates || r.destination || "-",
+      salesperson: r.salesperson || null,
     });
   }
 
@@ -136,4 +141,3 @@ export default async function ClientsPage({
     </div>
   );
 }
-

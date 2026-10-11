@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus, X } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
+import { LookupSelect } from "@/components/LookupSelect";
 
 type Txn = {
   id: string;
@@ -20,6 +21,7 @@ type Txn = {
   status: string;
   enteredBy?: string | null;
   notes?: string | null;
+  salesperson?: string | null;
 };
 
 type Option = { label: string; value: string; remaining: number; id?: string };
@@ -97,6 +99,7 @@ const empty = {
   clientContact: "",
   clientEmail: "",
   clientNotes: "",
+  salesperson: "",
 };
 
 export function TransactionManager({
@@ -115,7 +118,6 @@ export function TransactionManager({
   const [showOther, setShowOther] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [outstanding, setOutstanding] = useState<Outstanding>(null);
-  // NEW — map of clientName → { paid, refunded, refundable }
   const [clientPaid, setClientPaid] = useState<ClientPaidMap>({});
 
   const isClientCategory = INBOUND_CATEGORIES.includes(form.category);
@@ -124,7 +126,6 @@ export function TransactionManager({
   const isOutboundCategory = OUTBOUND_CHECK_CATEGORIES.includes(form.category);
   const shouldCheckOutstanding = isClientCategory || isOutboundCategory;
 
-  // ── Load bank accounts ──
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -146,7 +147,6 @@ export function TransactionManager({
     };
   }, []);
 
-  // ── NEW: Load client paid map once ──
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -167,7 +167,6 @@ export function TransactionManager({
     };
   }, [periodId]);
 
-  // ── Load party options ──
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -189,7 +188,6 @@ export function TransactionManager({
     };
   }, [form.category, periodId, open]);
 
-  // ── Fetch outstanding ──
   useEffect(() => {
     if (!open || !shouldCheckOutstanding) {
       setOutstanding(null);
@@ -268,6 +266,7 @@ export function TransactionManager({
       status: t.status || "Completed",
       enteredBy: t.enteredBy || "",
       notes: t.notes || "",
+      salesperson: t.salesperson || "",
     });
     setShowOther(false);
     setOpen(true);
@@ -288,18 +287,13 @@ export function TransactionManager({
     }
   }
 
-  // ── NEW: compute refundable client-side ──
-  // This is used as a secondary guard alongside the API, so the user
-  // gets an immediate cap even if the /api/outstanding response is slow.
   const clientRefundable = (() => {
     if (!isRefundCategory) return null;
     const name = showOther ? form.otherName.trim() : form.party || form.subCategory;
     if (!name) return null;
 
-    // Exact match first
     if (clientPaid[name]) return clientPaid[name].refundable;
 
-    // Fuzzy: case-insensitive includes
     const key = Object.keys(clientPaid).find((k) => {
       const a = k.toLowerCase().trim();
       const b = name.toLowerCase().trim();
@@ -334,9 +328,6 @@ export function TransactionManager({
       return;
     }
 
-    // ════════════════════════════════════════════════════════════
-    // DIRECTION SANITY CHECK
-    // ════════════════════════════════════════════════════════════
     if (isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
       const ok = confirm(
         `⚠️ Wrong direction\n\n` +
@@ -368,9 +359,6 @@ export function TransactionManager({
     const receivedIn = debitAmount;
     const movingAmount = isClientReceipt ? receivedIn : paidOut;
 
-    // ════════════════════════════════════════════════════════════
-    // HARD BLOCK: overpayment guard
-    // ════════════════════════════════════════════════════════════
     const isTypedNew = showOther && form.otherName.trim().length > 0;
 
     if (movingAmount > 0 && shouldCheckOutstanding) {
@@ -397,9 +385,6 @@ export function TransactionManager({
         liveReason = outstanding?.reason;
       }
 
-      // ── NEW: refund-only secondary guard, using clientPaid map ──
-      // If the client-side map knows the refundable amount (even if the
-      // API hasn't caught up), enforce it.
       if (isRefundCategory && clientRefundable != null) {
         if (movingAmount > clientRefundable) {
           alert(
@@ -491,6 +476,7 @@ export function TransactionManager({
         clientContact: form.clientContact || null,
         clientEmail: form.clientEmail || null,
         clientNotes: form.clientNotes || null,
+        salesperson: form.salesperson || null,
         isNewClient: isTypedNew,
       };
       const res = await fetch("/api/transactions", {
@@ -539,7 +525,6 @@ export function TransactionManager({
   const debitNum = parseFloat(form.debit) || 0;
   const creditNum = parseFloat(form.credit) || 0;
 
-  // ── Live hint ──
   const liveHint = (() => {
     if (!shouldCheckOutstanding) return null;
     const movingAmount = isClientCategory ? debitNum : creditNum;
@@ -563,7 +548,6 @@ export function TransactionManager({
       );
     }
 
-    // ── NEW: dedicated refund hint from clientPaid map ──
     if (isRefundCategory) {
       const name = showOther
         ? form.otherName.trim()
@@ -700,7 +684,7 @@ export function TransactionManager({
           <p className="text-xs text-slate-600">
             Choose <strong>Category</strong> first — Sub-Category / Party lists hotels, suppliers,
             clients or staff you owe / who owe you. Pick <strong>Other…</strong> to type a new name.
-            {" "}<strong>Debit = money IN &middot; Credit = money OUT.</strong>
+            {" "}<strong>Debit = money IN · Credit = money OUT.</strong>
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field
@@ -794,9 +778,23 @@ export function TransactionManager({
                   value={form.clientTotalPackage}
                   onChange={(v) => setForm({ ...form, clientTotalPackage: v })}
                 />
+                <label className="block text-xs col-span-2 md:col-span-1">
+                  <span className="text-slate-600 font-medium">
+                    Salesperson (who brought this client)
+                  </span>
+                  <div className="mt-1">
+                    <LookupSelect
+                      lookupKey="salesEmployees"
+                      periodId={periodId}
+                      value={form.salesperson}
+                      onChange={(v) => setForm({ ...form, salesperson: v })}
+                    />
+                  </div>
+                </label>
                 <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
                   Total Package = full sale (updates Clients tab). Debit = amount paid now.
-                  Leave Total Package blank on follow-up payments for existing clients.
+                  Selecting a salesperson adds the package amount to their sales
+                  and recalculates commission (2.5%, or Team Lead tiered rate).
                 </p>
               </>
             )}

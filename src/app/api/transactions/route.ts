@@ -32,9 +32,7 @@ export async function POST(req: NextRequest) {
       cat.includes("client receipt");
     const amountMoving = isClientReceipt ? debit : credit;
 
-    // ── Server-side overpayment guard ──
-    // Skip entirely only when the caller flagged this as a brand-new party
-    // AND there's no matching record yet.
+    // Server-side overpayment guard
     if (party && amountMoving > 0 && body.periodId && !isNewClient) {
       const outstanding = await lookupOutstanding(body.periodId, cat, party);
       if (outstanding != null && amountMoving > outstanding) {
@@ -80,6 +78,7 @@ export async function POST(req: NextRequest) {
       clientEmail: body.clientEmail || null,
       clientNotes: body.clientNotes || null,
       isNewClient,
+      salesperson: body.salesperson || null,
     });
     return NextResponse.json(txn);
   } catch (e) {
@@ -143,6 +142,7 @@ export async function PUT(req: NextRequest) {
       notes: body.notes,
       hotelAgreedCost:
         body.hotelAgreedCost != null ? Number(body.hotelAgreedCost) : undefined,
+      salesperson: body.salesperson || null,
     });
     return NextResponse.json(txn);
   } catch (e) {
@@ -163,11 +163,6 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-/**
- * Look up the outstanding balance for a given party in a given category.
- * Returns null when we can't determine it (allow the transaction through —
- * server-side capping in links-service is a secondary defence).
- */
 async function lookupOutstanding(
   periodId: string,
   category: string,
@@ -197,7 +192,6 @@ async function lookupOutstanding(
     rows.find((r) => nameMatch(String(r[key]), party)) ??
     rows.find((r) => lastNameMatch(String(r[key]), party));
 
-  // ── Client Receipt / Revenue ──
   if (
     category.includes("receipt") ||
     category.includes("revenue") ||
@@ -210,15 +204,11 @@ async function lookupOutstanding(
     return r ? r.remainingAmount : 0;
   }
 
-  // ── Salary / Payroll ──
-  // ── Salary / Payroll ──
   if (category.includes("salary") || category.includes("payroll")) {
     const rows = await prisma.payrollEntry.findMany({ where: { periodId } });
     if (rows.length === 0) return null;
     const e = find(rows, "employeeName");
     if (e) return Math.max(0, e.netPayable - (e.amountPaid ?? 0));
-    // No name match — return the SUM as a defensive fallback so that
-    // any amount larger than the total outstanding is blocked.
     const totalOutstanding = rows.reduce(
       (s, r) => s + Math.max(0, r.netPayable - (r.amountPaid ?? 0)),
       0
@@ -226,7 +216,6 @@ async function lookupOutstanding(
     return totalOutstanding;
   }
 
-  // ── Hotel ──
   if (category.includes("hotel")) {
     const rows = await prisma.payable.findMany({
       where: { periodId, category: { contains: "Hotel" } },
@@ -235,7 +224,6 @@ async function lookupOutstanding(
     return p ? p.remaining : null;
   }
 
-  // ── Transport ──
   if (category.includes("transport") || category.includes("driver")) {
     const rows = await prisma.payable.findMany({
       where: { periodId, category: { contains: "Transport" } },
@@ -244,7 +232,6 @@ async function lookupOutstanding(
     return p ? p.remaining : null;
   }
 
-  // ── Ticketing ──
   if (category.includes("ticketing")) {
     const rows = await prisma.payable.findMany({
       where: { periodId, category: { contains: "Ticketing" } },
@@ -253,14 +240,12 @@ async function lookupOutstanding(
     return p ? p.remaining : null;
   }
 
-  // ── Supplier / Payable (generic) ──
   if (category.includes("supplier") || category.includes("payable")) {
     const rows = await prisma.payable.findMany({ where: { periodId } });
     const p = find(rows, "supplierName");
     return p ? p.remaining : null;
   }
 
-  // ── Commission ──
   if (category.includes("commission")) {
     const rows = await prisma.commission.findMany({
       where: { periodId, status: "Accrued" },
@@ -269,7 +254,6 @@ async function lookupOutstanding(
     return c ? c.commissionAmt : null;
   }
 
-  // ── Refund ──
   if (category.includes("refund")) {
     const rows = await prisma.refund.findMany({
       where: { periodId, status: "Pending" },
@@ -278,7 +262,6 @@ async function lookupOutstanding(
     return r ? r.amount : null;
   }
 
-  // ── Employee Loan ──
   if (category.includes("employee loan") || category.includes("staff advance")) {
     const emps = await prisma.employee.findMany({ where: { isActive: true } });
     const emp = find(emps, "name");
@@ -289,7 +272,6 @@ async function lookupOutstanding(
     return loan ? loan.remainingAmount : null;
   }
 
-  // ── Supplier Advance ──
   if (category.includes("advance")) {
     const rows = await prisma.supplierAdvance.findMany({
       where: { periodId, remaining: { gt: 0 } },

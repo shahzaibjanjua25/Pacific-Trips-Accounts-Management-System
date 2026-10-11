@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
+import { attributeSaleToSalesperson } from "@/lib/sales-attribution";
 
 export async function GET(req: NextRequest) {
   const uid = await getSessionUserId();
@@ -23,7 +24,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ client, receivable: recv });
 }
 
-
 export async function POST(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -35,7 +35,10 @@ export async function POST(req: NextRequest) {
 
     const existing = await prisma.client.findFirst({ where: { name } });
     if (existing) {
-      return NextResponse.json({ error: "Client already exists", id: existing.id }, { status: 409 });
+      return NextResponse.json(
+        { error: "Client already exists", id: existing.id },
+        { status: 409 }
+      );
     }
 
     const client = await prisma.client.create({
@@ -51,6 +54,8 @@ export async function POST(req: NextRequest) {
     const periodId = req.nextUrl.searchParams.get("periodId") || body.periodId;
     const tp = Number(body.totalPackage) || 0;
     const paid = Number(body.amountPaid) || 0;
+    const salesperson = (body.salesperson || "").trim();
+
     if (periodId && (tp > 0 || paid > 0)) {
       const remaining = Math.max(0, tp - paid);
       await prisma.receivable.create({
@@ -58,14 +63,31 @@ export async function POST(req: NextRequest) {
           periodId,
           clientId: client.id,
           clientName: client.name,
+          salesperson: salesperson || null,
           totalPackage: tp || paid,
           amountToReceive: tp || paid,
           amountReceived: paid,
           remainingAmount: remaining,
-          status: remaining <= 0 && paid > 0 ? "Settled" : paid > 0 ? "Partial" : "Open",
+          status:
+            remaining <= 0 && paid > 0
+              ? "Settled"
+              : paid > 0
+                ? "Partial"
+                : "Open",
           notes: "Created from Clients page",
         },
       });
+
+      // Attribute the sale to the chosen salesperson → Sales Team + commission
+      if (salesperson && (tp || paid) > 0) {
+        await attributeSaleToSalesperson({
+          periodId,
+          salesperson,
+          clientName: client.name,
+          amount: tp || paid,
+          description: `New client: ${client.name}`,
+        });
+      }
     }
 
     return NextResponse.json(client);
@@ -81,10 +103,12 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { id, name, phone, contact, email, notes, totalPackage, amountPaid } = body;
+    const {
+      id, name, phone, contact, email, notes,
+      totalPackage, amountPaid, salesperson,
+    } = body;
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-    // Update client master
     const client = await prisma.client.update({
       where: { id },
       data: {
@@ -96,9 +120,8 @@ export async function PUT(req: NextRequest) {
       },
     });
 
-    // Update/create the receivable for the supplied period
     const periodId = req.nextUrl.searchParams.get("periodId");
-    if (periodId && (totalPackage != null || amountPaid != null)) {
+    if (periodId && (totalPackage != null || amountPaid != null || salesperson)) {
       const existing = await prisma.receivable.findFirst({
         where: { periodId, clientId: id },
         orderBy: { createdAt: "desc" },
@@ -109,6 +132,7 @@ export async function PUT(req: NextRequest) {
       const remaining = Math.max(0, tp - paid);
 
       if (existing) {
+        const prevTp = existing.totalPackage;
         await prisma.receivable.update({
           where: { id: existing.id },
           data: {
@@ -116,23 +140,59 @@ export async function PUT(req: NextRequest) {
             amountToReceive: tp || existing.amountToReceive,
             amountReceived: paid,
             remainingAmount: remaining,
-            status: remaining <= 0 && paid > 0 ? "Settled" : paid > 0 ? "Partial" : "Open",
+            salesperson: salesperson ?? existing.salesperson,
+            status:
+              remaining <= 0 && paid > 0
+                ? "Settled"
+                : paid > 0
+                  ? "Partial"
+                  : "Open",
           },
         });
+
+        // If the package increased, record the delta as a new sale for
+        // the chosen salesperson so their commission reflects it.
+        const delta = Math.max(0, tp - prevTp);
+        const targetSalesperson = salesperson || existing.salesperson;
+        if (targetSalesperson && delta > 0) {
+          await attributeSaleToSalesperson({
+            periodId,
+            salesperson: targetSalesperson,
+            clientName: client.name,
+            amount: delta,
+            description: `Package increase: ${client.name}`,
+          });
+        }
       } else if (tp > 0 || paid > 0) {
         await prisma.receivable.create({
           data: {
             periodId,
             clientId: id,
             clientName: client.name,
+            salesperson: salesperson || null,
             totalPackage: tp,
             amountToReceive: tp,
             amountReceived: paid,
             remainingAmount: remaining,
-            status: remaining <= 0 && paid > 0 ? "Settled" : paid > 0 ? "Partial" : "Open",
+            status:
+              remaining <= 0 && paid > 0
+                ? "Settled"
+                : paid > 0
+                  ? "Partial"
+                  : "Open",
             notes: "Edited from Clients page",
           },
         });
+
+        if (salesperson && tp > 0) {
+          await attributeSaleToSalesperson({
+            periodId,
+            salesperson,
+            clientName: client.name,
+            amount: tp,
+            description: `New client (edited): ${client.name}`,
+          });
+        }
       }
     }
 
@@ -150,10 +210,8 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  // Remove dependents first (ledger rows and receivables belonging to this client)
   await prisma.clientLedger.deleteMany({ where: { clientId: id } });
   await prisma.receivable.deleteMany({ where: { clientId: id } });
   await prisma.client.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }
-
