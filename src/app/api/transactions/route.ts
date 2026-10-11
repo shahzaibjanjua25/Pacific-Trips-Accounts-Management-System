@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
       relatedTransportId: body.relatedTransportId,
       relatedCommissionId: body.relatedCommissionId,
       relatedAdvanceId: body.relatedAdvanceId,
+      // Client package + paid (must be forwarded or Total Package is lost)
+      clientTotalPackage: Number(body.clientTotalPackage) || 0,
+      clientAmountPaid: Number(body.clientAmountPaid) || 0,
     });
     return NextResponse.json(txn);
   } catch (e) {
