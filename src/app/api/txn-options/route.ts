@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const periodId = req.nextUrl.searchParams.get("periodId");
 
   try {
-    // Hotel payments - return ALL hotels (paid + unpaid)
+    // ── Hotel payments — return ALL hotels (paid + unpaid) ──
     if (category.includes("hotel")) {
       const rows = await prisma.payable.findMany({
         where: {
@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(options);
     }
 
+    // ── Transport / Driver ──
     if (category.includes("transport") || category.includes("driver")) {
       const rows = await prisma.payable.findMany({
         where: {
@@ -69,24 +70,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(options);
     }
 
-    if (category.includes("supplier") || category.includes("payable")) {
-      const rows = await prisma.payable.findMany({
-        where: periodId ? { periodId } : {},
-        orderBy: [{ remaining: "desc" }, { supplierName: "asc" }],
-      });
-      const options: Option[] = rows.map((p) => ({
-        label: `${p.supplierName} - ${p.category || "Other"} ${
-          p.remaining > 0 ? `(owing ${p.remaining.toLocaleString()})` : "(fully paid)"
-        }`,
-        value: p.supplierName,
-        remaining: p.remaining,
-        id: p.id,
-        entityType: "payable",
-      }));
-      options.push({ label: "Other...", value: "__other__", remaining: 0 });
-      return NextResponse.json(options);
-    }
-
+    // ── Ticketing ──
     if (category.includes("ticketing")) {
       const rows = await prisma.ticketing.findMany({
         where: periodId ? { periodId } : {},
@@ -103,6 +87,28 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(options);
     }
 
+    // ── Supplier / Payable (generic) ──
+    if (category.includes("supplier") || category.includes("payable")) {
+      const rows = await prisma.payable.findMany({
+        where: periodId ? { periodId } : {},
+        orderBy: [{ remaining: "desc" }, { supplierName: "asc" }],
+      });
+      const options: Option[] = rows.map((p) => ({
+        label: `${p.supplierName} - ${p.category || "Other"} ${
+          p.remaining > 0
+            ? `(owing ${p.remaining.toLocaleString()})`
+            : "(fully paid)"
+        }`,
+        value: p.supplierName,
+        remaining: p.remaining,
+        id: p.id,
+        entityType: "payable",
+      }));
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
+      return NextResponse.json(options);
+    }
+
+    // ── Client receipt / Revenue ──
     if (
       category.includes("receipt") ||
       category.includes("revenue") ||
@@ -141,6 +147,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(options);
     }
 
+    // ── Salary / Payroll ──
     if (category.includes("salary") || category.includes("payroll")) {
       const emps = await prisma.employee.findMany({
         where: { isActive: true },
@@ -172,69 +179,228 @@ export async function GET(req: NextRequest) {
           entityType: "employee",
         };
       });
-      // Prefer staff who still have salary outstanding at the top
       options.sort((a, b) => b.remaining - a.remaining);
       options.push({ label: "Other…", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
+    // ── Commission Payment ──
+    // List employees who have an Accrued commission (unpaid) for this period.
     if (category.includes("commission")) {
       const commissions = await prisma.commission.findMany({
         where: {
           ...(periodId ? { periodId } : {}),
           status: "Accrued",
         },
-        orderBy: { employeeName: "asc" },
+        orderBy: [{ commissionAmt: "desc" }, { employeeName: "asc" }],
       });
+
       const options: Option[] = commissions.map((c) => ({
-        label: `${c.employeeName} - commission ${c.commissionAmt.toLocaleString()}`,
+        label: `${c.employeeName} — commission owing ${c.commissionAmt.toLocaleString()}`,
         value: c.employeeName,
         remaining: c.commissionAmt,
         id: c.id,
         entityType: "commission",
       }));
+
+      // Also include Sales staff who might not yet have a Commission row
+      const salesStaff = await prisma.employee.findMany({
+        where: { isActive: true, role: "Sales" },
+        orderBy: { name: "asc" },
+      });
+      const have = new Set(options.map((o) => o.value));
+      for (const e of salesStaff) {
+        if (!have.has(e.name)) {
+          options.push({
+            label: `${e.name} (no commission accrued yet)`,
+            value: e.name,
+            remaining: 0,
+            id: e.id,
+            entityType: "employee",
+          });
+        }
+      }
+
       options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
+    // ── Refund to Client ──
+    // List every client with a Pending refund, plus every client (for new refunds).
     if (category.includes("refund")) {
       const refunds = await prisma.refund.findMany({
         where: {
           ...(periodId ? { periodId } : {}),
           status: "Pending",
         },
+        orderBy: [{ amount: "desc" }, { clientName: "asc" }],
       });
+
       const options: Option[] = refunds.map((r) => ({
-        label: `${r.clientName} - refund ${r.amount.toLocaleString()}`,
+        label: `${r.clientName} — refund pending ${r.amount.toLocaleString()}`,
         value: r.clientName,
         remaining: r.amount,
         id: r.id,
         entityType: "refund",
       }));
+
+      // Add clients without a pending refund so you can create one
+      const clients = await prisma.client.findMany({ orderBy: { name: "asc" } });
+      const have = new Set(options.map((o) => o.value));
+      for (const c of clients) {
+        if (!have.has(c.name)) {
+          options.push({
+            label: c.name,
+            value: c.name,
+            remaining: 0,
+            id: c.id,
+            entityType: "client",
+          });
+        }
+      }
+
       options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
-    if (category.includes("advance")) {
+    // ── Office Expense ──
+    // List standard expense sub-categories + any vendors already used.
+    if (category.includes("office")) {
+      const STANDARD = [
+        "Rent",
+        "Electricity",
+        "Internet/Telephone",
+        "Maintenance",
+        "Saving",
+        "Supplies",
+        "Water",
+        "Gas",
+        "Stationery",
+        "Other",
+      ];
+      const options: Option[] = STANDARD.map((s) => ({
+        label: s,
+        value: s,
+        remaining: 0,
+        entityType: "subcategory",
+      }));
+
+      // Add previously used vendors
+      const vendors = await prisma.officeExpense.findMany({
+        where: periodId ? { periodId } : {},
+        select: { vendor: true, category: true },
+      });
+      const seen = new Set(options.map((o) => o.value));
+      for (const v of vendors) {
+        if (!v.vendor) continue;
+        if (seen.has(v.vendor)) continue;
+        seen.add(v.vendor);
+        options.push({
+          label: `${v.vendor} (vendor — ${v.category})`,
+          value: v.vendor,
+          remaining: 0,
+          entityType: "vendor",
+        });
+      }
+
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
+      return NextResponse.json(options);
+    }
+
+    // ── Marketing Expense ──
+    // List standard channels + existing vendors.
+    if (category.includes("marketing")) {
+      const CHANNELS = [
+        "Meta Ads",
+        "Google Ads",
+        "TikTok Ads",
+        "YouTube",
+        "Influencer",
+        "Print",
+        "Events",
+        "Other",
+      ];
+      const options: Option[] = CHANNELS.map((c) => ({
+        label: c,
+        value: c,
+        remaining: 0,
+        entityType: "subcategory",
+      }));
+
+      const vendors = await prisma.marketingExpense.findMany({
+        where: periodId ? { periodId } : {},
+        select: { vendor: true, channel: true },
+      });
+      const seen = new Set(options.map((o) => o.value));
+      for (const v of vendors) {
+        if (!v.vendor) continue;
+        if (seen.has(v.vendor)) continue;
+        seen.add(v.vendor);
+        options.push({
+          label: `${v.vendor} (vendor — ${v.channel || "Marketing"})`,
+          value: v.vendor,
+          remaining: 0,
+          entityType: "vendor",
+        });
+      }
+
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
+      return NextResponse.json(options);
+    }
+
+    // ── Supplier Advance — list SUPPLIERS ──
+    if (category.includes("advance") && !category.includes("employee")) {
+      const rows = await prisma.payable.findMany({
+        where: periodId ? { periodId } : {},
+        orderBy: { supplierName: "asc" },
+      });
+      const seen = new Set<string>();
+      const options: Option[] = [];
+      for (const p of rows) {
+        if (seen.has(p.supplierName)) continue;
+        seen.add(p.supplierName);
+        options.push({
+          label: `${p.supplierName} (${p.category || "Supplier"})`,
+          value: p.supplierName,
+          remaining: p.remaining,
+          id: p.id,
+          entityType: "payable",
+        });
+      }
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
+      return NextResponse.json(options);
+    }
+
+    // ── Employee Loan ──
+    if (category.includes("employee loan") || category.includes("staff advance")) {
       const emps = await prisma.employee.findMany({
         where: { isActive: true },
         orderBy: { name: "asc" },
+        include: { loans: true },
       });
-      const options: Option[] = emps.map((e) => ({
-        label: `${e.name} (${e.role || "Staff"})`,
-        value: e.name,
-        remaining: 0,
-        id: e.id,
-        entityType: "employee",
-      }));
+      const options: Option[] = emps.map((e) => {
+        const loan = e.loans?.[0];
+        return {
+          label: loan
+            ? `${e.name} (${e.role || "Staff"}) — loan remaining ${loan.remainingAmount.toLocaleString()}`
+            : `${e.name} (${e.role || "Staff"})`,
+          value: e.name,
+          remaining: loan?.remainingAmount ?? 0,
+          id: e.id,
+          entityType: "employee",
+        };
+      });
+      options.sort((a, b) => b.remaining - a.remaining);
       options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
-    return NextResponse.json([{ label: "Other...", value: "__other__", remaining: 0 }]);
+    // ── Fallback ──
+    return NextResponse.json([
+      { label: "Other...", value: "__other__", remaining: 0 },
+    ]);
   } catch (e) {
-    console.error(e);
+    console.error("[txn-options]", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
-
