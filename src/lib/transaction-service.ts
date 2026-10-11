@@ -278,7 +278,10 @@ export async function postTransaction(input: TxnInput) {
 
   if (isClientSide && party) {
     let client = await prisma.client.findFirst({ where: { name: party } });
-    if (!client) client = await prisma.client.create({ data: { name: party } });
+    const isNewClient = !client;
+    if (!client) {
+      client = await prisma.client.create({ data: { name: party } });
+    }
 
     const paidNow =
       input.clientAmountPaid && input.clientAmountPaid > 0
@@ -287,56 +290,96 @@ export async function postTransaction(input: TxnInput) {
           ? input.debit
           : 0;
 
-    const totalPackage =
+    // Only honor Total Package when the user explicitly entered it (Other… new client).
+    // Never treat Debit alone as the full package for an existing client.
+    const explicitPackage =
       input.clientTotalPackage && input.clientTotalPackage > 0
         ? input.clientTotalPackage
-        : paidNow;
+        : 0;
 
-    if (totalPackage > 0) {
-      let recv = await prisma.receivable.findFirst({
+    // Post-link snapshot (applyReceiptToReceivables may already have applied paidNow)
+    let recv = await prisma.receivable.findFirst({
+      where: {
+        periodId: input.periodId,
+        OR: [{ clientId: client.id }, { clientName: client.name }],
+        status: { in: ["Open", "Partial", "Overdue", "Settled"] },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // Prefer open rows when several exist
+    const openRecv = await prisma.receivable.findFirst({
+      where: {
+        periodId: input.periodId,
+        OR: [{ clientId: client.id }, { clientName: client.name }],
+        status: { in: ["Open", "Partial", "Overdue"] },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    if (openRecv) recv = openRecv;
+
+    if (recv) {
+      const newTotal =
+        explicitPackage > 0
+          ? Math.max(recv.totalPackage, explicitPackage)
+          : recv.totalPackage;
+
+      // Did resolveLinks already apply this payment?
+      const linked = await prisma.transactionLink.aggregate({
         where: {
+          transactionId: txn.id,
+          entityType: "receivable",
+          entityId: recv.id,
+        },
+        _sum: { appliedAmount: true },
+      });
+      const alreadyLinked = (linked._sum.appliedAmount ?? 0) > 0;
+
+      let newReceived = recv.amountReceived;
+      if (paidNow > 0 && !alreadyLinked) {
+        newReceived = Math.min(newTotal, newReceived + paidNow);
+      }
+      // If package grew above received, keep received as-is (or linked value)
+      newReceived = Math.min(newTotal, newReceived);
+      const newRemaining = Math.max(0, newTotal - newReceived);
+
+      await prisma.receivable.update({
+        where: { id: recv.id },
+        data: {
+          totalPackage: newTotal,
+          amountToReceive: newTotal,
+          amountReceived: newReceived,
+          remainingAmount: newRemaining,
+          status:
+            newRemaining <= 0 && newReceived > 0
+              ? "Settled"
+              : newReceived > 0
+                ? "Partial"
+                : "Open",
+          clientId: client.id,
+          clientName: client.name,
+        },
+      });
+    } else if (explicitPackage > 0 || (isNewClient && paidNow > 0)) {
+      const packageVal = explicitPackage > 0 ? explicitPackage : paidNow;
+      const remaining = Math.max(0, packageVal - paidNow);
+      recv = await prisma.receivable.create({
+        data: {
           periodId: input.periodId,
           clientId: client.id,
-          status: { in: ["Open", "Partial", "Overdue"] },
+          clientName: client.name,
+          totalPackage: packageVal,
+          amountToReceive: packageVal,
+          amountReceived: paidNow,
+          remainingAmount: remaining,
+          tripDates: input.description || null,
+          status: remaining <= 0 ? "Settled" : paidNow > 0 ? "Partial" : "Open",
+          notes: "Auto-created from transaction",
         },
-        orderBy: { createdAt: "asc" },
       });
+    }
 
-      if (recv) {
-        const newTotal = Math.max(recv.totalPackage, totalPackage);
-        const newRemaining = Math.max(0, newTotal - recv.amountReceived);
-        await prisma.receivable.update({
-          where: { id: recv.id },
-          data: {
-            totalPackage: newTotal,
-            amountToReceive: newTotal,
-            remainingAmount: newRemaining,
-            status:
-              newRemaining <= 0
-                ? "Settled"
-                : recv.amountReceived > 0
-                  ? "Partial"
-                  : "Open",
-          },
-        });
-      } else {
-        const remaining = Math.max(0, totalPackage - paidNow);
-        recv = await prisma.receivable.create({
-          data: {
-            periodId: input.periodId,
-            clientId: client.id,
-            clientName: client.name,
-            totalPackage,
-            amountToReceive: totalPackage,
-            amountReceived: paidNow,
-            remainingAmount: remaining,
-            status:
-              remaining <= 0 ? "Settled" : paidNow > 0 ? "Partial" : "Open",
-            notes: "Auto-created from transaction",
-          },
-        });
-      }
-
+    if (paidNow > 0) {
       await prisma.clientLedger.create({
         data: {
           clientId: client.id,
@@ -353,22 +396,25 @@ export async function postTransaction(input: TxnInput) {
           notes: "Auto-posted from transaction",
         },
       });
+    }
 
-      const stillOwed = Math.max(0, totalPackage - paidNow);
+    // Outstanding ledger only for NEW clients with explicit total package
+    if (explicitPackage > 0 && isNewClient) {
+      const stillOwed = Math.max(0, explicitPackage - paidNow);
       if (stillOwed > 0) {
         await prisma.clientLedger.create({
           data: {
             clientId: client.id,
             clientName: client.name,
             tourDate: new Date(input.date),
-            description: "Outstanding balance (advance owed by client)",
+            description: "Outstanding balance",
             category: "Receivables",
             hotel: "Receivables",
             debit: stillOwed,
             credit: 0,
             status: "Open",
             enteredBy: input.enteredBy || null,
-            notes: "Auto-created outstanding",
+            notes: "Auto-created outstanding from total package",
           },
         });
       }

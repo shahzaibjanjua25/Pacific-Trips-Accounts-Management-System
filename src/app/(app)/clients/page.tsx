@@ -46,12 +46,12 @@ export default async function ClientsPage({
     );
     const ledger = ledgers.filter((l) => l.clientId === c.id);
 
-    // Prefer the Receivable row when it exists — it's the source of truth
+    // Prefer the Receivable row when it exists â€” it's the source of truth
     let totalPackage = 0;
     let amountPaid = 0;
     let amountDue = 0;
-    let tripInfo = "—";
-    let status = "—";
+    let tripInfo = "â€”";
+    let status = "â€”";
 
     if (recv.length > 0) {
       totalPackage = recv.reduce((s, r) => s + r.totalPackage, 0);
@@ -60,7 +60,7 @@ export default async function ClientsPage({
       tripInfo =
         recv.find((r) => r.tripDates)?.tripDates ||
         recv.find((r) => r.destination)?.destination ||
-        "—";
+        "â€”";
       status = amountDue <= 0 && amountPaid > 0 ? "Settled" : amountPaid > 0 ? "Partial" : "Open";
     } else if (ledger.length > 0) {
       // Fall back to ledger sums
@@ -81,7 +81,7 @@ export default async function ClientsPage({
       tripInfo =
         ledger.find((l) => l.description)?.description ||
         ledger.find((l) => l.hotel)?.hotel ||
-        "—";
+        "â€”";
       status = amountDue <= 0 && amountPaid > 0 ? "Settled" : amountPaid > 0 ? "Partial" : "Open";
     }
 
@@ -116,7 +116,7 @@ export default async function ClientsPage({
       amountPaid: r.amountReceived,
       amountDue: r.remainingAmount,
       status: r.status || "Open",
-      tripInfo: r.tripDates || r.destination || "—",
+      tripInfo: r.tripDates || r.destination || "â€”",
     });
   }
 
@@ -136,3 +136,4 @@ export default async function ClientsPage({
     </div>
   );
 }
+
