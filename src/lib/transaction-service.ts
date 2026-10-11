@@ -9,6 +9,7 @@ import {
   applyTransportPayment,
   applyGenericPayablePayment,
   syncRefundToClientLedger,
+  removeRefundFromClientLedger,
   type AppliedLink,
 } from "./links-service";
 
@@ -38,7 +39,6 @@ export type TxnInput = {
   clientTotalPackage?: number;
   clientAmountPaid?: number;
   hotelAgreedCost?: number;
-  // ── New client fields (used when the caller is creating a party on the fly) ──
   clientPhone?: string | null;
   clientContact?: string | null;
   clientEmail?: string | null;
@@ -68,6 +68,97 @@ async function adjustBank(accountName: string | null | undefined, delta: number)
   }
 }
 const cashDelta = (debit: number, credit: number) => debit - credit;
+
+/* ────── REFUND HELPERS ────── */
+
+/**
+ * Handle a refund transaction:
+ *   1. Create a Refund row (status "Paid", paidDate = txn date).
+ *   2. Reduce the client's Receivable.amountReceived by the refund amount.
+ *   3. Sync the ClientLedger row so the Refunds page + Clients page agree.
+ *
+ * Returns an array of AppliedLink with the new Refund row's id.
+ */
+async function createRefundFromTransaction(opts: {
+  periodId: string;
+  clientName: string;
+  amount: number;
+  date: Date;
+  description?: string | null;
+  tripRef?: string | null;
+  notes?: string | null;
+}): Promise<AppliedLink[]> {
+  const { periodId, clientName, amount } = opts;
+  if (!clientName || amount <= 0) return [];
+
+  // 1. Find or create the client master
+  let client = await prisma.client.findFirst({
+    where: { name: clientName },
+  });
+  if (!client) {
+    client = await prisma.client.create({ data: { name: clientName } });
+  }
+
+  // 2. Find the receivable for this client (open OR settled) in this period
+  const recv =
+    (await prisma.receivable.findFirst({
+      where: {
+        periodId,
+        OR: [{ clientId: client.id }, { clientName: client.name }],
+      },
+      orderBy: { createdAt: "asc" },
+    })) ?? null;
+
+  const paidBefore = recv ? Math.max(0, recv.amountReceived || 0) : 0;
+
+  // Cap the refund at what the client actually paid us.
+  const cappedRefund = Math.min(amount, paidBefore);
+  if (cappedRefund <= 0) {
+    // Nothing to refund — return early without creating a Refund row.
+    return [];
+  }
+
+  // 3. Create the Refund row
+  const refund = await prisma.refund.create({
+    data: {
+      periodId,
+      clientId: client.id,
+      clientName: client.name,
+      amount: cappedRefund,
+      reason: opts.description || "Refund issued",
+      status: "Paid",
+      paidDate: opts.date,
+      tripRef: opts.tripRef || null,
+      notes: opts.notes || "Auto-created from transaction",
+    },
+  });
+
+  // 4. Reduce the receivable
+  if (recv) {
+    const newReceived = Math.max(0, paidBefore - cappedRefund);
+    const newRemaining = Math.max(0, recv.totalPackage - newReceived);
+    await prisma.receivable.update({
+      where: { id: recv.id },
+      data: {
+        amountReceived: newReceived,
+        remainingAmount: newRemaining,
+        status:
+          newRemaining <= 0 && newReceived > 0
+            ? "Settled"
+            : newReceived > 0
+              ? "Partial"
+              : "Open",
+      },
+    });
+  }
+
+  // 5. ClientLedger row (credit — money out to client)
+  await syncRefundToClientLedger(refund.id);
+
+  return [
+    { entityType: "refund", entityId: refund.id, appliedAmount: cappedRefund },
+  ];
+}
 
 /* ────── LINK RESOLUTION ────── */
 async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
@@ -138,36 +229,21 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     return applyCommissionPayment(periodId, party, signedPayAmount);
   }
 
+  // ── REFUND: always create a Refund row + reduce receivable ──
+  // We ignore applyRefundPayment here (that one only flips an existing
+  // Pending refund to Paid) and instead build the refund from the
+  // transaction itself, which is what the user wants.
   if (cat.includes("refund")) {
-    const links = await applyRefundPayment(periodId, party, signedPayAmount);
-    if (links.length > 0) return links;
-
-    if (signedPayAmount > 0 && party) {
-      const client = await prisma.client.findFirst({ where: { name: party } });
-      const recv = await prisma.receivable.findFirst({
-        where: { periodId, clientName: party, amountReceived: { gt: 0 } },
-      });
-      if (recv) {
-        const refund = await prisma.refund.create({
-          data: {
-            periodId,
-            clientId: client?.id ?? null,
-            clientName: party,
-            amount: signedPayAmount,
-            reason: input.description || "Refund issued",
-            status: "Paid",
-            paidDate: new Date(input.date),
-            tripRef: input.tripRef || null,
-            notes: input.notes || "Auto-created from transaction",
-          },
-        });
-        await syncRefundToClientLedger(refund.id);
-        return [
-          { entityType: "refund", entityId: refund.id, appliedAmount: signedPayAmount },
-        ];
-      }
-    }
-    return links;
+    if (signedPayAmount <= 0 || !party) return [];
+    return createRefundFromTransaction({
+      periodId,
+      clientName: party,
+      amount: signedPayAmount,
+      date: new Date(input.date),
+      description: input.description,
+      tripRef: input.tripRef ?? null,
+      notes: input.notes ?? null,
+    });
   }
 
   if (cat.includes("advance") && !cat.includes("employee")) {
@@ -279,7 +355,6 @@ export async function postTransaction(input: TxnInput) {
     cat.includes("revenue");
 
   if (isClientSide && party) {
-    // ── Find or create client with extended fields ──
     let client = await prisma.client.findFirst({ where: { name: party } });
     const isNewClient = !client;
     if (!client) {
@@ -293,8 +368,6 @@ export async function postTransaction(input: TxnInput) {
         },
       });
     } else if (input.isNewClient) {
-      // If caller explicitly says "new", enrich existing row with any
-      // fields that are still blank.
       const updates: Record<string, string> = {};
       if (!client.phone && input.clientPhone) updates.phone = input.clientPhone;
       if (!client.contact && input.clientContact) updates.contact = input.clientContact;
@@ -359,8 +432,6 @@ export async function postTransaction(input: TxnInput) {
       let newReceived = recv.amountReceived;
       if (paidNow > 0 && !alreadyLinked) {
         const wouldBe = newReceived + paidNow;
-        // Only block if this is NOT a brand-new client — a new client
-        // legitimately needs the receipt to seed the receivable.
         if (wouldBe > newTotal && !input.isNewClient) {
           const over = wouldBe - newTotal;
           await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
@@ -373,7 +444,6 @@ export async function postTransaction(input: TxnInput) {
               `but ${paidNow} was entered (excess ${over}).`
           );
         }
-        // For a brand-new client, extend the total to fit what was paid
         newReceived = wouldBe;
       }
       newReceived = Math.min(newTotal, newReceived);
@@ -599,11 +669,52 @@ async function reverseLink(link: {
     });
   }
 
+  // ── REFUND reversal ──
+  // The refund transaction reduced the client's amountReceived; when the
+  // transaction is deleted we must add it back.
   if (link.entityType === "refund") {
-    await prisma.refund.update({
+    const refund = await prisma.refund.findUnique({
       where: { id: link.entityId },
-      data: { status: "Pending", paidDate: null },
     });
+    if (!refund) return;
+
+    // Re-add the refunded amount to the client's receivable
+    const recv = await prisma.receivable.findFirst({
+      where: {
+        periodId: refund.periodId,
+        OR: [
+          { clientId: refund.clientId ?? undefined },
+          { clientName: refund.clientName },
+        ],
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    if (recv) {
+      const newReceived = Math.min(
+        recv.totalPackage,
+        recv.amountReceived + refund.amount
+      );
+      const newRemaining = Math.max(0, recv.totalPackage - newReceived);
+      await prisma.receivable.update({
+        where: { id: recv.id },
+        data: {
+          amountReceived: newReceived,
+          remainingAmount: newRemaining,
+          status:
+            newRemaining <= 0 && newReceived > 0
+              ? "Settled"
+              : newReceived > 0
+                ? "Partial"
+                : "Open",
+        },
+      });
+    }
+
+    // Remove the ClientLedger row tied to this refund
+    await removeRefundFromClientLedger(refund.id);
+
+    // Delete the Refund row itself
+    await prisma.refund.delete({ where: { id: refund.id } }).catch(() => {});
   }
 }
 
