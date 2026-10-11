@@ -26,6 +26,11 @@ type Option = { label: string; value: string; remaining: number; id?: string };
 type Account = { id: string; name: string; balance: number };
 type Outstanding = { value: number | null; exists: boolean; reason?: string } | null;
 
+type ClientPaidMap = Record<
+  string,
+  { paid: number; refunded: number; refundable: number }
+>;
+
 const CATEGORIES = [
   "Client Receipt",
   "Revenue",
@@ -46,7 +51,6 @@ const CATEGORIES = [
   "Other",
 ];
 
-// ── Categories where money leaves US ──
 const OUTBOUND_CHECK_CATEGORIES = [
   "Salary Payment",
   "Hotel Payment",
@@ -59,7 +63,6 @@ const OUTBOUND_CHECK_CATEGORIES = [
   "Employee Loan",
 ];
 
-// Categories where money comes IN (client side)
 const INBOUND_CATEGORIES = ["Client Receipt", "Revenue"];
 
 const FALLBACK_ACCOUNTS: Account[] = [
@@ -112,9 +115,12 @@ export function TransactionManager({
   const [showOther, setShowOther] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [outstanding, setOutstanding] = useState<Outstanding>(null);
+  // NEW — map of clientName → { paid, refunded, refundable }
+  const [clientPaid, setClientPaid] = useState<ClientPaidMap>({});
 
   const isClientCategory = INBOUND_CATEGORIES.includes(form.category);
   const isHotelCategory = form.category === "Hotel Payment";
+  const isRefundCategory = form.category === "Refund to Client";
   const isOutboundCategory = OUTBOUND_CHECK_CATEGORIES.includes(form.category);
   const shouldCheckOutstanding = isClientCategory || isOutboundCategory;
 
@@ -139,6 +145,27 @@ export function TransactionManager({
       cancelled = true;
     };
   }, []);
+
+  // ── NEW: Load client paid map once ──
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(`/api/client-paid?periodId=${periodId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data && typeof data === "object") {
+          setClientPaid(data as ClientPaidMap);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [periodId]);
 
   // ── Load party options ──
   useEffect(() => {
@@ -261,6 +288,28 @@ export function TransactionManager({
     }
   }
 
+  // ── NEW: compute refundable client-side ──
+  // This is used as a secondary guard alongside the API, so the user
+  // gets an immediate cap even if the /api/outstanding response is slow.
+  const clientRefundable = (() => {
+    if (!isRefundCategory) return null;
+    const name = showOther ? form.otherName.trim() : form.party || form.subCategory;
+    if (!name) return null;
+
+    // Exact match first
+    if (clientPaid[name]) return clientPaid[name].refundable;
+
+    // Fuzzy: case-insensitive includes
+    const key = Object.keys(clientPaid).find((k) => {
+      const a = k.toLowerCase().trim();
+      const b = name.toLowerCase().trim();
+      return a === b || a.includes(b) || b.includes(a);
+    });
+    if (key) return clientPaid[key].refundable;
+
+    return 0;
+  })();
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
 
@@ -287,21 +336,17 @@ export function TransactionManager({
 
     // ════════════════════════════════════════════════════════════
     // DIRECTION SANITY CHECK
-    //   OUTBOUND categories must put money in CREDIT
-    //   INBOUND categories must put money in DEBIT
     // ════════════════════════════════════════════════════════════
     if (isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
       const ok = confirm(
         `⚠️ Wrong direction\n\n` +
           `"${form.category}" is a payment OUT of the company, so the amount ` +
-          `belongs in the **Credit** column, not Debit.\n\n` +
+          `belongs in the Credit column, not Debit.\n\n` +
           `You entered ${formatPKR(debitAmount)} in Debit.\n\n` +
           `Click OK to move it to Credit automatically, or Cancel to fix it yourself.`
       );
       if (!ok) return;
-      // Auto-move
       setForm((f) => ({ ...f, credit: String(debitAmount), debit: "" }));
-      // Continue with the corrected value
       return save(new Event("submit") as unknown as React.FormEvent);
     }
 
@@ -309,7 +354,7 @@ export function TransactionManager({
       const ok = confirm(
         `⚠️ Wrong direction\n\n` +
           `"${form.category}" is money IN from a client, so the amount ` +
-          `belongs in the **Debit** column, not Credit.\n\n` +
+          `belongs in the Debit column, not Credit.\n\n` +
           `You entered ${formatPKR(creditAmount)} in Credit.\n\n` +
           `Click OK to move it to Debit automatically, or Cancel to fix it yourself.`
       );
@@ -325,11 +370,6 @@ export function TransactionManager({
 
     // ════════════════════════════════════════════════════════════
     // HARD BLOCK: overpayment guard
-    //
-    // Skip ONLY when BOTH are true:
-    //   1. user typed a new name via "Other…"
-    //   2. the API confirms no such record exists (exists === false)
-    // In every other case, enforce the block.
     // ════════════════════════════════════════════════════════════
     const isTypedNew = showOther && form.otherName.trim().length > 0;
 
@@ -357,10 +397,24 @@ export function TransactionManager({
         liveReason = outstanding?.reason;
       }
 
-      // Skip only for genuinely-new parties
+      // ── NEW: refund-only secondary guard, using clientPaid map ──
+      // If the client-side map knows the refundable amount (even if the
+      // API hasn't caught up), enforce it.
+      if (isRefundCategory && clientRefundable != null) {
+        if (movingAmount > clientRefundable) {
+          alert(
+            `❌ Cannot refund more than the client paid us\n\n` +
+              `Client: ${party}\n` +
+              `Refundable: ${formatPKR(clientRefundable)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(movingAmount - clientRefundable)}`
+          );
+          return;
+        }
+      }
+
       const treatAsNew = isTypedNew && !liveExists;
 
-      // Block if the amount exceeds what's owed AND we know the outstanding
       if (!treatAsNew && liveOutstanding != null && movingAmount > liveOutstanding) {
         const over = movingAmount - liveOutstanding;
         if (isClientReceipt) {
@@ -373,6 +427,14 @@ export function TransactionManager({
               `Reduce the amount to ${formatPKR(liveOutstanding)} or less, ` +
               `or increase the client's Total Package on the Receivables page first.`
           );
+        } else if (isRefundCategory) {
+          alert(
+            `❌ Cannot refund more than the client paid us\n\n` +
+              `Client: ${party}\n` +
+              `Refundable (paid − already refunded): ${formatPKR(liveOutstanding)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(over)}`
+          );
         } else {
           alert(
             `❌ Cannot add transaction — amount exceeds what we owe\n\n` +
@@ -383,11 +445,9 @@ export function TransactionManager({
               `Reduce the amount to ${formatPKR(liveOutstanding)} or less.`
           );
         }
-        return; // ⛔ HARD STOP
+        return;
       }
 
-      // If the API says a record exists but the name didn't match,
-      // shout loudly instead of letting a huge overpay through.
       if (!treatAsNew && liveExists && liveReason === "no-name-match") {
         const ok = confirm(
           `⚠️ Warning\n\n` +
@@ -401,7 +461,6 @@ export function TransactionManager({
       }
     }
 
-    // For a NEW client, check against Total Package if provided
     if (isClientReceipt) {
       const pkg = parseFloat(form.clientTotalPackage) || 0;
       if (pkg > 0 && receivedIn > pkg) {
@@ -485,7 +544,6 @@ export function TransactionManager({
     if (!shouldCheckOutstanding) return null;
     const movingAmount = isClientCategory ? debitNum : creditNum;
 
-    // Wrong-direction hint (before any outstanding check)
     if (isOutboundCategory && debitNum > 0 && creditNum === 0) {
       return (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
@@ -501,6 +559,48 @@ export function TransactionManager({
           ⚠️ You put the amount in <strong>Credit</strong>, but{" "}
           <strong>{form.category}</strong> is money coming IN. Put it in{" "}
           <strong>Debit</strong>. (It will be auto-moved on save.)
+        </p>
+      );
+    }
+
+    // ── NEW: dedicated refund hint from clientPaid map ──
+    if (isRefundCategory) {
+      const name = showOther
+        ? form.otherName.trim()
+        : form.party || form.subCategory;
+      if (!name) return null;
+      if (clientRefundable == null) return null;
+
+      if (movingAmount > clientRefundable) {
+        return (
+          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+            ⚠️ Refund exceeds what the client paid us. Refundable is{" "}
+            <strong>{formatPKR(clientRefundable)}</strong>, you entered{" "}
+            <strong>{formatPKR(movingAmount)}</strong>. Saving will be blocked.
+          </p>
+        );
+      }
+      if (clientRefundable === 0) {
+        return (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+            ⚠️ This client has <strong>₨ 0</strong> refundable — either they haven't
+            paid us, or they've already been fully refunded.
+          </p>
+        );
+      }
+      if (movingAmount > 0) {
+        return (
+          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+            Refundable: <strong>{formatPKR(clientRefundable)}</strong>
+            {" · "}
+            Remaining after this refund:{" "}
+            <strong>{formatPKR(Math.max(0, clientRefundable - movingAmount))}</strong>
+          </p>
+        );
+      }
+      return (
+        <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+          Refundable from this client: <strong>{formatPKR(clientRefundable)}</strong>
         </p>
       );
     }

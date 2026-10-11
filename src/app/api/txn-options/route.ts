@@ -94,11 +94,10 @@ export async function GET(req: NextRequest) {
         orderBy: [{ remaining: "desc" }, { supplierName: "asc" }],
       });
       const options: Option[] = rows.map((p) => ({
-        label: `${p.supplierName} - ${p.category || "Other"} ${
-          p.remaining > 0
+        label: `${p.supplierName} - ${p.category || "Other"} ${p.remaining > 0
             ? `(owing ${p.remaining.toLocaleString()})`
             : "(fully paid)"
-        }`,
+          }`,
         value: p.supplierName,
         remaining: p.remaining,
         id: p.id,
@@ -119,11 +118,10 @@ export async function GET(req: NextRequest) {
         orderBy: [{ remainingAmount: "desc" }, { clientName: "asc" }],
       });
       const options: Option[] = recv.map((r) => ({
-        label: `${r.clientName} ${
-          r.remainingAmount > 0
+        label: `${r.clientName} ${r.remainingAmount > 0
             ? `(due ${r.remainingAmount.toLocaleString()})`
             : "(fully paid)"
-        }`,
+          }`,
         value: r.clientName,
         remaining: r.remainingAmount,
         id: r.id,
@@ -155,11 +153,11 @@ export async function GET(req: NextRequest) {
       });
       const payrollRows = periodId
         ? await prisma.payrollEntry.findMany({
-            where: {
-              periodId,
-              status: { in: ["Pending", "Partial"] },
-            },
-          })
+          where: {
+            periodId,
+            status: { in: ["Pending", "Partial"] },
+          },
+        })
         : [];
       const remainingByName = new Map<string, number>();
       for (const p of payrollRows) {
@@ -227,37 +225,58 @@ export async function GET(req: NextRequest) {
 
     // ── Refund to Client ──
     // List every client with a Pending refund, plus every client (for new refunds).
+    // ── Refund to Client ──
+    // List clients that actually have money they can be refunded.
     if (category.includes("refund")) {
-      const refunds = await prisma.refund.findMany({
-        where: {
-          ...(periodId ? { periodId } : {}),
-          status: "Pending",
-        },
-        orderBy: [{ amount: "desc" }, { clientName: "asc" }],
-      });
+      const [receivables, refunds] = await Promise.all([
+        prisma.receivable.findMany({
+          where: periodId ? { periodId } : {},
+        }),
+        prisma.refund.findMany({
+          where: periodId ? { periodId } : {},
+        }),
+      ]);
 
-      const options: Option[] = refunds.map((r) => ({
-        label: `${r.clientName} — refund pending ${r.amount.toLocaleString()}`,
-        value: r.clientName,
-        remaining: r.amount,
-        id: r.id,
-        entityType: "refund",
-      }));
+      const paidBy = new Map<string, number>();
+      const refundedBy = new Map<string, number>();
 
-      // Add clients without a pending refund so you can create one
-      const clients = await prisma.client.findMany({ orderBy: { name: "asc" } });
-      const have = new Set(options.map((o) => o.value));
-      for (const c of clients) {
-        if (!have.has(c.name)) {
-          options.push({
-            label: c.name,
-            value: c.name,
-            remaining: 0,
-            id: c.id,
-            entityType: "client",
-          });
-        }
+      for (const r of receivables) {
+        const k = (r.clientName || "").trim();
+        if (!k) continue;
+        paidBy.set(k, (paidBy.get(k) ?? 0) + Math.max(0, r.amountReceived || 0));
       }
+      for (const r of refunds) {
+        const k = (r.clientName || "").trim();
+        if (!k) continue;
+        refundedBy.set(k, (refundedBy.get(k) ?? 0) + Math.max(0, r.amount || 0));
+      }
+
+      // Union of names — from receivables, from clients master, and from refunds
+      const clients = await prisma.client.findMany({ orderBy: { name: "asc" } });
+      const names = new Set<string>();
+      receivables.forEach((r) => r.clientName && names.add(r.clientName));
+      refunds.forEach((r) => r.clientName && names.add(r.clientName));
+      clients.forEach((c) => names.add(c.name));
+
+      const options: Option[] = Array.from(names)
+        .map((name) => {
+          const paid = paidBy.get(name) ?? 0;
+          const refunded = refundedBy.get(name) ?? 0;
+          const refundable = Math.max(0, paid - refunded);
+          return {
+            label:
+              refundable > 0
+                ? `${name} — refundable ${refundable.toLocaleString()} (paid ${paid.toLocaleString()})`
+                : paid === 0
+                  ? `${name} — no receipts yet`
+                  : `${name} — fully refunded (${refunded.toLocaleString()})`,
+            value: name,
+            remaining: refundable,
+            entityType: "client",
+          };
+        })
+        // Sort: refundable first (desc), then fully-refunded, then no-receipts
+        .sort((a, b) => b.remaining - a.remaining);
 
       options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus, X } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
 
 type Client = { id: string; name: string };
+type Account = { id: string; name: string; balance: number };
 
 type RefundRow = {
   id: string;
@@ -26,7 +27,14 @@ const empty = {
   paidDate: "",
   tripRef: "",
   notes: "",
+  bankAccount: "Cash",
 };
+
+const FALLBACK_ACCOUNTS: Account[] = [
+  { id: "fb-1", name: "Cash", balance: 0 },
+  { id: "fb-2", name: "Faysal Bank", balance: 0 },
+  { id: "fb-3", name: "UBL", balance: 0 },
+];
 
 export function RefundsPanel({
   periodId,
@@ -42,8 +50,28 @@ export function RefundsPanel({
   const [editing, setEditing] = useState<RefundRow | null>(null);
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts] = useState<Account[]>([]);
 
-  // If a client isn't in the master list (legacy data), still show it
+  // Load bank accounts for the account dropdown
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/accounts")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (cancelled) return;
+        const list: Account[] =
+          Array.isArray(data) && data.length > 0 ? data : FALLBACK_ACCOUNTS;
+        setAccounts(list);
+        setForm((f) => ({ ...f, bankAccount: f.bankAccount || list[0].name }));
+      })
+      .catch(() => {
+        if (!cancelled) setAccounts(FALLBACK_ACCOUNTS);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const clientNames = clients.map((c) => c.name);
   const extraNames = Array.from(
     new Set(
@@ -58,6 +86,7 @@ export function RefundsPanel({
     setForm({
       ...empty,
       clientName: clients[0]?.name || "",
+      bankAccount: accounts[0]?.name || "Cash",
       paidDate: "",
     });
     setOpen(true);
@@ -73,6 +102,7 @@ export function RefundsPanel({
       paidDate: r.paidDate ? r.paidDate.slice(0, 10) : "",
       tripRef: r.tripRef || "",
       notes: r.notes || "",
+      bankAccount: accounts[0]?.name || "Cash",
     });
     setOpen(true);
   }
@@ -90,6 +120,7 @@ export function RefundsPanel({
         paidDate: form.paidDate || null,
         tripRef: form.tripRef || null,
         notes: form.notes || null,
+        bankAccount: form.bankAccount,
       };
       const res = await fetch("/api/refunds", {
         method: editing ? "PUT" : "POST",
@@ -107,7 +138,8 @@ export function RefundsPanel({
   }
 
   async function remove(id: string) {
-    if (!confirm("Delete this refund?")) return;
+    if (!confirm("Delete this refund? The linked transaction will also be removed."))
+      return;
     setLoading(true);
     try {
       const res = await fetch(`/api/refunds?id=${id}`, { method: "DELETE" });
@@ -198,6 +230,29 @@ export function RefundsPanel({
                 <option value="Pending">Pending</option>
                 <option value="Paid">Paid</option>
               </select>
+            </label>
+
+            <label className="block text-xs">
+              <span className="text-slate-600 font-medium">
+                Bank / Cash Account
+              </span>
+              <select
+                value={form.bankAccount}
+                onChange={(e) => setForm({ ...form, bankAccount: e.target.value })}
+                className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
+                <option value="Cash">Cash</option>
+                <option value="Petty Cash">Petty Cash</option>
+                <option value="Cheque">Cheque</option>
+              </select>
+              <span className="text-[10px] text-slate-500 mt-0.5 block">
+                Used only when Status = Paid. Adjusts this account balance.
+              </span>
             </label>
 
             <Field
