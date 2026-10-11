@@ -41,7 +41,7 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      <SeedDatabaseButton />
+      {/* <SeedDatabaseButton /> */}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Section title="1. Cash & Bank" color="bg-emerald-500">

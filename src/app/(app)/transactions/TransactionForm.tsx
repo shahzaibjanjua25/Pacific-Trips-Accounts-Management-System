@@ -62,6 +62,7 @@ const empty = {
   otherName: "",
   clientTotalPackage: "",
   clientAmountPaid: "",
+  hotelAgreedCost: "",           // ← NEW
 };
 
 export function TransactionManager({
@@ -81,6 +82,7 @@ export function TransactionManager({
 
   const isClientCategory =
     form.category === "Client Receipt" || form.category === "Revenue";
+  const isHotelCategory = form.category === "Hotel Payment";   // ← NEW
 
   useEffect(() => {
     if (!open) return;
@@ -102,6 +104,44 @@ export function TransactionManager({
       cancelled = true;
     };
   }, [form.category, periodId, open]);
+
+  // Prefill Hotel Agreed Cost when editing a Hotel Payment
+  useEffect(() => {
+    if (!editing) return;
+    if (form.category !== "Hotel Payment") return;
+    const hotelName = form.party || form.subCategory;
+    if (!hotelName) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/payables?periodId=${periodId}`);
+        if (!res.ok) return;
+        const rows: Array<{
+          id: string;
+          supplierName: string;
+          category: string | null;
+          originalAmount: number;
+        }> = await res.json();
+        const match = rows.find(
+          (p) =>
+            (p.category || "").toLowerCase().includes("hotel") &&
+            p.supplierName.toLowerCase() === hotelName.toLowerCase()
+        );
+        if (!cancelled && match && match.originalAmount > 0) {
+          setForm((f) => ({
+            ...f,
+            hotelAgreedCost: String(match.originalAmount),
+          }));
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, form.category, form.party, form.subCategory, periodId]);
 
   function openAdd() {
     setEditing(null);
@@ -129,6 +169,7 @@ export function TransactionManager({
       otherName: "",
       clientTotalPackage: "",
       clientAmountPaid: "",
+      hotelAgreedCost: "",   // ← NEW (prefilled by effect above)
     });
     setShowOther(false);
     setOpen(true);
@@ -165,6 +206,7 @@ export function TransactionManager({
         credit: parseFloat(form.credit) || 0,
         clientTotalPackage: parseFloat(form.clientTotalPackage) || 0,
         clientAmountPaid: parseFloat(form.clientAmountPaid) || 0,
+        hotelAgreedCost: parseFloat(form.hotelAgreedCost) || 0,   // ← NEW
       };
       const res = await fetch("/api/transactions", {
         method: editing ? "PUT" : "POST",
@@ -331,6 +373,22 @@ export function TransactionManager({
               </>
             )}
 
+            {isHotelCategory && (
+              <>
+                <Field
+                  label="Hotel Agreed / Booking Cost (PKR)"
+                  type="number"
+                  value={form.hotelAgreedCost}
+                  onChange={(v) => setForm({ ...form, hotelAgreedCost: v })}
+                />
+                <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
+                  Total agreed amount with the hotel. Debit = amount paid now.
+                  Enter the full booking cost here so the hotel&apos;s remaining
+                  payable is calculated correctly.
+                </p>
+              </>
+            )}
+
             <Select
               label="Payment Method"
               value={form.paymentMethod}
@@ -493,4 +551,3 @@ function Select({
     </label>
   );
 }
-

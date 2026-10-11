@@ -4,17 +4,9 @@
  */
 import { prisma } from "./prisma";
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * PAYABLE â† OPERATIONAL SYNC
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-/**
- * Recompute a payroll entry from scratch based on:
- *   basic + commission - tax - loan installment - other deductions
- * Then set netPayable / remaining / status correctly.
- *
- * If `amountPaid` > 0 and status becomes fully Paid, decrement the linked
- * EmployeeLoan by the current month's installment.
- */
+/* ─────────────────────────────────────────────
+ * PAYABLE ← OPERATIONAL SYNC
+ * ───────────────────────────────────────────── */
 /**
  * Recompute a payroll entry from scratch based on:
  *   basic + commission − tax − loan installment − other deductions
@@ -201,9 +193,9 @@ export async function propagatePayableToOperational(payableId: string) {
     }
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ─────────────────────────────────────────────
  * PAYMENT APPLICATION
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+ * ───────────────────────────────────────────── */
 
 export type AppliedLink = {
     entityType:
@@ -226,16 +218,40 @@ function nameMatch(a: string, b: string): boolean {
     return x === y || x.includes(y) || y.includes(x);
 }
 
+/**
+ * Apply a payment to a Payable.
+ *
+ * originalAmount resolution order:
+ *   1. Use existing stored value if > 0
+ *   2. Else use explicit agreedCost if supplied
+ *   3. Else fall back to this payment amount (legacy last resort)
+ */
 async function applyToPayable(
     periodId: string,
     payableId: string,
-    amount: number
+    amount: number,
+    agreedCost?: number
 ): Promise<number> {
     const p = await prisma.payable.findUnique({ where: { id: payableId } });
     if (!p) return 0;
 
-    // If payable has no billed amount yet, treat this payment as the amount owed
-    const orig = p.originalAmount > 0 ? p.originalAmount : amount;
+    // Determine originalAmount
+    let orig = p.originalAmount;
+    if (orig <= 0) {
+        if (agreedCost && agreedCost > 0) {
+            orig = agreedCost;
+        } else {
+            orig = amount;
+            console.warn(
+                `[applyToPayable] No agreedCost for payable ${payableId} (${p.supplierName}). ` +
+                `Falling back to first payment amount (${amount}) as originalAmount.`
+            );
+        }
+    } else if (agreedCost && agreedCost > 0 && agreedCost !== orig) {
+        // User explicitly set/updated the agreed cost — honour it
+        orig = agreedCost;
+    }
+
     const pay = Math.min(amount, Math.max(0, orig - p.amountPaid));
     const newPaid = p.amountPaid + pay;
     const newRem = Math.max(0, orig - newPaid);
@@ -246,13 +262,14 @@ async function applyToPayable(
             originalAmount: orig,
             amountPaid: newPaid,
             remaining: newRem,
-            status: newRem <= 0 ? "Paid" : "Partial",
+            status: newRem <= 0 ? "Paid" : newPaid > 0 ? "Partial" : "Open",
         },
     });
 
     await propagatePayableToOperational(p.id);
     return pay;
 }
+
 export async function applyPaymentToPayables(
     periodId: string,
     partyName: string,
@@ -328,8 +345,6 @@ export async function applyReceiptToReceivables(
     return links;
 }
 
-/** Apply a partial (or full) payment to a payroll entry. */
-/** Apply a partial (or full) payment to a payroll entry. */
 /** Resolve employee display name → canonical Employee row (fuzzy). */
 async function resolveEmployee(employeeName: string) {
     const all = await prisma.employee.findMany({ where: { isActive: true } });
@@ -415,13 +430,10 @@ export async function applyPayrollPayment(
     }
 
     const outstanding = Math.max(0, entry.netPayable - (entry.amountPaid ?? 0));
-    // If net was 0 (e.g. lead with no commission yet), still record payment against net
-    // by treating payment as raising amountPaid (remaining stays 0 or increases net if needed)
     let applied: number;
     let newPaid: number;
     let newRemaining: number;
     if (outstanding <= 0 && entry.netPayable <= 0) {
-        // Nothing owed on paper — still apply payment as amountPaid so history is kept
         applied = amount;
         newPaid = (entry.amountPaid ?? 0) + applied;
         newRemaining = 0;
@@ -507,12 +519,10 @@ export async function applyRefundPayment(
     });
     return [{ entityType: "refund", entityId: r.id, appliedAmount: applied }];
 }
+
 /**
  * Post or update a ClientLedger row for a refund.
  * Called whenever a Refund is created or updated.
- * - Pending  â†’ creates an "Open" ledger credit row
- * - Paid     â†’ creates/updates the ledger row to "Paid"
- * - Deleted  â†’ ledger row is removed (handled by caller)
  */
 export async function syncRefundToClientLedger(refundId: string) {
     const refund = await prisma.refund.findUnique({ where: { id: refundId } });
@@ -562,6 +572,7 @@ export async function syncRefundToClientLedger(refundId: string) {
         await prisma.clientLedger.create({ data: ledgerData });
     }
 }
+
 /**
  * Find or create a Payable + HotelBooking pair by hotel name.
  * Used when a transaction names a hotel that doesn't exist yet.
@@ -569,7 +580,7 @@ export async function syncRefundToClientLedger(refundId: string) {
 export async function findOrCreateHotelPayable(
     periodId: string,
     hotelName: string,
-    opts?: { description?: string; tripRef?: string }
+    opts?: { description?: string; tripRef?: string; agreedCost?: number }
 ): Promise<string> {
     // Look for an existing payable for this hotel in the period
     let payable = await prisma.payable.findFirst({
@@ -582,6 +593,18 @@ export async function findOrCreateHotelPayable(
     });
 
     if (payable) {
+        // If an explicit agreed cost was supplied and differs, update it
+        if (
+            opts?.agreedCost &&
+            opts.agreedCost > 0 &&
+            payable.originalAmount !== opts.agreedCost
+        ) {
+            await prisma.payable.update({
+                where: { id: payable.id },
+                data: { originalAmount: opts.agreedCost },
+            });
+        }
+
         // Make sure a HotelBooking exists and is linked
         const existingBooking = await prisma.hotelBooking.findFirst({
             where: { payableId: payable.id },
@@ -600,15 +623,18 @@ export async function findOrCreateHotelPayable(
     }
 
     // Create both
+    const initialOriginal =
+        opts?.agreedCost && opts.agreedCost > 0 ? opts.agreedCost : 0;
+
     payable = await prisma.payable.create({
         data: {
             periodId,
             supplierName: hotelName,
             category: "Hotel",
             description: opts?.description ?? "Hotel booking (auto-created)",
-            originalAmount: 0,
+            originalAmount: initialOriginal,
             amountPaid: 0,
-            remaining: 0,
+            remaining: initialOriginal,
             relatedTrip: opts?.tripRef ?? null,
             status: "Open",
             notes: "Auto-created from transaction",
@@ -731,11 +757,11 @@ export async function applyHotelPayment(
     periodId: string,
     hotelName: string,
     amount: number,
-    opts?: { description?: string; tripRef?: string }
+    opts?: { description?: string; tripRef?: string; agreedCost?: number }
 ): Promise<AppliedLink[]> {
     if (!hotelName || amount <= 0) return [];
     const payableId = await findOrCreateHotelPayable(periodId, hotelName, opts);
-    const applied = await applyToPayable(periodId, payableId, amount);
+    const applied = await applyToPayable(periodId, payableId, amount, opts?.agreedCost);
     return applied > 0
         ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
         : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
@@ -774,11 +800,13 @@ export async function applyGenericPayablePayment(
         ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
         : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
 }
+
 /** Remove the ledger row tied to a refund (used on refund delete). */
 export async function removeRefundFromClientLedger(refundId: string) {
     const marker = `REFUND:${refundId}`;
     await prisma.clientLedger.deleteMany({ where: { receiptRef: marker } });
 }
+
 export async function applyToAdvances(
     periodId: string,
     supplierName: string,
@@ -811,4 +839,3 @@ export async function applyToAdvances(
 
     return links;
 }
-

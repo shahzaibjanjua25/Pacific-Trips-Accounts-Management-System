@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
       // Client package + paid (must be forwarded or Total Package is lost)
       clientTotalPackage: Number(body.clientTotalPackage) || 0,
       clientAmountPaid: Number(body.clientAmountPaid) || 0,
+      // Hotel agreed / booking cost (must be forwarded or Payable.originalAmount is wrong)
+      hotelAgreedCost: Number(body.hotelAgreedCost) || 0,   // ← NEW
     });
     return NextResponse.json(txn);
   } catch (e) {
@@ -71,6 +73,8 @@ export async function PUT(req: NextRequest) {
       status: body.status,
       enteredBy: body.enteredBy,
       notes: body.notes,
+      hotelAgreedCost:
+        body.hotelAgreedCost != null ? Number(body.hotelAgreedCost) : undefined,  // ← NEW
     });
     return NextResponse.json(txn);
   } catch (e) {
