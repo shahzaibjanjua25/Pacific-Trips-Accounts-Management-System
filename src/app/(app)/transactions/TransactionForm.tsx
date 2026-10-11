@@ -237,7 +237,7 @@ export function TransactionManager({
           </div>
           <p className="text-xs text-slate-600">
             Choose <strong>Category</strong> first - Sub-Category / Party lists hotels, suppliers,
-            clients or staff you owe / who owe you. Pick <strong>Otherâ€¦</strong> to type a new name.
+            clients or staff you owe / who owe you. Pick <strong>Other...</strong> to type a new name.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field
@@ -362,7 +362,7 @@ export function TransactionManager({
             disabled={loading}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Savingâ€¦" : editing ? "Update" : "Save Transaction"}
+            {loading ? "Saving..." : editing ? "Update" : "Save Transaction"}
           </button>
         </form>
       )}

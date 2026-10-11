@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
           entityType: "payable",
         });
       }
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
         id: p.id,
         entityType: "payable",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
         id: p.id,
         entityType: "payable",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
         id: t.id,
         entityType: "ticketing",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -137,7 +137,7 @@ export async function GET(req: NextRequest) {
           });
         }
       }
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -193,7 +193,7 @@ export async function GET(req: NextRequest) {
         id: c.id,
         entityType: "commission",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -211,7 +211,7 @@ export async function GET(req: NextRequest) {
         id: r.id,
         entityType: "refund",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
@@ -227,11 +227,11 @@ export async function GET(req: NextRequest) {
         id: e.id,
         entityType: "employee",
       }));
-      options.push({ label: "Otherâ€¦", value: "__other__", remaining: 0 });
+      options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }
 
-    return NextResponse.json([{ label: "Otherâ€¦", value: "__other__", remaining: 0 }]);
+    return NextResponse.json([{ label: "Other...", value: "__other__", remaining: 0 }]);
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: String(e) }, { status: 500 });

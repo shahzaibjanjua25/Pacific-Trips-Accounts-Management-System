@@ -310,7 +310,7 @@ export function SalesTeamPanel({
             disabled={loading || !form.employeeName}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Savingâ€¦" : "Save Sale"}
+            {loading ? "Saving..." : "Save Sale"}
           </button>
         </form>
       )}
