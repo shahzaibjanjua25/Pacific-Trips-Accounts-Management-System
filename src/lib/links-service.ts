@@ -2,15 +2,22 @@
  * Links operational modules (HotelBooking, TransportJob) to the financial
  * master (Payable). Payable is the single source of truth for money owed.
  *
- * SIGN CONVENTION FOR PAYABLES (payer's perspective):
- *   positive amount = we paid the supplier     (amountPaid increases)
- *   negative amount = supplier refunded us     (amountPaid decreases)
+ * IMPORTANT: Apply functions CAP the applied amount at the outstanding balance.
+ * Overpayments are blocked upstream (in TransactionForm + the API) before they
+ * reach these functions. The caps here are a defensive backstop.
  */
 import { prisma } from "./prisma";
 
 /* ─────────────────────────────────────────────
- * PAYABLE ← OPERATIONAL SYNC
+ * PAYABLE ↔ OPERATIONAL SYNC
  * ───────────────────────────────────────────── */
+
+/**
+ * Recompute a payroll entry from scratch based on:
+ *   basic + commission − tax − loan installment − other deductions
+ *
+ * Commission is only applied to Sales-role employees.
+ */
 export async function syncPayrollForEmployee(
     periodId: string,
     employeeName: string
@@ -26,7 +33,7 @@ export async function syncPayrollForEmployee(
             employeeName.toLowerCase().includes("amad") ||
             employeeName.toLowerCase().includes("ammar"));
 
-    const pay = await prisma.payrollEntry.findFirst({
+    let pay = await prisma.payrollEntry.findFirst({
         where: { periodId, employeeName },
     });
 
@@ -60,8 +67,8 @@ export async function syncPayrollForEmployee(
         remaining <= 0 && amountPaid > 0
             ? "Paid"
             : amountPaid > 0
-              ? "Partial"
-              : "Pending";
+                ? "Partial"
+                : "Pending";
 
     if (pay) {
         await prisma.payrollEntry.update({
@@ -96,6 +103,7 @@ export async function syncPayrollForEmployee(
     }
 }
 
+/** Ensure a Payable exists for a HotelBooking. Returns payable id. */
 export async function ensurePayableForHotel(hotelId: string): Promise<string | null> {
     const hotel = await prisma.hotelBooking.findUnique({ where: { id: hotelId } });
     if (!hotel) return null;
@@ -124,6 +132,7 @@ export async function ensurePayableForHotel(hotelId: string): Promise<string | n
     return payable.id;
 }
 
+/** Ensure a Payable exists for a TransportJob. Returns payable id. */
 export async function ensurePayableForTransport(jobId: string): Promise<string | null> {
     const job = await prisma.transportJob.findUnique({ where: { id: jobId } });
     if (!job) return null;
@@ -153,6 +162,7 @@ export async function ensurePayableForTransport(jobId: string): Promise<string |
     return payable.id;
 }
 
+/** Sync operational status word to match Payable financial status. */
 export function deriveHotelStatus(remaining: number, paid: number): string {
     if (remaining <= 0 && paid > 0) return "Paid";
     if (paid > 0) return "Partial";
@@ -188,7 +198,7 @@ export async function propagatePayableToOperational(payableId: string) {
 }
 
 /* ─────────────────────────────────────────────
- * PAYMENT APPLICATION (signed amounts)
+ * PAYMENT APPLICATION
  * ───────────────────────────────────────────── */
 
 export type AppliedLink = {
@@ -213,47 +223,37 @@ function nameMatch(a: string, b: string): boolean {
 }
 
 /**
- * Apply a signed amount to a Payable.
- *   signedAmount > 0 → we paid the supplier (amountPaid increases)
- *   signedAmount < 0 → supplier refunded us (amountPaid decreases)
- *
- * originalAmount resolution order:
- *   1. Existing stored value if > 0
- *   2. Explicit agreedCost if supplied
- *   3. |signedAmount| — legacy last resort
- *
- * Returns the signed delta actually applied.
+ * Apply a payment to a Payable.
+ * CAP: applied = min(amount, orig − amountPaid).
  */
 async function applyToPayable(
     periodId: string,
     payableId: string,
-    signedAmount: number,
+    amount: number,
     agreedCost?: number
 ): Promise<number> {
     const p = await prisma.payable.findUnique({ where: { id: payableId } });
     if (!p) return 0;
-    if (signedAmount === 0) return 0;
 
+    // Determine originalAmount:
+    //   1. Use existing stored value if present
+    //   2. Else use explicit agreedCost if supplied
+    //   3. Else fall back to this payment amount (last resort — legacy behaviour)
     let orig = p.originalAmount;
     if (orig <= 0) {
         if (agreedCost && agreedCost > 0) {
             orig = agreedCost;
         } else {
-            orig = Math.abs(signedAmount);
-            console.warn(
-                `[applyToPayable] No agreedCost for payable ${payableId} (${p.supplierName}). ` +
-                `Falling back to |payment| (${Math.abs(signedAmount)}) as originalAmount.`
-            );
+            orig = amount;
         }
     } else if (agreedCost && agreedCost > 0 && agreedCost !== orig) {
         orig = agreedCost;
     }
 
-    let newPaid = p.amountPaid + signedAmount;
-    if (newPaid < 0) newPaid = 0;
-    if (newPaid > orig) newPaid = orig;
+    // CAP: never apply more than what's still owed.
+    const pay = Math.min(amount, Math.max(0, orig - p.amountPaid));
+    const newPaid = p.amountPaid + pay;
     const newRem = Math.max(0, orig - newPaid);
-    const delta = newPaid - p.amountPaid;
 
     await prisma.payable.update({
         where: { id: p.id },
@@ -266,19 +266,24 @@ async function applyToPayable(
     });
 
     await propagatePayableToOperational(p.id);
-    return delta;
+    return pay;
 }
 
 export async function applyPaymentToPayables(
     periodId: string,
     partyName: string,
-    signedAmount: number,
+    amount: number,
     categories?: string[]
 ): Promise<AppliedLink[]> {
-    if (!partyName || signedAmount === 0) return [];
+    if (!partyName || amount <= 0) return [];
 
-    const where: Record<string, unknown> = { periodId };
-    if (categories && categories.length > 0) where.category = { in: categories };
+    const where: Record<string, unknown> = {
+        periodId,
+        remaining: { gt: 0 },
+    };
+    if (categories && categories.length > 0) {
+        where.category = { in: categories };
+    }
 
     const list = await prisma.payable.findMany({
         where,
@@ -286,13 +291,13 @@ export async function applyPaymentToPayables(
     });
 
     const links: AppliedLink[] = [];
-    let left = signedAmount;
+    let left = amount;
 
     for (const p of list) {
-        if (left === 0) break;
+        if (left <= 0) break;
         if (!nameMatch(p.supplierName, partyName)) continue;
         const applied = await applyToPayable(periodId, p.id, left);
-        if (applied !== 0) {
+        if (applied > 0) {
             links.push({ entityType: "payable", entityId: p.id, appliedAmount: applied });
             left -= applied;
         }
@@ -300,6 +305,10 @@ export async function applyPaymentToPayables(
     return links;
 }
 
+/**
+ * Apply a receipt to a client's open Receivables.
+ * CAP: applied = min(left, remainingAmount).
+ */
 export async function applyReceiptToReceivables(
     periodId: string,
     clientName: string,
@@ -319,6 +328,7 @@ export async function applyReceiptToReceivables(
         if (left <= 0) break;
         if (!nameMatch(r.clientName, clientName)) continue;
 
+        // CAP: never apply more than what's still owed on this row.
         const recv = Math.min(left, r.remainingAmount);
         const newReceived = r.amountReceived + recv;
         const newRem = Math.max(0, r.totalPackage - newReceived);
@@ -339,6 +349,7 @@ export async function applyReceiptToReceivables(
     return links;
 }
 
+/** Resolve employee display name → canonical Employee row (fuzzy). */
 async function resolveEmployee(employeeName: string) {
     const all = await prisma.employee.findMany({ where: { isActive: true } });
     return (
@@ -354,15 +365,28 @@ async function resolveEmployee(employeeName: string) {
     );
 }
 
+/**
+ * Apply a partial (or full) payment to a payroll entry.
+ * CAP: applied = min(amount, outstanding).
+ */
 export async function applyPayrollPayment(
     periodId: string,
     employeeName: string,
-    signedAmount: number
+    amount: number
 ): Promise<AppliedLink[]> {
-    if (!employeeName || signedAmount === 0) return [];
+    if (!employeeName || amount <= 0) return [];
 
     const matchEntry = (
-        rows: { id: string; employeeName: string; netPayable: number; amountPaid: number | null; status: string; employeeId: string | null; loanInstallment: number; paidDate: Date | null }[]
+        rows: {
+            id: string;
+            employeeName: string;
+            netPayable: number;
+            amountPaid: number | null;
+            status: string;
+            employeeId: string | null;
+            loanInstallment: number;
+            paidDate: Date | null;
+        }[]
     ) =>
         rows.find((e) => nameMatch(e.employeeName, employeeName)) ??
         rows.find((e) => {
@@ -373,21 +397,25 @@ export async function applyPayrollPayment(
             return !!lastA && lastA === lastB && lastA.length > 2;
         });
 
+    // Prefer open rows; also consider any row for this person
     let candidates = await prisma.payrollEntry.findMany({
         where: { periodId, status: { in: ["Pending", "Partial"] } },
         orderBy: { createdAt: "asc" },
     });
     let entry = matchEntry(candidates);
 
+    // Auto-create payroll row when missing
     if (!entry) {
         const emp = await resolveEmployee(employeeName);
         const canonicalName = emp?.name ?? employeeName.trim();
         await syncPayrollForEmployee(periodId, canonicalName);
+
         candidates = await prisma.payrollEntry.findMany({
             where: { periodId },
             orderBy: { createdAt: "asc" },
         });
         entry = matchEntry(candidates);
+
         if (!entry) {
             const loan = emp
                 ? await prisma.employeeLoan.findFirst({
@@ -401,6 +429,7 @@ export async function applyPayrollPayment(
             const basic = isLead ? 0 : emp?.basicSalary || 0;
             const installment = loan?.monthlyInstallment ?? 0;
             const net = Math.max(0, basic - installment);
+
             entry = await prisma.payrollEntry.create({
                 data: {
                     periodId,
@@ -418,13 +447,34 @@ export async function applyPayrollPayment(
         }
     }
 
-    // Signed application
-    const before = entry.amountPaid ?? 0;
-    let newPaid = before + signedAmount;
-    if (newPaid < 0) newPaid = 0;
-    if (newPaid > entry.netPayable) newPaid = entry.netPayable;
-    const applied = newPaid - before;
-    const newRemaining = Math.max(0, entry.netPayable - newPaid);
+    // ── Compute applied amount ──
+    const outstanding = Math.max(0, entry.netPayable - (entry.amountPaid ?? 0));
+
+    if (amount > outstanding && outstanding > 0) {
+        console.warn(
+            `[applyPayrollPayment] OVERPAYMENT reached service layer: ${entry.employeeName} ` +
+                `outstanding ${outstanding}, paying ${amount}, capping to ${outstanding}`
+        );
+    }
+
+    let applied: number;
+    let newPaid: number;
+    let newRemaining: number;
+
+    if (outstanding <= 0 && entry.netPayable <= 0) {
+        // Nothing owed on paper — accept payment but do not exceed netPayable
+        applied = amount;
+        newPaid = (entry.amountPaid ?? 0) + applied;
+        newRemaining = 0;
+    } else if (outstanding <= 0) {
+        // Fully paid already — nothing to apply
+        return [];
+    } else {
+        applied = Math.min(amount, outstanding); // CAP
+        newPaid = (entry.amountPaid ?? 0) + applied;
+        newRemaining = Math.max(0, entry.netPayable - newPaid);
+    }
+
     const fullyPaid = newRemaining <= 0 && newPaid > 0;
     const wasFullyPaidBefore = entry.status === "Paid";
 
@@ -438,45 +488,44 @@ export async function applyPayrollPayment(
         },
     });
 
-    // Loan decrement on transition to fully Paid, or increment on reversal from Paid
-    if (entry.employeeId && entry.loanInstallment > 0) {
-        if (fullyPaid && !wasFullyPaidBefore) {
-            const loan = await prisma.employeeLoan.findFirst({
-                where: { employeeId: entry.employeeId, remainingAmount: { gt: 0 } },
+    // Decrement loan only once when row first becomes fully Paid
+    if (
+        fullyPaid &&
+        !wasFullyPaidBefore &&
+        entry.employeeId &&
+        entry.loanInstallment > 0
+    ) {
+        const loan = await prisma.employeeLoan.findFirst({
+            where: { employeeId: entry.employeeId, remainingAmount: { gt: 0 } },
+        });
+        if (loan) {
+            await prisma.employeeLoan.update({
+                where: { id: loan.id },
+                data: {
+                    remainingAmount: Math.max(
+                        0,
+                        loan.remainingAmount - entry.loanInstallment
+                    ),
+                },
             });
-            if (loan) {
-                await prisma.employeeLoan.update({
-                    where: { id: loan.id },
-                    data: {
-                        remainingAmount: Math.max(0, loan.remainingAmount - entry.loanInstallment),
-                    },
-                });
-            }
-        } else if (!fullyPaid && wasFullyPaidBefore) {
-            const loan = await prisma.employeeLoan.findFirst({
-                where: { employeeId: entry.employeeId },
-            });
-            if (loan) {
-                await prisma.employeeLoan.update({
-                    where: { id: loan.id },
-                    data: { remainingAmount: loan.remainingAmount + entry.loanInstallment },
-                });
-            }
         }
     }
 
-    return applied !== 0
-        ? [{ entityType: "payroll", entityId: entry.id, appliedAmount: applied }]
-        : [];
+    return [
+        { entityType: "payroll", entityId: entry.id, appliedAmount: applied },
+    ];
 }
 
+/**
+ * Apply a commission payment.
+ * CAP: applied = min(amount, commissionAmt).
+ */
 export async function applyCommissionPayment(
     periodId: string,
     employeeName: string,
-    signedAmount: number
+    amount: number
 ): Promise<AppliedLink[]> {
-    if (!employeeName || signedAmount === 0) return [];
-    if (signedAmount < 0) return [];   // reversal of commission payment not supported here
+    if (!employeeName || amount <= 0) return [];
 
     const candidates = await prisma.commission.findMany({
         where: { periodId, status: "Accrued" },
@@ -490,8 +539,8 @@ export async function applyCommissionPayment(
         });
     if (!c) return [];
 
-    const applied = Math.min(signedAmount, c.commissionAmt);
-    if (applied <= 0) return [];
+    const applied = Math.min(amount, c.commissionAmt); // CAP
+
     await prisma.commission.update({
         where: { id: c.id },
         data: { status: "Paid" },
@@ -499,18 +548,22 @@ export async function applyCommissionPayment(
     return [{ entityType: "commission", entityId: c.id, appliedAmount: applied }];
 }
 
+/**
+ * Apply a refund payment.
+ * CAP: applied = min(amount, refund amount).
+ */
 export async function applyRefundPayment(
     periodId: string,
     clientName: string,
-    signedAmount: number
+    amount: number
 ): Promise<AppliedLink[]> {
-    if (signedAmount <= 0) return [];
     const r = await prisma.refund.findFirst({
         where: { periodId, clientName: { contains: clientName }, status: "Pending" },
     });
     if (!r) return [];
 
-    const applied = Math.min(signedAmount, r.amount);
+    const applied = Math.min(amount, r.amount); // CAP
+
     await prisma.refund.update({
         where: { id: r.id },
         data: { status: "Paid", paidDate: new Date() },
@@ -518,10 +571,18 @@ export async function applyRefundPayment(
     return [{ entityType: "refund", entityId: r.id, appliedAmount: applied }];
 }
 
+/**
+ * Post or update a ClientLedger row for a refund.
+ * Called whenever a Refund is created or updated.
+ * - Pending  → creates an "Open" ledger credit row
+ * - Paid     → creates/updates the ledger row to "Paid"
+ * - Deleted  → ledger row is removed (handled by caller)
+ */
 export async function syncRefundToClientLedger(refundId: string) {
     const refund = await prisma.refund.findUnique({ where: { id: refundId } });
     if (!refund) return;
 
+    // Find or create the Client master row
     let client = refund.clientId
         ? await prisma.client.findUnique({ where: { id: refund.clientId } })
         : null;
@@ -532,6 +593,7 @@ export async function syncRefundToClientLedger(refundId: string) {
         client = await prisma.client.create({ data: { name: refund.clientName } });
     }
 
+    // One ledger row per refund - match by receiptRef marker
     const marker = `REFUND:${refund.id}`;
     const existing = await prisma.clientLedger.findFirst({
         where: { clientId: client.id, receiptRef: marker },
@@ -548,8 +610,8 @@ export async function syncRefundToClientLedger(refundId: string) {
         subCategory: refund.tripRef || null,
         hotel: "Refund",
         debit: 0,
-        credit: refund.amount,
-        status: refund.status,
+        credit: refund.amount,     // credit = money out to client
+        status: refund.status,     // "Pending" or "Paid"
         receiptRef: marker,
         enteredBy: null,
         notes: refund.notes,
@@ -565,11 +627,16 @@ export async function syncRefundToClientLedger(refundId: string) {
     }
 }
 
+/**
+ * Find or create a Payable + HotelBooking pair by hotel name.
+ * Used when a transaction names a hotel that doesn't exist yet.
+ */
 export async function findOrCreateHotelPayable(
     periodId: string,
     hotelName: string,
     opts?: { description?: string; tripRef?: string; agreedCost?: number }
 ): Promise<string> {
+    // Look for an existing payable for this hotel in the period
     let payable = await prisma.payable.findFirst({
         where: {
             periodId,
@@ -580,17 +647,15 @@ export async function findOrCreateHotelPayable(
     });
 
     if (payable) {
-        if (
-            opts?.agreedCost &&
-            opts.agreedCost > 0 &&
-            payable.originalAmount !== opts.agreedCost
-        ) {
+        // If an explicit agreed cost was supplied and differs, update it
+        if (opts?.agreedCost && opts.agreedCost > 0 && payable.originalAmount !== opts.agreedCost) {
             await prisma.payable.update({
                 where: { id: payable.id },
                 data: { originalAmount: opts.agreedCost },
             });
         }
 
+        // Make sure a HotelBooking exists and is linked
         const existingBooking = await prisma.hotelBooking.findFirst({
             where: { payableId: payable.id },
         });
@@ -607,6 +672,7 @@ export async function findOrCreateHotelPayable(
         return payable.id;
     }
 
+    // Create both
     const initialOriginal =
         opts?.agreedCost && opts.agreedCost > 0 ? opts.agreedCost : 0;
 
@@ -699,6 +765,7 @@ export async function findOrCreateTransportPayable(
     return payable.id;
 }
 
+/** Fallback: just create a bare Payable when nothing else applies. */
 export async function findOrCreateGenericPayable(
     periodId: string,
     supplierName: string,
@@ -732,16 +799,20 @@ export async function findOrCreateGenericPayable(
     return payable.id;
 }
 
+/**
+ * Apply a hotel payment: find-or-create the payable,
+ * then apply the payment to it.
+ */
 export async function applyHotelPayment(
     periodId: string,
     hotelName: string,
-    signedAmount: number,
+    amount: number,
     opts?: { description?: string; tripRef?: string; agreedCost?: number }
 ): Promise<AppliedLink[]> {
-    if (!hotelName || signedAmount === 0) return [];
+    if (!hotelName || amount <= 0) return [];
     const payableId = await findOrCreateHotelPayable(periodId, hotelName, opts);
-    const applied = await applyToPayable(periodId, payableId, signedAmount, opts?.agreedCost);
-    return applied !== 0
+    const applied = await applyToPayable(periodId, payableId, amount, opts?.agreedCost);
+    return applied > 0
         ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
         : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
 }
@@ -749,13 +820,13 @@ export async function applyHotelPayment(
 export async function applyTransportPayment(
     periodId: string,
     driverName: string,
-    signedAmount: number,
+    amount: number,
     opts?: { description?: string; tripRef?: string }
 ): Promise<AppliedLink[]> {
-    if (!driverName || signedAmount === 0) return [];
+    if (!driverName || amount <= 0) return [];
     const payableId = await findOrCreateTransportPayable(periodId, driverName, opts);
-    const applied = await applyToPayable(periodId, payableId, signedAmount);
-    return applied !== 0
+    const applied = await applyToPayable(periodId, payableId, amount);
+    return applied > 0
         ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
         : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
 }
@@ -764,45 +835,50 @@ export async function applyGenericPayablePayment(
     periodId: string,
     supplierName: string,
     category: string,
-    signedAmount: number,
+    amount: number,
     opts?: { description?: string; tripRef?: string }
 ): Promise<AppliedLink[]> {
-    if (!supplierName || signedAmount === 0) return [];
+    if (!supplierName || amount <= 0) return [];
     const payableId = await findOrCreateGenericPayable(
         periodId,
         supplierName,
         category,
         opts
     );
-    const applied = await applyToPayable(periodId, payableId, signedAmount);
-    return applied !== 0
+    const applied = await applyToPayable(periodId, payableId, amount);
+    return applied > 0
         ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
         : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
 }
 
+/** Remove the ledger row tied to a refund (used on refund delete). */
 export async function removeRefundFromClientLedger(refundId: string) {
     const marker = `REFUND:${refundId}`;
     await prisma.clientLedger.deleteMany({ where: { receiptRef: marker } });
 }
 
+/**
+ * Apply a payment against Supplier Advances.
+ * CAP: applied = min(left, advance.remaining).
+ */
 export async function applyToAdvances(
     periodId: string,
     supplierName: string,
-    signedAmount: number
+    amount: number
 ): Promise<AppliedLink[]> {
-    if (signedAmount <= 0) return [];
     const list = await prisma.supplierAdvance.findMany({
         where: { periodId, remaining: { gt: 0 } },
         orderBy: { createdAt: "asc" },
     });
 
     const links: AppliedLink[] = [];
-    let left = signedAmount;
+    let left = amount;
 
     for (const a of list) {
         if (left <= 0) break;
         if (!nameMatch(a.supplierName, supplierName)) continue;
 
+        // CAP: never apply more than the outstanding remaining.
         const adj = Math.min(left, a.remaining);
         const newAdj = a.adjustedAmount + adj;
         const newRem = Math.max(0, a.amount - newAdj);
