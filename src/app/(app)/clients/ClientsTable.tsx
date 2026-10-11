@@ -237,7 +237,7 @@ export function ClientsTable({
                         )}
                       </td>
                       <td className="px-3 py-3 text-slate-600">
-                        {r.phone || r.contact || "-"}
+                        {r.phone || r.contact || "â€”"}
                       </td>
                       <td className="px-3 py-3 max-w-[180px] truncate">{r.tripInfo}</td>
                       <td className="px-3 py-3 text-right tabular-nums">

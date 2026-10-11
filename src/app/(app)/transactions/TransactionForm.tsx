@@ -214,7 +214,7 @@ export function TransactionManager({
               : "bg-amber-100 text-amber-800"
               }`}
           >
-            Balance (D−C): <strong>{formatPKR(totalDebit - totalCredit)}</strong>
+            Balance (Dâˆ’C): <strong>{formatPKR(totalDebit - totalCredit)}</strong>
           </span>
         </div>
         <button
@@ -236,8 +236,8 @@ export function TransactionManager({
             </button>
           </div>
           <p className="text-xs text-slate-600">
-            Choose <strong>Category</strong> first - Sub-Category / Party lists hotels, suppliers,
-            clients or staff you owe / who owe you. Pick <strong>Other...</strong> to type a new name.
+            Choose <strong>Category</strong> first â€” Sub-Category / Party lists hotels, suppliers,
+            clients or staff you owe / who owe you. Pick <strong>Otherâ€¦</strong> to type a new name.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field
@@ -280,7 +280,7 @@ export function TransactionManager({
                 onChange={(e) => onPartySelect(e.target.value)}
                 className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="">- Select -</option>
+                <option value="">â€” Select â€”</option>
                 {options.map((o) => (
                   <option key={o.value + o.label} value={o.value}>
                     {o.label}
@@ -304,32 +304,31 @@ export function TransactionManager({
               onChange={(v) => setForm({ ...form, tripRef: v })}
             />
             <Field
-              label="Debit - money IN (PKR)"
+              label="Debit â€” money IN (PKR)"
               type="number"
               value={form.debit}
               onChange={(v) => setForm({ ...form, debit: v })}
             />
             <Field
-              label="Credit - money OUT (PKR)"
+              label="Credit â€” money OUT (PKR)"
               type="number"
               value={form.credit}
               onChange={(v) => setForm({ ...form, credit: v })}
             />
 
-            {/* Total Package only when registering a NEW client via Other… */}
-            {isClientCategory && showOther && (
-              <Field
-                label="Client Total Package (PKR) — full trip value"
-                type="number"
-                value={form.clientTotalPackage}
-                onChange={(v) => setForm({ ...form, clientTotalPackage: v })}
-              />
-            )}
-            {isClientCategory && showOther && (
-              <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
-                Debit = amount paid now. Total Package = full sale value (creates receivable outstanding).
-                Existing clients: pick their name above — only Debit is applied to their balance.
-              </p>
+            {isClientCategory && (
+              <>
+                <Field
+                  label="Client Total Package (PKR) — full trip value"
+                  type="number"
+                  value={form.clientTotalPackage}
+                  onChange={(v) => setForm({ ...form, clientTotalPackage: v })}
+                />
+                <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
+                  Total Package = full sale (updates Clients tab). Debit = amount paid now.
+                  Leave Total Package blank on follow-up payments for existing clients.
+                </p>
+              </>
             )}
 
             <Select
@@ -362,7 +361,7 @@ export function TransactionManager({
             disabled={loading}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Saving..." : editing ? "Update" : "Save Transaction"}
+            {loading ? "Savingâ€¦" : editing ? "Update" : "Save Transaction"}
           </button>
         </form>
       )}
@@ -405,14 +404,14 @@ export function TransactionManager({
                     </td>
                     <td className="px-3 py-2 max-w-[200px] truncate">{t.description}</td>
                     <td className="px-3 py-2">{t.category}</td>
-                    <td className="px-3 py-2">{t.party || t.subCategory || "-"}</td>
+                    <td className="px-3 py-2">{t.party || t.subCategory || "â€”"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {t.debit ? formatPKR(t.debit) : "-"}
+                      {t.debit ? formatPKR(t.debit) : "â€”"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {t.credit ? formatPKR(t.credit) : "-"}
+                      {t.credit ? formatPKR(t.credit) : "â€”"}
                     </td>
-                    <td className="px-3 py-2">{t.bankAccount || "-"}</td>
+                    <td className="px-3 py-2">{t.bankAccount || "â€”"}</td>
                     <td className="px-3 py-2">{t.status}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button
