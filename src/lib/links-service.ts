@@ -9,7 +9,7 @@ import { prisma } from "./prisma";
  * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 /**
  * Recompute a payroll entry from scratch based on:
- *   basic + commission âˆ’ tax âˆ’ loan installment âˆ’ other deductions
+ *   basic + commission − tax − loan installment − other deductions
  * Then set netPayable / remaining / status correctly.
  *
  * If `amountPaid` > 0 and status becomes fully Paid, decrement the linked
