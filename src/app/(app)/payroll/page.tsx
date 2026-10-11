@@ -286,9 +286,9 @@ export default async function Page({
       )} */}
 
       <div>
-        <h2 className="text-lg font-semibold mb-2 text-slate-700">
+        {/* <h2 className="text-lg font-semibold mb-2 text-slate-700">
           Other Staff's no commission ({otherPayroll.length})
-        </h2>
+        </h2> */}
         {otherPayroll.length === 0 ? (
           <div className="bg-white border rounded-xl p-6 text-sm text-slate-500">
             Click Load team into payroll.
