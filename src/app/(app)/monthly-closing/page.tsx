@@ -22,18 +22,31 @@ export default async function MonthlyClosingPage({
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
   const data = await getDashboardData(current.id);
 
-  const bsLines = await prisma.balanceSheetLine.findMany({
-    where: { periodId: current.id },
-  });
-  const bsAssets = bsLines
-    .filter((r) => r.section === "Asset")
-    .reduce((s, r) => s + r.amount, 0);
-  const bsLiab = bsLines
-    .filter((r) => r.section === "Liability")
-    .reduce((s, r) => s + r.amount, 0);
-  const bsEquity = bsLines
-    .filter((r) => r.section === "Equity")
-    .reduce((s, r) => s + r.amount, 0);
+  // Safe if BalanceSheetLine table is not migrated yet
+  let bsAssets = 0;
+  let bsLiab = 0;
+  let bsEquity = 0;
+  let bsReady = false;
+  try {
+    const bsLines = await prisma.balanceSheetLine.findMany({
+      where: { periodId: current.id },
+    });
+    bsReady = true;
+    bsAssets = bsLines
+      .filter((r) => r.section === "Asset")
+      .reduce((s, r) => s + r.amount, 0);
+    bsLiab = bsLines
+      .filter((r) => r.section === "Liability")
+      .reduce((s, r) => s + r.amount, 0);
+    bsEquity = bsLines
+      .filter((r) => r.section === "Equity")
+      .reduce((s, r) => s + r.amount, 0);
+  } catch {
+    bsReady = false;
+  }
+
+  // Dashboard exposes ratios.netPosition (not totals.netPosition)
+  const netPosition = data.ratios?.netPosition ?? 0;
 
   return (
     <div className="space-y-6">
@@ -41,7 +54,8 @@ export default async function MonthlyClosingPage({
         <div>
           <h1 className="text-2xl font-bold">Monthly Closing — {current.label}</h1>
           <p className="text-sm text-slate-500">
-            Revenue, Direct Costs, Operating Expenses, Profitability, Position & Balance Sheet
+            Revenue, Direct Costs, Operating Expenses, Profitability, Position &amp; Balance
+            Sheet
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
@@ -77,12 +91,7 @@ export default async function MonthlyClosingPage({
           <Row label="Receivables" value={data.receivables.clientOutstanding} />
           <Row label="Payables" value={data.payables.supplierRemaining} />
           <Row label="Assets (at cost)" value={data.oneTime.assets} />
-          <Row
-            label="Net Position"
-            value={data.totals.netPosition}
-            bold
-            danger={data.totals.netPosition < 0}
-          />
+          <Row label="Net Position" value={netPosition} bold danger={netPosition < 0} />
           <h2 className="font-semibold pt-3">Trip Analysis</h2>
           <Row label="Gross Trip Profit" value={data.profitability.grossTripProfit} />
           <Row label="Net Trip Profit" value={data.profitability.netTripProfit} />
@@ -108,10 +117,16 @@ export default async function MonthlyClosingPage({
             Open Balance Sheet →
           </Link>
         </div>
-        {bsLines.length === 0 ? (
+        {!bsReady ? (
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Balance Sheet table is not set up yet. Run{" "}
+            <code className="text-xs bg-white px-1 rounded">npx prisma db push</code> then
+            open the Balance Sheet page.
+          </p>
+        ) : bsAssets === 0 && bsLiab === 0 && bsEquity === 0 ? (
           <p className="text-sm text-slate-500">
-            No balance sheet lines yet for this period. Open the Balance Sheet page to
-            auto-seed from bank, receivables, payables and assets.
+            No balance sheet lines yet. Open the Balance Sheet page to auto-seed from bank,
+            receivables, payables and assets.
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">

@@ -19,12 +19,36 @@ export default async function BalanceSheetPage({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  let rows = await prisma.balanceSheetLine.findMany({
-    where: { periodId: current.id },
-    orderBy: [{ section: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
-  });
+  let rows: Awaited<ReturnType<typeof prisma.balanceSheetLine.findMany>> = [];
+  let tableMissing = false;
+  try {
+    rows = await prisma.balanceSheetLine.findMany({
+      where: { periodId: current.id },
+      orderBy: [{ section: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+  } catch {
+    tableMissing = true;
+  }
 
-  // If empty, seed via API logic is client-side on first GET; seed here too so SSR works
+  if (tableMissing) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Balance Sheet</h1>
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+            The BalanceSheetLine table is not in the database yet. From the project root run:
+            <br />
+            <code className="text-xs bg-white px-1 rounded">npx prisma db push</code>
+            {" "}then{" "}
+            <code className="text-xs bg-white px-1 rounded">npx prisma generate</code>
+            {" "}and restart the server.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // If empty, seed from live books
   if (rows.length === 0) {
     // Lightweight seed mirror of API defaults
     const [banks, receivables, payables, assets, liabilities, advances, loans] =
