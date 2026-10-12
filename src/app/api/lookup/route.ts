@@ -82,12 +82,19 @@ async function loadLookup(key: LookupKey, periodId: string | null): Promise<Look
     }
 
     case "salesEmployees": {
+      // Team Lead does not close sales directly — exclude from attribution dropdowns
+      const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
       const rows = await prisma.employee.findMany({
         where: { isActive: true, role: "Sales" },
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       });
-      return rows.map((e) => ({ value: e.name, label: e.name }));
+      return rows
+        .filter(
+          (e) =>
+            !TEAM_LEAD_KEYWORDS.some((k) => e.name.toLowerCase().includes(k))
+        )
+        .map((e) => ({ value: e.name, label: e.name }));
     }
 
     case "hotels": {

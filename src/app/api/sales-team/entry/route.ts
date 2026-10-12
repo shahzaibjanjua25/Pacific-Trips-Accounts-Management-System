@@ -1,74 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
-import { syncPayrollForEmployee } from "@/lib/links-service";
-
-const RATE = 0.025;
-
-async function recompute(periodId: string, employeeName: string) {
-  const emp = await prisma.employee.findFirst({ where: { name: employeeName } });
-  if (!emp) return;
-
-  if (emp.role !== "Sales") {
-    await syncPayrollForEmployee(periodId, employeeName);
-    return;
-  }
-
-  const isLead =
-    employeeName.toLowerCase().includes("amad") ||
-    employeeName.toLowerCase().includes("ammar");
-
-  const entries = await prisma.salesPerformance.findMany({
-    where: { periodId, employeeName },
-  });
-  const individualTotal = entries.reduce((s, e) => s + (e.debit || 0), 0);
-
-  let teamTotal = 0;
-  if (isLead) {
-    const teamMembers = await prisma.employee.findMany({
-      where: { isActive: true, role: "Sales" },
-    });
-    for (const m of teamMembers) {
-      const nm = m.name.toLowerCase();
-      if (nm.includes("amad") || nm.includes("ammar")) continue;
-      const rows = await prisma.salesPerformance.findMany({
-        where: { periodId, employeeName: m.name },
-      });
-      teamTotal += rows.reduce((s, r) => s + (r.debit || 0), 0);
-    }
-  }
-
-  const saleBase = isLead ? teamTotal : individualTotal;
-  const commission = saleBase * RATE;
-
-  const existingComm = await prisma.commission.findFirst({
-    where: { periodId, employeeName },
-  });
-  if (existingComm) {
-    await prisma.commission.update({
-      where: { id: existingComm.id },
-      data: {
-        saleAmount: saleBase,
-        commissionRate: RATE * 100,
-        commissionAmt: commission,
-      },
-    });
-  } else {
-    await prisma.commission.create({
-      data: {
-        periodId,
-        employeeId: emp.id,
-        employeeName,
-        saleAmount: saleBase,
-        commissionRate: RATE * 100,
-        commissionAmt: commission,
-        status: "Accrued",
-      },
-    });
-  }
-
-  await syncPayrollForEmployee(periodId, employeeName);
-}
+import { computeSalesPayroll, isTeamLeadName } from "@/lib/payroll-service";
 
 /**
  * Upsert a Client master row + Receivable + ClientLedger for a sales entry.
@@ -102,7 +35,6 @@ async function upsertClientFromSale(opts: {
       },
     });
   } else {
-    // Enrich blanks
     const updates: Record<string, string> = {};
     if (!client.phone && opts.clientPhone) updates.phone = opts.clientPhone;
     if (!client.contact && opts.clientContact) updates.contact = opts.clientContact;
@@ -116,7 +48,6 @@ async function upsertClientFromSale(opts: {
     }
   }
 
-  // Create/update a Receivable for the sale
   const pkg = Number(opts.totalPackage) || 0;
   const paid = Number(opts.amountPaid) || 0;
   if (pkg > 0 || paid > 0) {
@@ -127,8 +58,9 @@ async function upsertClientFromSale(opts: {
       orderBy: { createdAt: "asc" },
     });
     if (existingRecv) {
-      const newTotal = Math.max(existingRecv.totalPackage, total);
-      const newReceived = Math.min(newTotal, existingRecv.amountReceived + paid);
+      // On edit, set package from the sale amount rather than stacking
+      const newTotal = total;
+      const newReceived = Math.min(newTotal, paid > 0 ? paid : existingRecv.amountReceived);
       const newRemaining = Math.max(0, newTotal - newReceived);
       await prisma.receivable.update({
         where: { id: existingRecv.id },
@@ -143,6 +75,7 @@ async function upsertClientFromSale(opts: {
               : newReceived > 0
                 ? "Partial"
                 : "Open",
+          salesperson: opts.salesperson || existingRecv.salesperson,
         },
       });
     } else {
@@ -183,6 +116,11 @@ async function upsertClientFromSale(opts: {
   }
 }
 
+async function recomputeAll(periodId: string) {
+  // Full team recompute with tiered Team Lead rules
+  await computeSalesPayroll(periodId);
+}
+
 export async function POST(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -204,9 +142,19 @@ export async function POST(req: NextRequest) {
       clientTotalPackage,
       clientAmountPaid,
     } = body;
-    if (!periodId || !employeeName || !amount) {
+    if (!periodId || !employeeName || amount == null) {
       return NextResponse.json(
         { error: "periodId, employeeName, amount required" },
+        { status: 400 }
+      );
+    }
+
+    if (isTeamLeadName(employeeName)) {
+      return NextResponse.json(
+        {
+          error:
+            "Team Lead cannot be attributed individual sales. Choose a sales team member.",
+        },
         { status: 400 }
       );
     }
@@ -226,7 +174,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // ── Create/update client + receivable ──
     if (clientName) {
       await upsertClientFromSale({
         periodId,
@@ -243,7 +190,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    await recompute(periodId, employeeName);
+    await recomputeAll(periodId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[sales-team:entry:POST]", e);
@@ -274,6 +221,16 @@ export async function PUT(req: NextRequest) {
     } = body;
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
+    if (employeeName && isTeamLeadName(employeeName)) {
+      return NextResponse.json(
+        {
+          error:
+            "Team Lead cannot be attributed individual sales. Choose a sales team member.",
+        },
+        { status: 400 }
+      );
+    }
+
     const existing = await prisma.salesPerformance.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -289,28 +246,26 @@ export async function PUT(req: NextRequest) {
       },
     });
 
-    // ── Refresh client + receivable ──
-    if (clientName) {
+    if (clientName || existing.clientName) {
       await upsertClientFromSale({
         periodId: existing.periodId,
-        clientName,
+        clientName: clientName || existing.clientName || "",
         clientPhone: clientPhone || null,
         clientContact: clientContact || null,
         clientEmail: clientEmail || null,
         clientNotes: clientNotes || null,
-        totalPackage: Number(clientTotalPackage) || Number(amount) || 0,
+        totalPackage:
+          Number(clientTotalPackage) ||
+          (amount != null ? Number(amount) : existing.debit) ||
+          0,
         amountPaid: Number(clientAmountPaid) || 0,
-        tourDate,
-        description,
+        tourDate: tourDate || (existing.tourDate ? existing.tourDate.toISOString() : null),
+        description: description ?? existing.description,
         salesperson: employeeName ?? existing.employeeName,
       });
     }
 
-    await recompute(existing.periodId, existing.employeeName);
-    if (employeeName && employeeName !== existing.employeeName) {
-      await recompute(existing.periodId, employeeName);
-    }
-
+    await recomputeAll(existing.periodId);
     return NextResponse.json({ ok: true, row: updated });
   } catch (e) {
     console.error("[sales-team:entry:PUT]", e);
@@ -329,8 +284,10 @@ export async function DELETE(req: NextRequest) {
     const row = await prisma.salesPerformance.findUnique({ where: { id } });
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // Remove only this sale entry — full debit amount is subtracted because
+    // individual sales totals use SalesPerformance exclusively.
     await prisma.salesPerformance.delete({ where: { id } });
-    await recompute(row.periodId, row.employeeName);
+    await recomputeAll(row.periodId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[sales-team:entry:DELETE]", e);
