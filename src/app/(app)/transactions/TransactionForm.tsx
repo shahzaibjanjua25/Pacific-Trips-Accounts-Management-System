@@ -664,7 +664,7 @@ export function TransactionManager({
         return (
           <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
             Refundable: <strong>{formatPKR(clientRefundable)}</strong>
-            {" Â· "}
+            {"  ·  "}
             Remaining after this refund:{" "}
             <strong>{formatPKR(Math.max(0, clientRefundable - movingAmount))}</strong>
           </p>
@@ -760,14 +760,14 @@ export function TransactionManager({
     return (
       <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
         Outstanding: <strong>{formatPKR(effectiveLimit)}</strong>
-        {" Â· "}
+        {"  ·  "}
         Remaining after this:{" "}
         <strong>{formatPKR(Math.max(0, effectiveLimit - movingAmount))}</strong>
         {isClientCategory && formPkg > 0 ? (
           <span className="block text-slate-600">
             Package {formatPKR(formPkg)}
             {outstanding.amountReceived != null
-              ? ` Â· received so far ${formatPKR(outstanding.amountReceived)}`
+              ? `  ·  received so far ${formatPKR(outstanding.amountReceived)}`
               : ""}
           </span>
         ) : null}
@@ -817,8 +817,8 @@ export function TransactionManager({
           </div>
           <p className="text-xs text-slate-600">
             Choose <strong>Category</strong> first - Sub-Category / Party lists hotels, suppliers,
-            clients or staff you owe / who owe you. Pick <strong>OtherÃ¢â‚¬Â¦</strong> to type a new name.
-            {" "}<strong>Debit = money IN Â· Credit = money OUT.</strong>
+            clients or staff you owe / who owe you. Pick <strong>Other...</strong> to type a new name.
+            {" "}<strong>Debit = money IN  ·  Credit = money OUT.</strong>
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field
@@ -1047,7 +1047,7 @@ export function TransactionManager({
 
                 <optgroup label="Other">
                   <option value="Cheque">Cheque</option>
-                  <option value="__other__">OtherÃ¢â‚¬Â¦</option>
+                  <option value="__other__">Other...</option>
                 </optgroup>
               </select>
             </label>

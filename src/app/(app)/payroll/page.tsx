@@ -204,14 +204,14 @@ export default async function Page({
                   : "bg-white border-emerald-300 text-emerald-800"
                   }`}
               >
-                {e.name} Â· {des}
+                {e.name}  ·  {des}
                 {loan
-                  ? ` Â· loan remaining ${formatPKR(loan.remainingAmount)} (${formatPKR(
+                  ? `  ·  loan remaining ${formatPKR(loan.remainingAmount)} (${formatPKR(
                     loan.monthlyInstallment
                   )}/mo)`
                   : ""}
-                {comm ? ` Â· comm ${formatPKR(comm.commissionAmt)}` : ""}
-                {payRow ? ` Â· net ${formatPKR(payRow.netPayable)}` : ""}
+                {comm ? `  ·  comm ${formatPKR(comm.commissionAmt)}` : ""}
+                {payRow ? `  ·  net ${formatPKR(payRow.netPayable)}` : ""}
               </span>
             );
           })}
