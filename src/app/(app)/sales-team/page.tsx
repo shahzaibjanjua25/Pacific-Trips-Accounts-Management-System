@@ -19,22 +19,29 @@ export default async function SalesTeamPage({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [employees, trips, receivables, commissions, payroll, salesEntries, targetRow] =
-    await Promise.all([
-      prisma.employee.findMany({
-        where: { isActive: true, role: "Sales" },
-        orderBy: { name: "asc" },
-      }),
-      prisma.trip.findMany({ where: { periodId: current.id } }),
-      prisma.receivable.findMany({ where: { periodId: current.id } }),
-      prisma.commission.findMany({ where: { periodId: current.id } }),
-      prisma.payrollEntry.findMany({ where: { periodId: current.id } }),
-      prisma.salesPerformance.findMany({
-        where: { periodId: current.id },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.salesTarget.findUnique({ where: { periodId: current.id } }),
-    ]);
+  const [
+    employees,
+    trips,
+    receivables,
+    commissions,
+    payroll,
+    salesEntries,
+    targetRow,
+  ] = await Promise.all([
+    prisma.employee.findMany({
+      where: { isActive: true, role: "Sales" },
+      orderBy: { name: "asc" },
+    }),
+    prisma.trip.findMany({ where: { periodId: current.id } }),
+    prisma.receivable.findMany({ where: { periodId: current.id } }),
+    prisma.commission.findMany({ where: { periodId: current.id } }),
+    prisma.payrollEntry.findMany({ where: { periodId: current.id } }),
+    prisma.salesPerformance.findMany({
+      where: { periodId: current.id },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.salesTarget.findUnique({ where: { periodId: current.id } }),
+  ]);
 
   const monthlyTarget = targetRow?.targetAmount ?? 12_000_000;
   const targetNotes = targetRow?.notes ?? "";
@@ -101,7 +108,8 @@ export default async function SalesTeamPage({
       netPayable: pay?.netPayable ?? 0,
       amountPaid: pay?.amountPaid ?? 0,
       remaining:
-        pay?.remaining ?? Math.max(0, (pay?.netPayable ?? 0) - (pay?.amountPaid ?? 0)),
+        pay?.remaining ??
+        Math.max(0, (pay?.netPayable ?? 0) - (pay?.amountPaid ?? 0)),
       status: pay?.status ?? "Pending",
     };
   });

@@ -39,14 +39,31 @@ const emptySaleForm = {
   clientName: "",
   amount: "",
   notes: "",
-  // ── NEW ──
-  clientPhone: "",
-  clientContact: "",
-  clientEmail: "",
-  clientNotes: "",
-  clientTotalPackage: "",
-  clientAmountPaid: "",
 };
+
+const emptyRowForm = {
+  role: "Sales" as "Sales" | "Team Lead-Sales",
+  basicSalary: "",
+  individualSales: "",
+  saleBase: "",
+  commissionRate: "",
+  commissionAmt: "",
+  netPayable: "",
+  amountPaid: "",
+  status: "Pending" as "Pending" | "Partial" | "Paid",
+  notes: "",
+};
+
+async function readError(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.error) return String(parsed.error);
+  } catch {
+    /* not JSON */
+  }
+  return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+}
 
 export function SalesTeamPanel({
   periodId,
@@ -69,24 +86,23 @@ export function SalesTeamPanel({
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<"team" | "target">("team");
 
+  // Sale entry form
   const [open, setOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<SaleEntry | null>(null);
   const [form, setForm] = useState(emptySaleForm);
 
+  // Row edit form
   const [editingRow, setEditingRow] = useState<Row | null>(null);
-  const [rowForm, setRowForm] = useState({
-    individualSales: "",
-    commissionAmt: "",
-    amountPaid: "",
-    notes: "",
-  });
+  const [rowForm, setRowForm] = useState(emptyRowForm);
 
+  // Target form
   const [targetForm, setTargetForm] = useState({
     targetAmount: String(monthlyTarget),
     notes: targetNotes || "",
   });
   const [savingTarget, setSavingTarget] = useState(false);
 
+  // Filters
   const [filterEmployee, setFilterEmployee] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [searchText, setSearchText] = useState("");
@@ -124,6 +140,9 @@ export function SalesTeamPanel({
   const totalPaid = filteredRows.reduce((s, r) => s + r.amountPaid, 0);
   const totalRemaining = filteredRows.reduce((s, r) => s + r.remaining, 0);
 
+  const progressPct =
+    monthlyTarget > 0 ? (totalTeamSales / monthlyTarget) * 100 : 0;
+
   function openAdd() {
     setEditingEntry(null);
     setForm({
@@ -145,12 +164,6 @@ export function SalesTeamPanel({
       clientName: s.clientName || "",
       amount: String(s.amount || 0),
       notes: s.notes || "",
-      clientPhone: "",
-      clientContact: "",
-      clientEmail: "",
-      clientNotes: "",
-      clientTotalPackage: "",
-      clientAmountPaid: "",
     });
     setOpen(true);
   }
@@ -168,13 +181,6 @@ export function SalesTeamPanel({
         clientName: form.clientName,
         amount,
         notes: form.notes,
-        // NEW — passed to API so a new Client is created/enriched
-        clientPhone: form.clientPhone || null,
-        clientContact: form.clientContact || null,
-        clientEmail: form.clientEmail || null,
-        clientNotes: form.clientNotes || null,
-        clientTotalPackage: parseFloat(form.clientTotalPackage) || 0,
-        clientAmountPaid: parseFloat(form.clientAmountPaid) || 0,
       };
       const res = await fetch("/api/sales-team/entry", {
         method: editingEntry ? "PUT" : "POST",
@@ -183,18 +189,7 @@ export function SalesTeamPanel({
           editingEntry ? { ...payload, id: editingEntry.id } : payload
         ),
       });
-      const text = await res.text();
-if (!res.ok) {
-  let msg = text;
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed?.error) msg = parsed.error;
-  } catch {
-    // strip HTML tags if we got a Next.js error page
-    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-  }
-  throw new Error(msg);
-}
+      if (!res.ok) throw new Error(await readError(res));
       setOpen(false);
       setEditingEntry(null);
       router.refresh();
@@ -212,18 +207,7 @@ if (!res.ok) {
       const res = await fetch(`/api/sales-team/entry?id=${id}`, {
         method: "DELETE",
       });
-      const text = await res.text();
-if (!res.ok) {
-  let msg = text;
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed?.error) msg = parsed.error;
-  } catch {
-    // strip HTML tags if we got a Next.js error page
-    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-  }
-  throw new Error(msg);
-}
+      if (!res.ok) throw new Error(await readError(res));
       router.refresh();
     } catch (err) {
       alert("Delete failed: " + err);
@@ -232,12 +216,19 @@ if (!res.ok) {
     }
   }
 
+  // ── Row edit ──
   function openEditRow(r: Row) {
     setEditingRow(r);
     setRowForm({
+      role: r.isLead ? "Team Lead-Sales" : "Sales",
+      basicSalary: String(r.basicSalary || 0),
       individualSales: String(r.individualSales || 0),
+      saleBase: String(r.saleBase || 0),
+      commissionRate: String(r.commissionRate || 0),
       commissionAmt: String(r.commissionAmt || 0),
+      netPayable: String(r.netPayable || 0),
       amountPaid: String(r.amountPaid || 0),
+      status: (r.status as "Pending" | "Partial" | "Paid") || "Pending",
       notes: "",
     });
   }
@@ -253,24 +244,22 @@ if (!res.ok) {
         body: JSON.stringify({
           periodId,
           employeeName: editingRow.name,
+          role: rowForm.role,
+          basicSalary: parseFloat(rowForm.basicSalary) || 0,
           individualSales: parseFloat(rowForm.individualSales) || 0,
+          saleBase: parseFloat(rowForm.saleBase) || 0,
+          commissionRate: parseFloat(rowForm.commissionRate) || 0,
           commissionAmt: parseFloat(rowForm.commissionAmt) || 0,
+          netPayable:
+            rowForm.netPayable === ""
+              ? undefined
+              : parseFloat(rowForm.netPayable) || 0,
           amountPaid: parseFloat(rowForm.amountPaid) || 0,
+          status: rowForm.status,
           notes: rowForm.notes,
         }),
       });
-      const text = await res.text();
-if (!res.ok) {
-  let msg = text;
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed?.error) msg = parsed.error;
-  } catch {
-    // strip HTML tags if we got a Next.js error page
-    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-  }
-  throw new Error(msg);
-}
+      if (!res.ok) throw new Error(await readError(res));
       setEditingRow(null);
       router.refresh();
     } catch (err) {
@@ -295,18 +284,7 @@ if (!res.ok) {
         )}`,
         { method: "DELETE" }
       );
-      const text = await res.text();
-if (!res.ok) {
-  let msg = text;
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed?.error) msg = parsed.error;
-  } catch {
-    // strip HTML tags if we got a Next.js error page
-    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-  }
-  throw new Error(msg);
-}
+      if (!res.ok) throw new Error(await readError(res));
       router.refresh();
     } catch (err) {
       alert("Delete failed: " + err);
@@ -328,7 +306,7 @@ if (!res.ok) {
           notes: targetForm.notes,
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readError(res));
       router.refresh();
     } catch (err) {
       alert("Save failed: " + err);
@@ -337,11 +315,23 @@ if (!res.ok) {
     }
   }
 
-  const progressPct =
-    monthlyTarget > 0 ? (totalTeamSales / monthlyTarget) * 100 : 0;
+  const previewNet = (() => {
+    const basic = parseFloat(rowForm.basicSalary) || 0;
+    const comm = parseFloat(rowForm.commissionAmt) || 0;
+    return Math.max(0, basic + comm);
+  })();
+  const previewRemaining = (() => {
+    const net =
+      rowForm.netPayable === ""
+        ? previewNet
+        : parseFloat(rowForm.netPayable) || 0;
+    const paid = parseFloat(rowForm.amountPaid) || 0;
+    return Math.max(0, net - paid);
+  })();
 
   return (
     <div className="space-y-5">
+      {/* Tabs */}
       <div className="flex gap-2 border-b">
         <button
           onClick={() => setTab("team")}
@@ -367,6 +357,7 @@ if (!res.ok) {
 
       {tab === "team" && (
         <>
+          {/* KPI strip */}
           <div className="flex flex-wrap gap-3 text-sm">
             <span className="bg-sky-100 text-sky-900 px-3 py-1.5 rounded-md">
               Team Sales: <strong>{formatPKR(totalTeamSales)}</strong>
@@ -389,6 +380,7 @@ if (!res.ok) {
             </span>
           </div>
 
+          {/* Filter bar */}
           <div className="flex flex-wrap gap-3 items-end justify-between bg-white border rounded-xl p-3">
             <div className="flex flex-wrap gap-3 items-end">
               <label className="block text-xs">
@@ -443,6 +435,7 @@ if (!res.ok) {
             </button>
           </div>
 
+          {/* Sale entry form */}
           {open && (
             <form
               onSubmit={saveEntry}
@@ -464,7 +457,6 @@ if (!res.ok) {
               </div>
               <p className="text-xs text-slate-600">
                 Commission (2.5%) is auto-added to this employee&apos;s payroll row.
-                The client is created/updated in the Clients master automatically.
               </p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <label className="block text-xs">
@@ -506,66 +498,6 @@ if (!res.ok) {
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                   />
                 </label>
-
-                {/* ── NEW: optional client detail fields ── */}
-                <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">Client Phone</span>
-                  <input
-                    value={form.clientPhone}
-                    onChange={(e) =>
-                      setForm({ ...form, clientPhone: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">Client Contact / Ref</span>
-                  <input
-                    value={form.clientContact}
-                    onChange={(e) =>
-                      setForm({ ...form, clientContact: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">Client Email</span>
-                  <input
-                    value={form.clientEmail}
-                    onChange={(e) =>
-                      setForm({ ...form, clientEmail: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </label>
-
-                <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">
-                    Total Package (PKR)
-                  </span>
-                  <input
-                    type="number"
-                    value={form.clientTotalPackage}
-                    onChange={(e) =>
-                      setForm({ ...form, clientTotalPackage: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">
-                    Amount Paid (PKR)
-                  </span>
-                  <input
-                    type="number"
-                    value={form.clientAmountPaid}
-                    onChange={(e) =>
-                      setForm({ ...form, clientAmountPaid: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </label>
-
                 <label className="block text-xs col-span-2">
                   <span className="text-slate-600 font-medium">Description</span>
                   <input
@@ -583,31 +515,21 @@ if (!res.ok) {
                   <input
                     type="number"
                     value={form.amount}
-                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                    onChange={(e) =>
+                      setForm({ ...form, amount: e.target.value })
+                    }
                     required
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                   />
                 </label>
                 <div className="col-span-2 md:col-span-3">
                   <label className="block text-xs">
-                    <span className="text-slate-600 font-medium">
-                      Client Notes / Sale Notes
-                    </span>
-                    <input
-                      value={form.clientNotes}
-                      onChange={(e) =>
-                        setForm({ ...form, clientNotes: e.target.value })
-                      }
-                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                    />
-                  </label>
-                </div>
-                <div className="col-span-2 md:col-span-3">
-                  <label className="block text-xs">
-                    <span className="text-slate-600 font-medium">Entry Notes</span>
+                    <span className="text-slate-600 font-medium">Notes</span>
                     <input
                       value={form.notes}
-                      onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                      onChange={(e) =>
+                        setForm({ ...form, notes: e.target.value })
+                      }
                       className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                     />
                   </label>
@@ -618,11 +540,16 @@ if (!res.ok) {
                 disabled={loading || !form.employeeName}
                 className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
               >
-                {loading ? "Saving…" : editingEntry ? "Update Sale" : "Save Sale"}
+                {loading
+                  ? "Saving…"
+                  : editingEntry
+                    ? "Update Sale"
+                    : "Save Sale"}
               </button>
             </form>
           )}
 
+          {/* Full row edit form */}
           {editingRow && (
             <form
               onSubmit={saveRow}
@@ -637,66 +564,145 @@ if (!res.ok) {
                 </button>
               </div>
               <p className="text-xs text-slate-600">
-                Override values for this employee. Commission is normally 2.5% of
-                sale base (or tiered for Team Lead).
+                Every column is editable. Leave Net Payable blank to
+                auto-calculate as Basic + Commission. Remaining is always
+                Net − Paid.
               </p>
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">
-                    Individual Sales
-                  </span>
-                  <input
-                    type="number"
-                    value={rowForm.individualSales}
+                  <span className="text-slate-600 font-medium">Role</span>
+                  <select
+                    value={rowForm.role}
                     onChange={(e) =>
-                      setRowForm({ ...rowForm, individualSales: e.target.value })
+                      setRowForm({
+                        ...rowForm,
+                        role: e.target.value as "Sales" | "Team Lead-Sales",
+                      })
                     }
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
+                  >
+                    <option value="Sales">Sales</option>
+                    <option value="Team Lead-Sales">Team Lead-Sales</option>
+                  </select>
                 </label>
+
+                <NumField
+                  label="Basic Salary"
+                  value={rowForm.basicSalary}
+                  onChange={(v) =>
+                    setRowForm({ ...rowForm, basicSalary: v })
+                  }
+                />
+                <NumField
+                  label="Individual Sales"
+                  value={rowForm.individualSales}
+                  onChange={(v) =>
+                    setRowForm({ ...rowForm, individualSales: v })
+                  }
+                />
+                <NumField
+                  label="Sale Base"
+                  value={rowForm.saleBase}
+                  onChange={(v) => setRowForm({ ...rowForm, saleBase: v })}
+                />
+                <NumField
+                  label="Rate (%)"
+                  value={rowForm.commissionRate}
+                  onChange={(v) =>
+                    setRowForm({ ...rowForm, commissionRate: v })
+                  }
+                />
+                <NumField
+                  label="Commission (PKR)"
+                  value={rowForm.commissionAmt}
+                  onChange={(v) =>
+                    setRowForm({ ...rowForm, commissionAmt: v })
+                  }
+                />
+                <NumField
+                  label="Net Payable (blank = auto)"
+                  value={rowForm.netPayable}
+                  onChange={(v) =>
+                    setRowForm({ ...rowForm, netPayable: v })
+                  }
+                />
+                <NumField
+                  label="Amount Paid"
+                  value={rowForm.amountPaid}
+                  onChange={(v) => setRowForm({ ...rowForm, amountPaid: v })}
+                />
+
                 <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">Commission</span>
-                  <input
-                    type="number"
-                    value={rowForm.commissionAmt}
+                  <span className="text-slate-600 font-medium">Status</span>
+                  <select
+                    value={rowForm.status}
                     onChange={(e) =>
-                      setRowForm({ ...rowForm, commissionAmt: e.target.value })
+                      setRowForm({
+                        ...rowForm,
+                        status: e.target.value as
+                          | "Pending"
+                          | "Partial"
+                          | "Paid",
+                      })
                     }
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Partial">Partial</option>
+                    <option value="Paid">Paid</option>
+                  </select>
                 </label>
-                <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">Amount Paid</span>
-                  <input
-                    type="number"
-                    value={rowForm.amountPaid}
-                    onChange={(e) =>
-                      setRowForm({ ...rowForm, amountPaid: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="block text-xs">
-                  <span className="text-slate-600 font-medium">Notes</span>
-                  <input
-                    value={rowForm.notes}
-                    onChange={(e) =>
-                      setRowForm({ ...rowForm, notes: e.target.value })
-                    }
-                    className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
-                  />
-                </label>
+
+                <div className="col-span-2 md:col-span-3">
+                  <label className="block text-xs">
+                    <span className="text-slate-600 font-medium">Notes</span>
+                    <input
+                      value={rowForm.notes}
+                      onChange={(e) =>
+                        setRowForm({ ...rowForm, notes: e.target.value })
+                      }
+                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
               </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
-              >
-                {loading ? "Saving…" : "Update Row"}
-              </button>
+
+              <div className="bg-white border rounded-lg p-3 text-xs text-slate-700 flex flex-wrap gap-4">
+                <span>
+                  Live Net: <strong>{formatPKR(previewNet)}</strong>
+                  {rowForm.netPayable !== "" && (
+                    <span className="text-slate-500">
+                      {" "}
+                      (overridden by Net Payable field)
+                    </span>
+                  )}
+                </span>
+                <span>
+                  Remaining: <strong>{formatPKR(previewRemaining)}</strong>
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+                >
+                  {loading ? "Saving…" : "Save Changes"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingRow(null)}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-5 py-2 rounded-lg text-sm font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
             </form>
           )}
 
+          {/* Aggregated sales team table */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -776,7 +782,9 @@ if (!res.ok) {
                         </td>
                         <td
                           className={`px-3 py-2 text-right tabular-nums font-medium ${
-                            r.remaining > 0 ? "text-red-600" : "text-slate-500"
+                            r.remaining > 0
+                              ? "text-red-600"
+                              : "text-slate-500"
                           }`}
                         >
                           {formatPKR(r.remaining)}
@@ -798,7 +806,7 @@ if (!res.ok) {
                           <button
                             onClick={() => openEditRow(r)}
                             className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
-                            title="Edit row"
+                            title="Edit full row"
                           >
                             <Pencil size={15} />
                           </button>
@@ -818,6 +826,7 @@ if (!res.ok) {
             </div>
           </div>
 
+          {/* Individual sales entries */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="bg-slate-50 px-4 py-2 border-b flex justify-between items-center">
               <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
@@ -996,5 +1005,27 @@ if (!res.ok) {
         </div>
       )}
     </div>
+  );
+}
+
+function NumField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="block text-xs">
+      <span className="text-slate-600 font-medium">{label}</span>
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+      />
+    </label>
   );
 }
