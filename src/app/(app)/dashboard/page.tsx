@@ -82,7 +82,7 @@ export default async function DashboardPage({
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-          <PeriodSelector periods={periods} currentId={currentPeriod.id} />
+          <PeriodSelector periods={periods} currentId={currentPeriod.id} allowCreate />
           <ExportMonthButton
             periodId={currentPeriod.id}
             periodLabel={currentPeriod.label}
