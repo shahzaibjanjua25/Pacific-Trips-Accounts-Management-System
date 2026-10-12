@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { ensurePayableForTransport } from "@/lib/links-service";
 import { getSessionUserId } from "@/lib/auth";
 
-/** Only real TransportJob columns — money lives on Payable */
+/** Only real TransportJob columns - money lives on Payable */
 const JOB_FIELDS = [
   "periodId",
   "driverName",

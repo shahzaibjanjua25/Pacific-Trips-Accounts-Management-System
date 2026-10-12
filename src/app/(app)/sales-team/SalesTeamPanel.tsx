@@ -330,7 +330,7 @@ export function SalesTeamPanel({
                 required
                 className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
               >
-                <option value="">â€” Select employee â€”</option>
+                <option value="">- Select employee -</option>
                 {employees.filter((e) => !e.isLead).map((e) => (
                   <option key={e.id} value={e.name}>
                     {e.name}
@@ -389,7 +389,7 @@ export function SalesTeamPanel({
             disabled={loading || !form.employeeName}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Savingâ€¦" : editingEntry ? "Update Sale" : "Save Sale"}
+            {loading ? "Saving..." : editingEntry ? "Update Sale" : "Save Sale"}
           </button>
         </form>
       )}
@@ -461,7 +461,7 @@ export function SalesTeamPanel({
             disabled={loading}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Savingâ€¦" : "Update Row"}
+            {loading ? "Saving..." : "Update Row"}
           </button>
         </form>
       )}
@@ -518,7 +518,7 @@ export function SalesTeamPanel({
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {r.isLead ? "â€”" : formatPKR(r.basicSalary)}
+                      {r.isLead ? "-" : formatPKR(r.basicSalary)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatPKR(r.individualSales)}
@@ -609,18 +609,18 @@ export function SalesTeamPanel({
                     <td className="px-3 py-2 whitespace-nowrap">
                       {s.tourDate
                         ? new Date(s.tourDate).toLocaleDateString("en-GB")
-                        : "â€”"}
+                        : "-"}
                     </td>
                     <td className="px-3 py-2 font-medium">{s.employeeName}</td>
-                    <td className="px-3 py-2">{s.clientName || "â€”"}</td>
+                    <td className="px-3 py-2">{s.clientName || "-"}</td>
                     <td className="px-3 py-2 max-w-[240px] truncate">
-                      {s.description || "â€”"}
+                      {s.description || "-"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-700 font-medium">
                       {formatPKR(s.amount)}
                     </td>
                     <td className="px-3 py-2 max-w-[200px] truncate">
-                      {s.notes || "â€”"}
+                      {s.notes || "-"}
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button

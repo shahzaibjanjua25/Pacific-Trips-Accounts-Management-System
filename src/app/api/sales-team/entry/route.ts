@@ -284,7 +284,7 @@ export async function DELETE(req: NextRequest) {
     const row = await prisma.salesPerformance.findUnique({ where: { id } });
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Remove only this sale entry — full debit amount is subtracted because
+    // Remove only this sale entry - full debit amount is subtracted because
     // individual sales totals use SalesPerformance exclusively.
     await prisma.salesPerformance.delete({ where: { id } });
     await recomputeAll(row.periodId);

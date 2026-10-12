@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { ensurePayableForHotel } from "@/lib/links-service";
 import { getSessionUserId } from "@/lib/auth";
 
-/** Only real HotelBooking columns — money lives on Payable */
+/** Only real HotelBooking columns - money lives on Payable */
 const HOTEL_FIELDS = [
   "periodId",
   "hotelName",
