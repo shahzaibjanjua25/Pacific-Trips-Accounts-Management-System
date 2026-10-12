@@ -47,7 +47,7 @@ export type TxnInput = {
   salesperson?: string | null;
 };
 
-/* ────── BANK ────── */
+/* ------ BANK ------ */
 async function adjustBank(accountName: string | null | undefined, delta: number) {
   if (!accountName || delta === 0) return;
   const trimmed = accountName.trim();
@@ -70,7 +70,7 @@ async function adjustBank(accountName: string | null | undefined, delta: number)
 }
 const cashDelta = (debit: number, credit: number) => debit - credit;
 
-/* ────── REFUND HELPERS ────── */
+/* ------ REFUND HELPERS ------ */
 
 async function createRefundFromTransaction(opts: {
   periodId: string;
@@ -144,7 +144,7 @@ async function createRefundFromTransaction(opts: {
     });
   }
 
-  // 5. ClientLedger row (credit — money out to client)
+  // 5. ClientLedger row (credit - money out to client)
   await syncRefundToClientLedger(refund.id);
 
   return [
@@ -152,7 +152,7 @@ async function createRefundFromTransaction(opts: {
   ];
 }
 
-/* ────── LINK RESOLUTION ────── */
+/* ------ LINK RESOLUTION ------ */
 async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const cat = (input.category || "").toLowerCase();
   const party = input.party || input.subCategory || "";
@@ -251,10 +251,98 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     }
   }
 
+  // Employee Loan / Staff Advance:
+  //   Credit = company gives money to employee -> increase loan remaining
+  //   Debit  = employee repays -> decrease loan remaining (capped at remaining)
+  if (
+    (cat.includes("employee loan") || cat.includes("staff advance")) &&
+    party
+  ) {
+    const creditAmt = Math.abs(input.credit || 0);
+    const debitAmt = Math.abs(input.debit || 0);
+
+    const emp =
+      (await prisma.employee.findFirst({
+        where: { name: party, isActive: true },
+      })) ||
+      (await prisma.employee.findFirst({
+        where: {
+          isActive: true,
+          name: { contains: party, mode: "insensitive" },
+        },
+      }));
+
+    if (!emp) {
+      return [];
+    }
+
+    let loan = await prisma.employeeLoan.findFirst({
+      where: { employeeId: emp.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (creditAmt > 0) {
+      // Giving / increasing loan
+      if (loan) {
+        await prisma.employeeLoan.update({
+          where: { id: loan.id },
+          data: {
+            originalAmount: loan.originalAmount + creditAmt,
+            remainingAmount: loan.remainingAmount + creditAmt,
+          },
+        });
+      } else {
+        loan = await prisma.employeeLoan.create({
+          data: {
+            employeeId: emp.id,
+            originalAmount: creditAmt,
+            remainingAmount: creditAmt,
+            monthlyInstallment: 0,
+            startDate: new Date(input.date),
+            notes: input.description || "Loan from transaction",
+          },
+        });
+      }
+      return [
+        {
+          entityType: "employee_loan",
+          entityId: loan.id,
+          appliedAmount: creditAmt, // positive = increased loan
+        },
+      ];
+    }
+
+    if (debitAmt > 0) {
+      // Repayment
+      if (!loan || loan.remainingAmount <= 0) {
+        throw new Error(
+          `No open loan for ${emp.name}. Cannot record repayment of ${debitAmt}.`
+        );
+      }
+      if (debitAmt > loan.remainingAmount + 0.001) {
+        throw new Error(
+          `Repayment ${debitAmt} exceeds ${emp.name}'s remaining loan ${loan.remainingAmount}.`
+        );
+      }
+      const newRemaining = Math.max(0, loan.remainingAmount - debitAmt);
+      await prisma.employeeLoan.update({
+        where: { id: loan.id },
+        data: { remainingAmount: newRemaining },
+      });
+      return [
+        {
+          entityType: "employee_loan",
+          entityId: loan.id,
+          appliedAmount: -debitAmt, // negative = decreased loan
+        },
+      ];
+    }
+  }
+
   return [];
 }
 
-/* ────── POST ────── */
+/* ------ POST ------ */
 export async function postTransaction(input: TxnInput) {
   const txn = await prisma.transaction.create({
     data: {
@@ -496,7 +584,7 @@ export async function postTransaction(input: TxnInput) {
       isNewReceivable = true;
     }
 
-    // ── Sales attribution ──
+    // -- Sales attribution --
     // Attribute to the salesperson when:
     //   (a) a new Receivable was just created with a total package, OR
     //   (b) the package was raised on an existing receivable (delta > 0)
@@ -555,7 +643,7 @@ export async function postTransaction(input: TxnInput) {
           receiptRef: input.notes || null,
           enteredBy: input.enteredBy || null,
           notes:
-            "Auto-posted from transaction (money returned to client — reduces amount received)",
+            "Auto-posted from transaction (money returned to client - reduces amount received)",
         },
       });
     }
@@ -585,7 +673,7 @@ export async function postTransaction(input: TxnInput) {
   return txn;
 }
 
-/* ────── DELETE ────── */
+/* ------ DELETE ------ */
 export async function deleteTransaction(id: string) {
   const txn = await prisma.transaction.findUnique({ where: { id } });
   if (!txn) return null;
@@ -690,6 +778,28 @@ async function reverseLink(link: {
     });
   }
 
+  if (link.entityType === "employee_loan") {
+    const loan = await prisma.employeeLoan.findUnique({
+      where: { id: link.entityId },
+    });
+    if (!loan) return;
+    // appliedAmount > 0 was a credit (loan increase); reverse by decreasing
+    // appliedAmount < 0 was a debit repayment; reverse by increasing remaining
+    const delta = -link.appliedAmount;
+    const newRemaining = Math.max(0, loan.remainingAmount + delta);
+    const newOriginal =
+      link.appliedAmount > 0
+        ? Math.max(0, loan.originalAmount - link.appliedAmount)
+        : loan.originalAmount;
+    await prisma.employeeLoan.update({
+      where: { id: loan.id },
+      data: {
+        remainingAmount: newRemaining,
+        originalAmount: newOriginal,
+      },
+    });
+  }
+
   if (link.entityType === "refund") {
     const refund = await prisma.refund.findUnique({
       where: { id: link.entityId },
@@ -732,7 +842,7 @@ async function reverseLink(link: {
   }
 }
 
-/* ────── UPDATE ────── */
+/* ------ UPDATE ------ */
 export async function updateTransaction(id: string, input: Partial<TxnInput>) {
   const old = await prisma.transaction.findUnique({ where: { id } });
   if (!old) return null;
@@ -886,7 +996,7 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
             status: "Credited",
             enteredBy: updated.enteredBy || null,
             notes:
-              "Auto-posted from transaction (money returned to client — reduces amount received)",
+              "Auto-posted from transaction (money returned to client - reduces amount received)",
           },
         });
       }
