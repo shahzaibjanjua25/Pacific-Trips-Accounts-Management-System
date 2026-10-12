@@ -1,4 +1,3 @@
-// src/app/api/sales-team/update/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
@@ -20,6 +19,7 @@ export async function POST(req: NextRequest) {
       commissionAmt,
       netPayable,
       amountPaid,
+      remaining,
       status,
       notes,
     } = body;
@@ -38,27 +38,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
 
-    const nextRole =
-      role === "Team Lead-Sales" ? "Sales" : role || emp.role || "Sales";
+    // Role stays Sales in DB; Team Lead is inferred from name for commission rules
+    const nextRole = role === "Team Lead-Sales" ? "Sales" : role || emp.role || "Sales";
 
-    if (basicSalary != null) {
+    if (basicSalary != null || role != null) {
       await prisma.employee.update({
         where: { id: emp.id },
-        data: { basicSalary: Number(basicSalary) || 0, role: nextRole },
+        data: {
+          ...(basicSalary != null ? { basicSalary: Number(basicSalary) || 0 } : {}),
+          ...(role != null ? { role: nextRole } : {}),
+        },
       });
     }
 
-    const isLead =
-      role === "Team Lead-Sales" ||
-      employeeName.toLowerCase().includes("amad") ||
-      employeeName.toLowerCase().includes("ammar") ||
-      employeeName.toLowerCase().includes("ahmad");
-
-    // ── Commission ──
-    const saleAmt = Number(saleBase) || Number(individualSales) || 0;
-    const rate = commissionRate != null ? Number(commissionRate) : 2.5;
+    // Commission row
+    const saleAmt =
+      saleBase != null
+        ? Number(saleBase) || 0
+        : individualSales != null
+          ? Number(individualSales) || 0
+          : 0;
+    const rate =
+      commissionRate != null && !Number.isNaN(Number(commissionRate))
+        ? Number(commissionRate)
+        : 2.5;
     const commAmt =
-      commissionAmt != null ? Number(commissionAmt) : saleAmt * (rate / 100);
+      commissionAmt != null && !Number.isNaN(Number(commissionAmt))
+        ? Number(commissionAmt)
+        : saleAmt * (rate / 100);
 
     const existingComm = await prisma.commission.findFirst({
       where: { periodId, employeeName },
@@ -71,6 +78,7 @@ export async function POST(req: NextRequest) {
           commissionRate: rate,
           commissionAmt: commAmt,
           status: status === "Paid" ? "Paid" : "Accrued",
+          notes: notes != null ? notes : existingComm.notes,
         },
       });
     } else {
@@ -83,11 +91,12 @@ export async function POST(req: NextRequest) {
           commissionRate: rate,
           commissionAmt: commAmt,
           status: status === "Paid" ? "Paid" : "Accrued",
+          notes: notes || null,
         },
       });
     }
 
-    // ── Payroll ──
+    // Payroll row
     const existingPay = await prisma.payrollEntry.findFirst({
       where: { periodId, employeeName },
     });
@@ -95,10 +104,7 @@ export async function POST(req: NextRequest) {
     const basic =
       basicSalary != null
         ? Number(basicSalary) || 0
-        : isLead
-          ? 0
-          : emp.basicSalary || 40000;
-
+        : existingPay?.basicSalary ?? emp.basicSalary ?? 0;
     const loan = existingPay?.loanInstallment ?? 0;
     const tax = existingPay?.taxDeducted ?? 0;
     const other = existingPay?.otherDeductions ?? 0;
@@ -109,12 +115,15 @@ export async function POST(req: NextRequest) {
         ? Number(netPayable)
         : computedNet;
 
-    const paid = Number(amountPaid) || 0;
-    const remaining = Math.max(0, net - paid);
+    const paid = amountPaid != null ? Number(amountPaid) || 0 : existingPay?.amountPaid ?? 0;
+    const rem =
+      remaining != null && !Number.isNaN(Number(remaining))
+        ? Math.max(0, Number(remaining))
+        : Math.max(0, net - paid);
 
     let nextStatus: string;
     if (status) nextStatus = status;
-    else if (remaining <= 0 && paid > 0) nextStatus = "Paid";
+    else if (rem <= 0 && paid > 0) nextStatus = "Paid";
     else if (paid > 0) nextStatus = "Partial";
     else nextStatus = "Pending";
 
@@ -125,9 +134,9 @@ export async function POST(req: NextRequest) {
           basicSalary: basic,
           netPayable: net,
           amountPaid: paid,
-          remaining,
+          remaining: rem,
           status: nextStatus,
-          notes: notes || existingPay.notes,
+          notes: notes != null ? notes : existingPay.notes,
         },
       });
     } else {
@@ -142,7 +151,7 @@ export async function POST(req: NextRequest) {
           otherDeductions: other,
           netPayable: net,
           amountPaid: paid,
-          remaining,
+          remaining: rem,
           status: nextStatus,
           notes: notes || null,
         },
