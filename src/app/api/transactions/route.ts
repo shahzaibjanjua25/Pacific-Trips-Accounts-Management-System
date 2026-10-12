@@ -30,10 +30,24 @@ export async function POST(req: NextRequest) {
       cat.includes("receipt") ||
       cat.includes("revenue") ||
       cat.includes("client receipt");
-    const amountMoving = isClientReceipt ? debit : credit;
+    const isEmployeeLoan =
+      cat.includes("employee loan") || cat.includes("staff advance");
+    // Client receipt: check debit. Employee loan: only check debit (repayment).
+    // Giving a loan is credit - no outstanding limit.
+    const amountMoving = isClientReceipt
+      ? debit
+      : isEmployeeLoan
+        ? debit
+        : credit;
 
-    // Server-side overpayment guard
-    if (party && amountMoving > 0 && body.periodId && !isNewClient) {
+    // Server-side overpayment guard (skip when giving employee loan via credit)
+    if (
+      party &&
+      amountMoving > 0 &&
+      body.periodId &&
+      !isNewClient &&
+      !(isEmployeeLoan && credit > 0 && debit <= 0)
+    ) {
       const outstanding = await lookupOutstanding(body.periodId, cat, party);
       if (outstanding != null && amountMoving > outstanding) {
         return NextResponse.json(
@@ -101,9 +115,20 @@ export async function PUT(req: NextRequest) {
       cat.includes("receipt") ||
       cat.includes("revenue") ||
       cat.includes("client receipt");
-    const amountMoving = isClientReceipt ? debit : credit;
+    const isEmployeeLoan =
+      cat.includes("employee loan") || cat.includes("staff advance");
+    const amountMoving = isClientReceipt
+      ? debit
+      : isEmployeeLoan
+        ? debit
+        : credit;
 
-    if (party && amountMoving > 0 && !body.isNewClient) {
+    if (
+      party &&
+      amountMoving > 0 &&
+      !body.isNewClient &&
+      !(isEmployeeLoan && credit > 0 && debit <= 0)
+    ) {
       const existing = await prisma.transaction.findUnique({
         where: { id: body.id },
       });

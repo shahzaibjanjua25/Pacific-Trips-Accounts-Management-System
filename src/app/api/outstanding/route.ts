@@ -386,14 +386,10 @@ export async function GET(req: NextRequest) {
       emps.find((e) => lastNameMatch(e.name, party));
 
     if (!emp) {
-      // No name match - return the sum of all outstanding loans
-      const loans = await prisma.employeeLoan.findMany({
-        where: { remainingAmount: { gt: 0 } },
-      });
-      const total = loans.reduce((s, l) => s + l.remainingAmount, 0);
+      // Unknown employee name - do not use sum of all loans (that blocked valid credits)
       return NextResponse.json({
-        outstanding: total,
-        exists: true,
+        outstanding: 0,
+        exists: false,
         reason: "no-name-match",
       });
     }

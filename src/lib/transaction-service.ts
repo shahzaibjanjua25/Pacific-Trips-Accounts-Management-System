@@ -234,7 +234,11 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-  if (cat.includes("advance") && !cat.includes("employee")) {
+  if (
+    cat.includes("advance") &&
+    !cat.includes("employee") &&
+    !cat.includes("staff")
+  ) {
     if (signedPayAmount > 0 && party) {
       const adv = await prisma.supplierAdvance.create({
         data: {
@@ -365,7 +369,18 @@ export async function postTransaction(input: TxnInput) {
 
   await adjustBank(input.bankAccount, cashDelta(input.debit || 0, input.credit || 0));
 
-  const links = await resolveLinks(input);
+  let links;
+  try {
+    links = await resolveLinks(input);
+  } catch (err) {
+    // Roll back txn + bank so a failed loan/payable link does not leave orphans
+    await adjustBank(
+      input.bankAccount,
+      -cashDelta(input.debit || 0, input.credit || 0)
+    ).catch(() => {});
+    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
+    throw err;
+  }
   for (const link of links) {
     await prisma.transactionLink.create({
       data: {
