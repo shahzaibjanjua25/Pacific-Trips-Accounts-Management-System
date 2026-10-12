@@ -161,7 +161,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         outstanding: p.remaining,
         exists: true,
-        totalAmount: p.totalAmount,
+        totalAmount: p.originalAmount,
         amountPaid: p.amountPaid,
       });
     }
