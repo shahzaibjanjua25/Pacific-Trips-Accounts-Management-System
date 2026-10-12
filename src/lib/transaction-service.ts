@@ -514,11 +514,11 @@ export async function postTransaction(input: TxnInput) {
       sign: 1,
     });
   } catch (err) {
-    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
+    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => { });
     throw err;
   }
 
-  let links;
+  let links: AppliedLink[] = [];
   try {
     // Bank Transfer has no operational links
     if (isBankTransferCategory(input.category)) {
@@ -541,8 +541,8 @@ export async function postTransaction(input: TxnInput) {
       status: input.status || "Completed",
       notes: input.notes,
       sign: -1,
-    }).catch(() => {});
-    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
+    }).catch(() => { });
+    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => { });
     throw err;
   }
   for (const link of links) {
@@ -691,7 +691,7 @@ export async function postTransaction(input: TxnInput) {
         const wouldBe = newReceived + paidNow;
         if (wouldBe > newTotal && !input.isNewClient) {
           const over = wouldBe - newTotal;
-          await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
+          await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => { });
           await applyBankEffect({
             periodId: input.periodId,
             date: input.date,
@@ -705,10 +705,10 @@ export async function postTransaction(input: TxnInput) {
             status: input.status || "Completed",
             notes: input.notes,
             sign: -1,
-          }).catch(() => {});
+          }).catch(() => { });
           throw new Error(
             `Overpayment blocked: ${party} owes ${newTotal - newReceived} ` +
-              `but ${paidNow} was entered (excess ${over}).`
+            `but ${paidNow} was entered (excess ${over}).`
           );
         }
         newReceived = wouldBe;
@@ -1040,7 +1040,7 @@ async function reverseLink(link: {
     }
 
     await removeRefundFromClientLedger(refund.id);
-    await prisma.refund.delete({ where: { id: refund.id } }).catch(() => {});
+    await prisma.refund.delete({ where: { id: refund.id } }).catch(() => { });
   }
 }
 
@@ -1114,17 +1114,17 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
   const newLinks = isBankTransferCategory(updated.category)
     ? []
     : await resolveLinks({
-        periodId: updated.periodId,
-        date: updated.date.toISOString(),
-        description: updated.description,
-        category: updated.category,
-        subCategory: updated.subCategory,
-        party: updated.party,
-        tripRef: updated.tripRef,
-        debit: updated.debit,
-        credit: updated.credit,
-        hotelAgreedCost: input.hotelAgreedCost,
-      });
+      periodId: updated.periodId,
+      date: updated.date.toISOString(),
+      description: updated.description,
+      category: updated.category,
+      subCategory: updated.subCategory,
+      party: updated.party,
+      tripRef: updated.tripRef,
+      debit: updated.debit,
+      credit: updated.credit,
+      hotelAgreedCost: input.hotelAgreedCost,
+    });
 
   for (const link of newLinks) {
     await prisma.transactionLink.create({
