@@ -184,7 +184,17 @@ export function SalesTeamPanel({
         ),
       });
       const text = await res.text();
-      if (!res.ok) throw new Error(text);
+if (!res.ok) {
+  let msg = text;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.error) msg = parsed.error;
+  } catch {
+    // strip HTML tags if we got a Next.js error page
+    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+  }
+  throw new Error(msg);
+}
       setOpen(false);
       setEditingEntry(null);
       router.refresh();
@@ -203,7 +213,17 @@ export function SalesTeamPanel({
         method: "DELETE",
       });
       const text = await res.text();
-      if (!res.ok) throw new Error(text);
+if (!res.ok) {
+  let msg = text;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.error) msg = parsed.error;
+  } catch {
+    // strip HTML tags if we got a Next.js error page
+    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+  }
+  throw new Error(msg);
+}
       router.refresh();
     } catch (err) {
       alert("Delete failed: " + err);
@@ -240,7 +260,17 @@ export function SalesTeamPanel({
         }),
       });
       const text = await res.text();
-      if (!res.ok) throw new Error(text);
+if (!res.ok) {
+  let msg = text;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.error) msg = parsed.error;
+  } catch {
+    // strip HTML tags if we got a Next.js error page
+    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+  }
+  throw new Error(msg);
+}
       setEditingRow(null);
       router.refresh();
     } catch (err) {
@@ -266,7 +296,17 @@ export function SalesTeamPanel({
         { method: "DELETE" }
       );
       const text = await res.text();
-      if (!res.ok) throw new Error(text);
+if (!res.ok) {
+  let msg = text;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.error) msg = parsed.error;
+  } catch {
+    // strip HTML tags if we got a Next.js error page
+    msg = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+  }
+  throw new Error(msg);
+}
       router.refresh();
     } catch (err) {
       alert("Delete failed: " + err);
