@@ -186,12 +186,10 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     else d.status = d.status || "Open";
   }
 
+  // HotelBooking has no money fields — those live on Payable.
+  // Do NOT inject agreedCost / amountPaid / remaining here (Prisma will reject them).
   if (model === "hotelBooking") {
-    const orig = Number(d.agreedCost) || 0;
-    const paid = Number(d.amountPaid) || 0;
-    d.remaining = Math.max(0, orig - paid);
-    if (d.remaining === 0) d.status = "Paid";
-    else if ((paid as number) > 0) d.status = "Partial";
+    // status only; leave as client provided
   }
 
   if (model === "trip") {
@@ -244,12 +242,9 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     if (d.outstanding === 0) d.status = "Paid";
   }
 
+  // TransportJob has no remaining/agreedCost — money lives on Payable.
   if (model === "transportJob") {
-    const agreed = Number(d.agreedCost) || 0;
-    const settled = Number(d.finalSettlement) || 0;
-    d.remaining = Math.max(0, agreed - settled);
-    if (d.remaining === 0) d.status = "Settled";
-    else if ((settled as number) > 0) d.status = "Partial";
+    // status only
   }
 
   for (const key of Object.keys(d)) {
@@ -349,7 +344,7 @@ export function makeCrudHandlers(
       return NextResponse.json(row);
     } catch (e) {
       console.error(`[crud:${modelName}:POST]`, e);
-      return NextResponse.json({ error: "Create failed" }, { status: 500 });
+      return NextResponse.json({ error: String(e) }, { status: 500 });
     }
   }
 
@@ -375,7 +370,7 @@ export function makeCrudHandlers(
       return NextResponse.json(row);
     } catch (e) {
       console.error(`[crud:${modelName}:PUT]`, e);
-      return NextResponse.json({ error: "Update failed" }, { status: 500 });
+      return NextResponse.json({ error: String(e) }, { status: 500 });
     }
   }
 
@@ -404,4 +399,3 @@ export function makeCrudHandlers(
 
   return { GET, POST, PUT, DELETE };
 }
-

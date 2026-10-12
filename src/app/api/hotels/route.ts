@@ -3,12 +3,44 @@ import { prisma } from "@/lib/prisma";
 import { ensurePayableForHotel } from "@/lib/links-service";
 import { getSessionUserId } from "@/lib/auth";
 
-function coerceDates(data: Record<string, unknown>) {
-  for (const k of ["checkIn", "checkOut"]) {
-    if (typeof data[k] === "string" && data[k]) data[k] = new Date(data[k] as string);
-    else if (data[k] === "") data[k] = null;
+/** Only real HotelBooking columns — money lives on Payable */
+const HOTEL_FIELDS = [
+  "periodId",
+  "hotelName",
+  "clientName",
+  "tripRef",
+  "checkIn",
+  "checkOut",
+  "nights",
+  "rooms",
+  "status",
+  "notes",
+] as const;
+
+function pickHotel(body: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const k of HOTEL_FIELDS) {
+    if (k in body) out[k] = body[k];
   }
-  return data;
+  for (const k of ["checkIn", "checkOut"]) {
+    if (typeof out[k] === "string" && out[k]) out[k] = new Date(out[k] as string);
+    else if (out[k] === "") out[k] = null;
+  }
+  if (typeof out.nights === "string") out.nights = parseInt(out.nights as string, 10) || null;
+  if (typeof out.rooms === "string") out.rooms = parseInt(out.rooms as string, 10) || null;
+  for (const k of Object.keys(out)) {
+    if (out[k] === "") out[k] = null;
+  }
+  return out;
+}
+
+function payableMoney(body: Record<string, unknown>) {
+  const orig = Number(body.agreedCost) || 0;
+  const paid = Number(body.amountPaid) || 0;
+  const remaining = Math.max(0, orig - paid);
+  const status =
+    remaining <= 0 && paid > 0 ? "Paid" : paid > 0 ? "Partial" : "Open";
+  return { orig, paid, remaining, status };
 }
 
 export async function GET(req: NextRequest) {
@@ -30,24 +62,33 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const data = coerceDates({ ...body });
+    const data = pickHotel(body);
     delete data.id;
-    delete data.payable;
-    delete data.payableId;
 
     const row = await prisma.hotelBooking.create({ data: data as never });
     const payableId = await ensurePayableForHotel(row.id);
 
-    const orig = Number(body.agreedCost) || 0;
-    const paid = Number(body.amountPaid) || 0;
+    const { orig, paid, remaining, status } = payableMoney(body);
     if (payableId && (orig > 0 || paid > 0)) {
       await prisma.payable.update({
         where: { id: payableId },
         data: {
           originalAmount: orig,
           amountPaid: paid,
-          remaining: Math.max(0, orig - paid),
-          status: orig - paid <= 0 && paid > 0 ? "Paid" : paid > 0 ? "Partial" : "Open",
+          remaining,
+          status,
+        },
+      });
+      // keep operational status in sync
+      await prisma.hotelBooking.update({
+        where: { id: row.id },
+        data: {
+          status:
+            remaining <= 0 && paid > 0
+              ? "Paid"
+              : paid > 0
+                ? "Partial"
+                : (row.status as string) || "Booked",
         },
       });
     }
@@ -58,7 +99,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(fresh);
   } catch (e) {
-    console.error(e);
+    console.error("[hotels:POST]", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
@@ -71,28 +112,39 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-    const data = coerceDates({ ...body });
-    const id = data.id as string;
-    delete data.id;
-    delete data.payable;
-    delete data.payableId;
-    delete data.createdAt;
-    delete data.updatedAt;
+    const id = body.id as string;
+    const data = pickHotel(body);
+    // never overwrite period / ids on update
     delete data.periodId;
 
-    const row = await prisma.hotelBooking.update({ where: { id }, data: data as never });
+    const row = await prisma.hotelBooking.update({
+      where: { id },
+      data: data as never,
+    });
     const payableId = await ensurePayableForHotel(row.id);
 
-    const orig = Number(body.agreedCost) || 0;
-    const paid = Number(body.amountPaid) || 0;
-    if (payableId && (orig > 0 || paid > 0)) {
+    const { orig, paid, remaining, status } = payableMoney(body);
+    // Always sync payable when either amount is present (including zeroing)
+    if (payableId && ("agreedCost" in body || "amountPaid" in body)) {
       await prisma.payable.update({
         where: { id: payableId },
         data: {
           originalAmount: orig,
           amountPaid: paid,
-          remaining: Math.max(0, orig - paid),
-          status: orig - paid <= 0 && paid > 0 ? "Paid" : paid > 0 ? "Partial" : "Open",
+          remaining,
+          status,
+        },
+      });
+      await prisma.hotelBooking.update({
+        where: { id: row.id },
+        data: {
+          status:
+            body.status ||
+            (remaining <= 0 && paid > 0
+              ? "Paid"
+              : paid > 0
+                ? "Partial"
+                : "Booked"),
         },
       });
     }
@@ -103,7 +155,7 @@ export async function PUT(req: NextRequest) {
     });
     return NextResponse.json(fresh);
   } catch (e) {
-    console.error(e);
+    console.error("[hotels:PUT]", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
