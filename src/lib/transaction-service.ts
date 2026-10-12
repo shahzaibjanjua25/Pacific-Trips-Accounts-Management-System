@@ -96,14 +96,22 @@ async function recordBankTxn(opts: {
 }) {
   const name = opts.accountName.trim();
   if (!name) return;
+
+  // Balance lives on BankBalance (not BankAccount).
+  // accountId FK points at BankAccount — only set it if a real BankAccount row exists.
+  // Never use BankBalance.id here (that caused BankTxn_accountId_fkey violations).
   const bal = await prisma.bankBalance.findFirst({
     where: { accountName: { equals: name, mode: "insensitive" } },
   });
+  const bankAccount = await prisma.bankAccount.findFirst({
+    where: { name: { equals: name, mode: "insensitive" } },
+  });
+
   await prisma.bankTxn.create({
     data: {
       periodId: opts.periodId,
       accountName: name,
-      accountId: bal?.id ?? null,
+      accountId: bankAccount?.id ?? null,
       date: opts.date,
       description: opts.description ?? null,
       deposit: opts.deposit ?? 0,
