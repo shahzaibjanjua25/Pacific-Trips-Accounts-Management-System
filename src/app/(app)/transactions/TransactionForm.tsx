@@ -136,6 +136,7 @@ export function TransactionManager({
     form.category.toLowerCase().includes("employee loan") ||
     form.category.toLowerCase().includes("staff advance");
   const isOutboundCategory = OUTBOUND_CHECK_CATEGORIES.includes(form.category);
+  const isBankTransfer = form.category === "Bank Transfer";
   // Employee loan: only check limit on repayment (debit). Credit (giving loan) is unlimited.
   const shouldCheckOutstanding =
     isClientCategory ||
@@ -345,13 +346,28 @@ export function TransactionManager({
         ? form.otherAccount.trim()
         : form.accountMode;
 
-    if (!party) {
-      alert("Please choose or type a party.");
-      return;
-    }
-    if (!resolvedAccount) {
-      alert("Please choose or type an account.");
-      return;
+    if (isBankTransfer) {
+      if (!resolvedAccount) {
+        alert("Bank Transfer: choose the From account (Account field).");
+        return;
+      }
+      if (!party) {
+        alert("Bank Transfer: choose or type the To account in the Party field.");
+        return;
+      }
+      if (debitAmount === 0 && creditAmount === 0) {
+        alert("Bank Transfer: enter the amount in Credit (or Debit).");
+        return;
+      }
+    } else {
+      if (!party) {
+        alert("Please choose or type a party.");
+        return;
+      }
+      if (!resolvedAccount) {
+        alert("Please choose or type an account.");
+        return;
+      }
     }
 
     if (isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
@@ -638,7 +654,7 @@ export function TransactionManager({
       if (clientRefundable === 0) {
         return (
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-             This client has <strong>â‚¨ 0</strong> refundable - either they haven't
+             This client has <strong>Ã¢â€šÂ¨ 0</strong> refundable - either they haven't
             paid us, or they've already been fully refunded.
           </p>
         );
@@ -647,7 +663,7 @@ export function TransactionManager({
         return (
           <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
             Refundable: <strong>{formatPKR(clientRefundable)}</strong>
-            {" · "}
+            {" Â· "}
             Remaining after this refund:{" "}
             <strong>{formatPKR(Math.max(0, clientRefundable - movingAmount))}</strong>
           </p>
@@ -743,14 +759,14 @@ export function TransactionManager({
     return (
       <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
         Outstanding: <strong>{formatPKR(effectiveLimit)}</strong>
-        {" · "}
+        {" Â· "}
         Remaining after this:{" "}
         <strong>{formatPKR(Math.max(0, effectiveLimit - movingAmount))}</strong>
         {isClientCategory && formPkg > 0 ? (
           <span className="block text-slate-600">
             Package {formatPKR(formPkg)}
             {outstanding.amountReceived != null
-              ? ` · received so far ${formatPKR(outstanding.amountReceived)}`
+              ? ` Â· received so far ${formatPKR(outstanding.amountReceived)}`
               : ""}
           </span>
         ) : null}
@@ -800,8 +816,8 @@ export function TransactionManager({
           </div>
           <p className="text-xs text-slate-600">
             Choose <strong>Category</strong> first - Sub-Category / Party lists hotels, suppliers,
-            clients or staff you owe / who owe you. Pick <strong>Otherâ€¦</strong> to type a new name.
-            {" "}<strong>Debit = money IN · Credit = money OUT.</strong>
+            clients or staff you owe / who owe you. Pick <strong>OtherÃ¢â‚¬Â¦</strong> to type a new name.
+            {" "}<strong>Debit = money IN Â· Credit = money OUT.</strong>
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field
@@ -964,7 +980,9 @@ export function TransactionManager({
 
             <label className="block text-xs col-span-2">
               <span className="text-slate-600 font-medium">
-                Account (Payment Method)
+                {isBankTransfer
+                  ? "From Account (transfer out of)"
+                  : "Account (Payment Method)"}
               </span>
               <select
                 value={form.accountMode}
@@ -990,7 +1008,7 @@ export function TransactionManager({
 
                 <optgroup label="Other">
                   <option value="Cheque">Cheque</option>
-                  <option value="__other__">Otherâ€¦</option>
+                  <option value="__other__">OtherÃ¢â‚¬Â¦</option>
                 </optgroup>
               </select>
             </label>

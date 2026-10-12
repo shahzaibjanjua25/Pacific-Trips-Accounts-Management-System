@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Attribute the sale to the chosen salesperson → Sales Team + commission
+      // Attribute the sale to the chosen salesperson â†’ Sales Team + commission
       if (salesperson && (tp || paid) > 0) {
         await attributeSaleToSalesperson({
           periodId,
@@ -150,18 +150,75 @@ export async function PUT(req: NextRequest) {
           },
         });
 
-        // If the package increased, record the delta as a new sale for
-        // the chosen salesperson so their commission reflects it.
-        const delta = Math.max(0, tp - prevTp);
-        const targetSalesperson = salesperson || existing.salesperson;
-        if (targetSalesperson && delta > 0) {
+        // Sales Team: package increase OR salesperson change must update
+        // SalesPerformance (single source of truth for commissions).
+        const delta = Math.max(0, (tp || existing.totalPackage) - prevTp);
+        const prevSalesperson = (existing.salesperson || "").trim();
+        const nextSalesperson = (
+          (typeof salesperson === "string" ? salesperson : prevSalesperson) || ""
+        ).trim();
+        const packageForSale =
+          (tp > 0 ? tp : existing.totalPackage) || 0;
+        const salespersonChanged =
+          prevSalesperson.toLowerCase() !== nextSalesperson.toLowerCase();
+
+        if (salespersonChanged && packageForSale > 0) {
+          // Remove prior attribution for this client in this period
+          if (prevSalesperson) {
+            await prisma.salesPerformance.deleteMany({
+              where: {
+                periodId,
+                clientName: client.name,
+                employeeName: prevSalesperson,
+              },
+            });
+            const { computeSalesPayroll } = await import(
+              "@/lib/payroll-service"
+            );
+            const { syncPayrollForEmployee } = await import(
+              "@/lib/links-service"
+            );
+            await computeSalesPayroll(periodId);
+            await syncPayrollForEmployee(periodId, prevSalesperson);
+          }
+          if (nextSalesperson) {
+            await attributeSaleToSalesperson({
+              periodId,
+              salesperson: nextSalesperson,
+              clientName: client.name,
+              amount: packageForSale,
+              description: `Reassigned sale: ${client.name}`,
+            });
+          }
+        } else if (nextSalesperson && delta > 0) {
           await attributeSaleToSalesperson({
             periodId,
-            salesperson: targetSalesperson,
+            salesperson: nextSalesperson,
             clientName: client.name,
             amount: delta,
             description: `Package increase: ${client.name}`,
           });
+        } else if (
+          salespersonChanged &&
+          !nextSalesperson &&
+          prevSalesperson
+        ) {
+          // Salesperson cleared — drop sales rows for this client
+          await prisma.salesPerformance.deleteMany({
+            where: {
+              periodId,
+              clientName: client.name,
+              employeeName: prevSalesperson,
+            },
+          });
+          const { computeSalesPayroll } = await import(
+            "@/lib/payroll-service"
+          );
+          const { syncPayrollForEmployee } = await import(
+            "@/lib/links-service"
+          );
+          await computeSalesPayroll(periodId);
+          await syncPayrollForEmployee(periodId, prevSalesperson);
         }
       } else if (tp > 0 || paid > 0) {
         await prisma.receivable.create({
