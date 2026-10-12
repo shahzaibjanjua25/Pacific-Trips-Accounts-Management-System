@@ -19,29 +19,20 @@ export default async function SalesTeamPage({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [
-    employees,
-    trips,
-    receivables,
-    commissions,
-    payroll,
-    salesEntries,
-    targetRow,
-  ] = await Promise.all([
-    prisma.employee.findMany({
-      where: { isActive: true, role: "Sales" },
-      orderBy: { name: "asc" },
-    }),
-    prisma.trip.findMany({ where: { periodId: current.id } }),
-    prisma.receivable.findMany({ where: { periodId: current.id } }),
-    prisma.commission.findMany({ where: { periodId: current.id } }),
-    prisma.payrollEntry.findMany({ where: { periodId: current.id } }),
-    prisma.salesPerformance.findMany({
-      where: { periodId: current.id },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.salesTarget.findUnique({ where: { periodId: current.id } }),
-  ]);
+  const [employees, commissions, payroll, salesEntries, targetRow] =
+    await Promise.all([
+      prisma.employee.findMany({
+        where: { isActive: true, role: "Sales" },
+        orderBy: { name: "asc" },
+      }),
+      prisma.commission.findMany({ where: { periodId: current.id } }),
+      prisma.payrollEntry.findMany({ where: { periodId: current.id } }),
+      prisma.salesPerformance.findMany({
+        where: { periodId: current.id },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.salesTarget.findUnique({ where: { periodId: current.id } }),
+    ]);
 
   const monthlyTarget = targetRow?.targetAmount ?? 12_000_000;
   const targetNotes = targetRow?.notes ?? "";
@@ -57,18 +48,8 @@ export default async function SalesTeamPage({
     return { amount: teamTotal * 0.025, rate: 2.5 };
   }
 
-  const salesByPerson: Record<string, number> = {};
-  for (const t of trips) {
-    const sp = t.salesperson || "Unassigned";
-    salesByPerson[sp] = (salesByPerson[sp] || 0) + t.packageRevenue;
-  }
-  for (const r of receivables) {
-    if (r.salesperson) {
-      salesByPerson[r.salesperson] =
-        (salesByPerson[r.salesperson] || 0) + r.totalPackage;
-    }
-  }
-
+  // Single source of truth for individual sales: SalesPerformance only.
+  // (Avoid double-counting with Receivables/Trips created from the same sale.)
   const entriesByPerson: Record<string, number> = {};
   for (const e of salesEntries) {
     entriesByPerson[e.employeeName] =
@@ -77,16 +58,11 @@ export default async function SalesTeamPage({
 
   const totalTeamSales = employees
     .filter((e) => !isTeamLead(e.name))
-    .reduce(
-      (s, e) =>
-        s + (salesByPerson[e.name] || 0) + (entriesByPerson[e.name] || 0),
-      0
-    );
+    .reduce((s, e) => s + (entriesByPerson[e.name] || 0), 0);
 
   const rows = employees.map((e) => {
     const lead = isTeamLead(e.name);
-    const individual =
-      (salesByPerson[e.name] || 0) + (entriesByPerson[e.name] || 0);
+    const individual = entriesByPerson[e.name] || 0;
     const comm = commissions.find((c) => c.employeeName === e.name);
     const pay = payroll.find((p) => p.employeeName === e.name);
     const saleBase = lead ? totalTeamSales : individual;
@@ -121,7 +97,7 @@ export default async function SalesTeamPage({
           <h1 className="text-2xl font-bold">Sales Team Performance</h1>
           <p className="text-sm text-slate-500">
             Individual sales, 2.5% commission, and Team Lead tiered override.
-            Sales entered here sync to payroll.
+            Sales entered here sync to payroll. Team Lead is not assigned to sales.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />

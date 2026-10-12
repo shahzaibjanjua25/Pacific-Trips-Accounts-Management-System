@@ -1,20 +1,23 @@
 /**
  * Sales team payroll rules (Pacific Trips policy):
  * - Each sales member: Basic 40,000 PKR + 2.5% commission on THEIR individual sales
- * - Team Lead "Amad/Ahmad/Ammar Amjad":
+ * - Team Lead "Ahmad/Amad/Ammar Amjad":
  *     team sales < 70 lacs              → fixed salary 55,000
  *     70 lacs ≤ sales < monthly target  → 1% of team sales
  *     sales ≥ monthly target            → 2.5% of team sales
  *   Target is stored per period in the SalesTarget table.
+ *
+ * Individual / team sales are taken only from SalesPerformance (single source of
+ * truth) so deleting a sale removes the full amount, not a partial double-count.
  */
 
 import { prisma } from "./prisma";
 import { syncPayrollForEmployee } from "./links-service";
 
 const COMMISSION_RATE = 0.025;
-const LEAD_FLOOR = 7_000_000;       // 70 lacs
+const LEAD_FLOOR = 7_000_000; // 70 lacs
 const LEAD_MIN_SALARY = 55_000;
-const DEFAULT_LEAD_TARGET = 12_000_000;  // 1.2 crore fallback
+const DEFAULT_LEAD_TARGET = 12_000_000; // 1.2 crore fallback
 
 export function isTeamLeadName(name: string): boolean {
   const n = name.toLowerCase();
@@ -61,23 +64,13 @@ export async function computeSalesPayroll(periodId: string) {
     where: { isActive: true, role: "Sales" },
   });
 
-  const trips = await prisma.trip.findMany({ where: { periodId } });
-  const receivables = await prisma.receivable.findMany({ where: { periodId } });
   const salesEntries = await prisma.salesPerformance.findMany({
     where: { periodId },
   });
 
+  // Single source of truth: SalesPerformance only (avoids double-count with
+  // Receivables / Trips created from the same sale entry).
   const salesByPerson: Record<string, number> = {};
-  for (const t of trips) {
-    const sp = t.salesperson || "Unassigned";
-    salesByPerson[sp] = (salesByPerson[sp] || 0) + t.packageRevenue;
-  }
-  for (const r of receivables) {
-    if (r.salesperson) {
-      salesByPerson[r.salesperson] =
-        (salesByPerson[r.salesperson] || 0) + r.totalPackage;
-    }
-  }
   for (const e of salesEntries) {
     salesByPerson[e.employeeName] =
       (salesByPerson[e.employeeName] || 0) + (e.debit || 0);
@@ -123,7 +116,7 @@ export async function computeSalesPayroll(periodId: string) {
           notes: leadNote ?? existingComm.notes,
         },
       });
-    } else if (commission > 0) {
+    } else if (commission > 0 || isLead) {
       await prisma.commission.create({
         data: {
           periodId,
