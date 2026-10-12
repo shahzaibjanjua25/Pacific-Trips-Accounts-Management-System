@@ -1,3 +1,4 @@
+// src/app/api/sales-target/route.ts — should already exist
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
