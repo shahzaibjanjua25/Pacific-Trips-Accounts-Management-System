@@ -215,4 +215,4 @@ export async function DELETE(req: NextRequest) {
     console.error("[sales-team:update DELETE]", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
-}
+}//
