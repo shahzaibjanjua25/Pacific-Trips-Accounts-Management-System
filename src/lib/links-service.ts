@@ -222,7 +222,8 @@ export type AppliedLink = {
     | "payroll"
     | "commission"
     | "refund"
-    | "advance";
+    | "advance"
+    | "employee_loan";
     entityId: string;
     appliedAmount: number;
 };
