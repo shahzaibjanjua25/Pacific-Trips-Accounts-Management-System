@@ -1,28 +1,35 @@
 import { prisma } from "./prisma";
 import { monthLabel } from "./utils";
 
+/**
+ * Fixed monthly loan installments (PKR) by employee name match.
+ * Used when EmployeeLoan.monthlyInstallment is 0 or missing.
+ */
 const LOAN_INSTALLMENTS: Record<string, number> = {
   ahsaan: 30000,
-  "mr ahsaan": 30000,
   amjad: 20000,
-  "Ahmad Amjad": 20000,
-  "ammar amjad": 20000,
+  ammar: 20000,
   awais: 20000,
 };
 
 function installmentFor(name: string, fallback: number): number {
   const key = name.toLowerCase().trim();
   for (const [k, v] of Object.entries(LOAN_INSTALLMENTS)) {
-    if (key.includes(k) || k.includes(key)) return v;
+    if (key.includes(k)) return v;
   }
-  return fallback || 0;
+  return fallback > 0 ? fallback : 0;
 }
 
 function prevYearMonth(year: number, month: number) {
-  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+  return month === 1
+    ? { year: year - 1, month: 12 }
+    : { year, month: month - 1 };
 }
 
-export async function getOrCreatePeriodWithCarryForward(year: number, month: number) {
+export async function getOrCreatePeriodWithCarryForward(
+  year: number,
+  month: number
+) {
   const label = monthLabel(year, month);
 
   const existing = await prisma.period.findUnique({
@@ -30,31 +37,37 @@ export async function getOrCreatePeriodWithCarryForward(year: number, month: num
   });
   if (existing) return { period: existing, carried: false };
 
-  const result = await prisma.$transaction(async (tx) => {
-    const recheck = await tx.period.findUnique({
-      where: { year_month: { year, month } },
-    });
-    if (recheck) return { period: recheck, carried: false };
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const recheck = await tx.period.findUnique({
+        where: { year_month: { year, month } },
+      });
+      if (recheck) return { period: recheck, carried: false };
 
-    const period = await tx.period.create({ data: { year, month, label } });
+      const period = await tx.period.create({ data: { year, month, label } });
 
-    const prev = prevYearMonth(year, month);
-    const prevPeriod = await tx.period.findUnique({
-      where: { year_month: { year: prev.year, month: prev.month } },
-    });
-    if (!prevPeriod) return { period, carried: false };
+      const prev = prevYearMonth(year, month);
+      const prevPeriod = await tx.period.findUnique({
+        where: { year_month: { year: prev.year, month: prev.month } },
+      });
+      if (!prevPeriod) return { period, carried: false };
 
-    await carryForwardTx(tx, prevPeriod.id, period.id);
-    return { period, carried: true };
-  }, {
-    timeout: 30000, // 30s — carry-forward can be slow with many records
-  });
+      await carryForwardTx(tx, prevPeriod.id, period.id);
+      return { period, carried: true };
+    },
+    { timeout: 60000 }
+  );
 
   return result;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string) {
+async function carryForwardTx(
+  tx: any,
+  fromPeriodId: string,
+  toPeriodId: string
+) {
+  // --- Receivables (open balances only) ---
   try {
     const openRecv = await tx.receivable.findMany({
       where: { periodId: fromPeriodId, remainingAmount: { gt: 0 } },
@@ -77,10 +90,12 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
           daysOverdue: r.daysOverdue,
           tripStart: r.tripStart,
           salesperson: r.salesperson,
-          discounts: 0,
-          additionalCharges: 0,
-          status: "Open",
-          notes: `Carried forward. Prior received: ${r.amountReceived}`,
+          discounts: r.discounts,
+          additionalCharges: r.additionalCharges,
+          status: r.daysOverdue > 0 ? "Overdue" : "Open",
+          notes: r.notes
+            ? `${r.notes} | CF from prior month`
+            : "Carried forward open balance",
         },
       });
     }
@@ -88,6 +103,7 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     console.error("[carry-forward] receivables failed:", e);
   }
 
+  // --- Payables (open balances only) ---
   try {
     const openPay = await tx.payable.findMany({
       where: { periodId: fromPeriodId, remaining: { gt: 0 } },
@@ -104,9 +120,12 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
           amountPaid: 0,
           remaining: p.remaining,
           dueDate: p.dueDate,
+          daysOverdue: p.daysOverdue,
+          status: p.daysOverdue > 0 ? "Overdue" : "Open",
           relatedTrip: p.relatedTrip,
-          status: "Open",
-          notes: "Carried forward",
+          notes: p.notes
+            ? `${p.notes} | CF from prior month`
+            : "Carried forward open balance",
         },
       });
     }
@@ -114,91 +133,12 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     console.error("[carry-forward] payables failed:", e);
   }
 
+  // --- Supplier advances (remaining) ---
   try {
-    const openHotels = await tx.hotelBooking.findMany({
-      where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
-      include: { payable: true },
-    });
-    for (const h of openHotels) {
-      const payable = await tx.payable.create({
-        data: {
-          periodId: toPeriodId,
-          supplierName: h.hotelName,
-          category: "Hotel",
-          description: h.clientName ? `Hotel for ${h.clientName}` : "Hotel booking",
-          originalAmount: h.payable?.remaining ?? 0,
-          amountPaid: 0,
-          remaining: h.payable?.remaining ?? 0,
-          relatedTrip: h.tripRef,
-          status: "Open",
-          notes: "Carried forward",
-        },
-      });
-      await tx.hotelBooking.create({
-        data: {
-          periodId: toPeriodId,
-          hotelName: h.hotelName,
-          clientName: h.clientName,
-          tripRef: h.tripRef,
-          checkIn: h.checkIn,
-          checkOut: h.checkOut,
-          nights: h.nights,
-          rooms: h.rooms,
-          status: "Booked",
-          notes: "Carried remaining",
-          payableId: payable.id,
-        },
-      });
-    }
-  } catch (e) {
-    console.error("[carry-forward] hotels failed:", e);
-  }
-
-  // --- Transport ---
-  try {
-    const openTransport = await tx.transportJob.findMany({
-      where: { periodId: fromPeriodId, payable: { remaining: { gt: 0 } } },
-      include: { payable: true },
-    });
-    for (const t of openTransport) {
-      const payable = await tx.payable.create({
-        data: {
-          periodId: toPeriodId,
-          supplierName: t.driverName || "Driver",
-          category: "Transport",
-          description: t.vehicle || "Transport job",
-          originalAmount: t.payable?.remaining ?? 0,
-          amountPaid: 0,
-          remaining: t.payable?.remaining ?? 0,
-          relatedTrip: t.tripRef,
-          status: "Open",
-          notes: "Carried forward",
-        },
-      });
-      await tx.transportJob.create({
-        data: {
-          periodId: toPeriodId,
-          driverName: t.driverName,
-          vehicle: t.vehicle,
-          clientName: t.clientName,
-          tripRef: t.tripRef,
-          fuelCost: 0,
-          status: "Pending",
-          notes: "Carried remaining",
-          payableId: payable.id,
-        },
-      });
-    }
-  } catch (e) {
-    console.error("[carry-forward] transport failed:", e);
-  }
-
-  // --- Supplier Advances ---
-  try {
-    const openAdv = await tx.supplierAdvance.findMany({
+    const advs = await tx.supplierAdvance.findMany({
       where: { periodId: fromPeriodId, remaining: { gt: 0 } },
     });
-    for (const a of openAdv) {
+    for (const a of advs) {
       await tx.supplierAdvance.create({
         data: {
           periodId: toPeriodId,
@@ -206,8 +146,10 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
           amount: a.remaining,
           adjustedAmount: 0,
           remaining: a.remaining,
-          relatedTrip: a.relatedTrip,
-          notes: "Carried forward",
+          dateGiven: a.dateGiven,
+          notes: a.notes
+            ? `${a.notes} | CF`
+            : "Carried forward advance remaining",
         },
       });
     }
@@ -215,12 +157,12 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     console.error("[carry-forward] advances failed:", e);
   }
 
-  // --- Refunds ---
+  // --- Pending refunds ---
   try {
-    const pendingRefunds = await tx.refund.findMany({
+    const refunds = await tx.refund.findMany({
       where: { periodId: fromPeriodId, status: "Pending" },
     });
-    for (const r of pendingRefunds) {
+    for (const r of refunds) {
       await tx.refund.create({
         data: {
           periodId: toPeriodId,
@@ -229,8 +171,9 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
           amount: r.amount,
           reason: r.reason,
           status: "Pending",
-          tripRef: r.tripRef,
-          notes: "Carried forward",
+          notes: r.notes
+            ? `${r.notes} | CF`
+            : "Carried forward pending refund",
         },
       });
     }
@@ -238,84 +181,153 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     console.error("[carry-forward] refunds failed:", e);
   }
 
-  // --- Payroll ---
-  // --- Payroll ---
-  // --- Payroll ---
+  // --- Employee loans: ALWAYS apply monthly installment when entering new month ---
+  // Example: remaining 185,000, installment 20,000 -> new remaining 165,000
+  // Continues each month until remaining is 0.
+  try {
+    const loans = await tx.employeeLoan.findMany({
+      where: { remainingAmount: { gt: 0 } },
+      include: { employee: true },
+    });
+    for (const loan of loans) {
+      const empName = loan.employee?.name || "";
+      let installment = installmentFor(
+        empName,
+        loan.monthlyInstallment || 0
+      );
+      // Cap installment at what is still owed
+      if (installment > loan.remainingAmount) {
+        installment = loan.remainingAmount;
+      }
+      if (installment <= 0) {
+        // Still ensure monthlyInstallment is stored for payroll display
+        const fixed = installmentFor(empName, 0);
+        if (fixed > 0 && (loan.monthlyInstallment || 0) === 0) {
+          await tx.employeeLoan.update({
+            where: { id: loan.id },
+            data: { monthlyInstallment: fixed },
+          });
+        }
+        continue;
+      }
+
+      const newRemaining = Math.max(0, loan.remainingAmount - installment);
+      await tx.employeeLoan.update({
+        where: { id: loan.id },
+        data: {
+          remainingAmount: newRemaining,
+          // Keep scheduled installment for future months (or clear if paid off)
+          monthlyInstallment:
+            newRemaining <= 0
+              ? 0
+              : installmentFor(empName, loan.monthlyInstallment || installment),
+        },
+      });
+    }
+  } catch (e) {
+    console.error("[carry-forward] employee loans failed:", e);
+  }
+
+  // --- Payroll rows for new month (from previous month staff + open loans) ---
   try {
     const prevPayroll = await tx.payrollEntry.findMany({
       where: { periodId: fromPeriodId },
     });
+    const seen = new Set<string>();
+
     for (const p of prevPayroll) {
+      seen.add(p.employeeName);
       const emp = p.employeeId
         ? await tx.employee.findUnique({ where: { id: p.employeeId } })
-        : null;
+        : await tx.employee.findFirst({ where: { name: p.employeeName } });
+
+      const nameL = (p.employeeName || "").toLowerCase();
+      const isLead =
+        nameL.includes("ahmad") ||
+        nameL.includes("amad") ||
+        nameL.includes("ammar");
       const isSales = emp?.role === "Sales";
+      const basic = isLead
+        ? 0
+        : p.basicSalary || emp?.basicSalary || (isSales ? 40000 : 0);
+      const tax = p.taxDeducted || 0;
+      const other = p.otherDeductions || 0;
 
-      const installment = installmentFor(p.employeeName, p.loanInstallment);
-      const basic = p.basicSalary;
-      const tax = p.taxDeducted;
-      const other = p.otherDeductions;
-
-      // Commission only for Sales role
-      let comm = 0;
-      if (isSales) {
-        const commissionRow = await tx.commission.findFirst({
-          where: { periodId: fromPeriodId, employeeName: p.employeeName },
+      // Loan remaining was already reduced above; read current balance
+      let nextInstallment = 0;
+      if (emp) {
+        const currentLoan = await tx.employeeLoan.findFirst({
+          where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
         });
-        comm = commissionRow?.commissionAmt ?? 0;
-      }
-
-      const net = Math.max(0, basic + comm - tax - installment - other);
-
-      if (
-        p.status === "Paid" &&
-        (p.remaining ?? 0) <= 0 &&
-        p.employeeId &&
-        installment > 0
-      ) {
-        const loan = await tx.employeeLoan.findFirst({
-          where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
-        });
-        if (loan) {
-          await tx.employeeLoan.update({
-            where: { id: loan.id },
-            data: {
-              remainingAmount: Math.max(
-                0,
-                loan.remainingAmount - installment
-              ),
-            },
-          });
+        if (currentLoan) {
+          nextInstallment = installmentFor(
+            p.employeeName,
+            currentLoan.monthlyInstallment || 0
+          );
+          // Never schedule more than remaining
+          if (nextInstallment > currentLoan.remainingAmount) {
+            nextInstallment = currentLoan.remainingAmount;
+          }
         }
       }
 
-      const currentLoan = p.employeeId
-        ? await tx.employeeLoan.findFirst({
-          where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
-        })
-        : null;
-      const nextInstallment = currentLoan?.monthlyInstallment ?? installment;
+      // Commission starts at 0 for new month (recompute later)
+      const net = Math.max(0, basic - tax - nextInstallment - other);
 
       await tx.payrollEntry.create({
         data: {
           periodId: toPeriodId,
-          employeeId: p.employeeId,
+          employeeId: emp?.id || p.employeeId,
           employeeName: p.employeeName,
           basicSalary: basic,
           taxDeducted: tax,
           loanInstallment: nextInstallment,
           otherDeductions: other,
-          netPayable: Math.max(
-            0,
-            basic + comm - tax - nextInstallment - other
-          ),
+          netPayable: net,
           amountPaid: 0,
-          remaining: Math.max(
-            0,
-            basic + comm - tax - nextInstallment - other
-          ),
+          remaining: net,
           status: "Pending",
-          notes: p.notes ? `${p.notes} | Carried forward` : "Carried forward",
+          notes: "Carried forward - edit / compute as needed",
+        },
+      });
+    }
+
+    // Employees with open loans but no prior payroll row
+    const activeEmps = await tx.employee.findMany({ where: { isActive: true } });
+    for (const emp of activeEmps) {
+      if (seen.has(emp.name)) continue;
+      const loan = await tx.employeeLoan.findFirst({
+        where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
+      });
+      if (!loan) continue;
+      let nextInstallment = installmentFor(
+        emp.name,
+        loan.monthlyInstallment || 0
+      );
+      if (nextInstallment > loan.remainingAmount) {
+        nextInstallment = loan.remainingAmount;
+      }
+      const nameL = emp.name.toLowerCase();
+      const isLead =
+        nameL.includes("ahmad") ||
+        nameL.includes("amad") ||
+        nameL.includes("ammar");
+      const basic = isLead
+        ? 0
+        : emp.basicSalary || (emp.role === "Sales" ? 40000 : 0);
+      const net = Math.max(0, basic - nextInstallment);
+      await tx.payrollEntry.create({
+        data: {
+          periodId: toPeriodId,
+          employeeId: emp.id,
+          employeeName: emp.name,
+          basicSalary: basic,
+          loanInstallment: nextInstallment,
+          netPayable: net,
+          amountPaid: 0,
+          remaining: net,
+          status: "Pending",
+          notes: "Opened from carry-forward (loan still open)",
         },
       });
     }
@@ -323,7 +335,7 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     console.error("[carry-forward] payroll failed:", e);
   }
 
-  // --- Office Expenses ---
+  // --- Recurring office expenses ---
   try {
     const prevOffice = await tx.officeExpense.findMany({
       where: { periodId: fromPeriodId, recurring: true },
@@ -341,7 +353,7 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
           vendor: o.vendor,
           paymentMethod: o.paymentMethod,
           recurring: true,
-          notes: "Carried template — edit if needed",
+          notes: "Carried template - edit if needed",
         },
       });
     }
@@ -349,18 +361,21 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     console.error("[carry-forward] office expenses failed:", e);
   }
 
-  // --- Marketing ---
+  // --- Marketing template (sum of prior month as starting point) ---
   try {
     const prevMkt = await tx.marketingExpense.findMany({
       where: { periodId: fromPeriodId },
     });
     if (prevMkt.length > 0) {
-      const total = prevMkt.reduce((s: number, m: { amount: number }) => s + m.amount, 0);
+      const total = prevMkt.reduce(
+        (s: number, m: { amount: number }) => s + m.amount,
+        0
+      );
       await tx.marketingExpense.create({
         data: {
           periodId: toPeriodId,
           channel: "Monthly Ads",
-          description: "Carried from previous month — edit if needed",
+          description: "Carried from previous month - edit if needed",
           amount: total,
           notes: "Carried template",
         },
@@ -370,9 +385,11 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     console.error("[carry-forward] marketing failed:", e);
   }
 
-  // --- Vadets ---
+  // --- Vadets (once only - no duplicate block) ---
   try {
-    const prevVadets = await tx.vadet.findMany({ where: { periodId: fromPeriodId } });
+    const prevVadets = await tx.vadet.findMany({
+      where: { periodId: fromPeriodId },
+    });
     for (const v of prevVadets) {
       await tx.vadet.create({
         data: {
@@ -385,18 +402,5 @@ async function carryForwardTx(tx: any, fromPeriodId: string, toPeriodId: string)
     }
   } catch (e) {
     console.error("[carry-forward] vadets failed:", e);
-  }
-
-
-  const prevVadets = await tx.vadet.findMany({ where: { periodId: fromPeriodId } });
-  for (const v of prevVadets) {
-    await tx.vadet.create({
-      data: {
-        periodId: toPeriodId,
-        name: v.name,
-        amount: v.amount,
-        notes: "Carried forward",
-      },
-    });
   }
 }

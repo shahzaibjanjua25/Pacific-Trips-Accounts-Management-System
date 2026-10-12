@@ -8,13 +8,13 @@
  */
 import { prisma } from "./prisma";
 
-/* ─────────────────────────────────────────────
- * PAYABLE ↔ OPERATIONAL SYNC
- * ───────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * PAYABLE â†” OPERATIONAL SYNC
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 /**
  * Recompute a payroll entry from scratch based on:
- *   basic + commission − tax − loan installment − other deductions
+ *   basic + commission âˆ’ tax âˆ’ loan installment âˆ’ other deductions
  *
  * Commission is only applied to Sales-role employees.
  */
@@ -55,7 +55,19 @@ export async function syncPayrollForEmployee(
     const loan = await prisma.employeeLoan.findFirst({
         where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
     });
-    const installment = loan?.monthlyInstallment ?? 0;
+    // Cap installment at remaining loan so payroll never deducts more than owed
+    let installment = loan?.monthlyInstallment ?? 0;
+    if (loan && installment > loan.remainingAmount) {
+        installment = loan.remainingAmount;
+    }
+    if (loan && installment <= 0) {
+        // Fallback fixed schedules when monthlyInstallment was never set
+        const n = employeeName.toLowerCase();
+        if (n.includes("ahsaan")) installment = Math.min(30000, loan.remainingAmount);
+        else if (n.includes("amjad") || n.includes("amad") || n.includes("ammar"))
+            installment = Math.min(20000, loan.remainingAmount);
+        else if (n.includes("awais")) installment = Math.min(20000, loan.remainingAmount);
+    }
 
     const netPayable = Math.max(
         0,
@@ -95,9 +107,9 @@ export async function syncPayrollForEmployee(
                 status: "Pending",
                 notes: isSales
                     ? isLead
-                        ? "Team Lead — tiered override on team sales"
-                        : "Sales — 40k + 2.5% of own sales"
-                    : `${emp.role} — no commission`,
+                        ? "Team Lead â€” tiered override on team sales"
+                        : "Sales â€” 40k + 2.5% of own sales"
+                    : `${emp.role} â€” no commission`,
             },
         });
     }
@@ -197,9 +209,9 @@ export async function propagatePayableToOperational(payableId: string) {
     }
 }
 
-/* ─────────────────────────────────────────────
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * PAYMENT APPLICATION
- * ───────────────────────────────────────────── */
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export type AppliedLink = {
     entityType:
@@ -224,7 +236,7 @@ function nameMatch(a: string, b: string): boolean {
 
 /**
  * Apply a payment to a Payable.
- * CAP: applied = min(amount, orig − amountPaid).
+ * CAP: applied = min(amount, orig âˆ’ amountPaid).
  */
 async function applyToPayable(
     periodId: string,
@@ -238,7 +250,7 @@ async function applyToPayable(
     // Determine originalAmount:
     //   1. Use existing stored value if present
     //   2. Else use explicit agreedCost if supplied
-    //   3. Else fall back to this payment amount (last resort — legacy behaviour)
+    //   3. Else fall back to this payment amount (last resort â€” legacy behaviour)
     let orig = p.originalAmount;
     if (orig <= 0) {
         if (agreedCost && agreedCost > 0) {
@@ -349,7 +361,7 @@ export async function applyReceiptToReceivables(
     return links;
 }
 
-/** Resolve employee display name → canonical Employee row (fuzzy). */
+/** Resolve employee display name â†’ canonical Employee row (fuzzy). */
 async function resolveEmployee(employeeName: string) {
     const all = await prisma.employee.findMany({ where: { isActive: true } });
     return (
@@ -447,7 +459,7 @@ export async function applyPayrollPayment(
         }
     }
 
-    // ── Compute applied amount ──
+    // â”€â”€ Compute applied amount â”€â”€
     const outstanding = Math.max(0, entry.netPayable - (entry.amountPaid ?? 0));
 
     if (amount > outstanding && outstanding > 0) {
@@ -462,12 +474,12 @@ export async function applyPayrollPayment(
     let newRemaining: number;
 
     if (outstanding <= 0 && entry.netPayable <= 0) {
-        // Nothing owed on paper — accept payment but do not exceed netPayable
+        // Nothing owed on paper â€” accept payment but do not exceed netPayable
         applied = amount;
         newPaid = (entry.amountPaid ?? 0) + applied;
         newRemaining = 0;
     } else if (outstanding <= 0) {
-        // Fully paid already — nothing to apply
+        // Fully paid already â€” nothing to apply
         return [];
     } else {
         applied = Math.min(amount, outstanding); // CAP
@@ -574,9 +586,9 @@ export async function applyRefundPayment(
 /**
  * Post or update a ClientLedger row for a refund.
  * Called whenever a Refund is created or updated.
- * - Pending  → creates an "Open" ledger credit row
- * - Paid     → creates/updates the ledger row to "Paid"
- * - Deleted  → ledger row is removed (handled by caller)
+ * - Pending  â†’ creates an "Open" ledger credit row
+ * - Paid     â†’ creates/updates the ledger row to "Paid"
+ * - Deleted  â†’ ledger row is removed (handled by caller)
  */
 export async function syncRefundToClientLedger(refundId: string) {
     const refund = await prisma.refund.findUnique({ where: { id: refundId } });
