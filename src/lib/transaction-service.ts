@@ -48,6 +48,17 @@ export type TxnInput = {
 };
 
 /* ------ BANK ------ */
+
+/** Only Completed (and synonyms) move real money. Pending / Cancelled do not. */
+function isCompletedStatus(status?: string | null): boolean {
+  const s = (status || "Completed").toLowerCase().trim();
+  return s === "completed" || s === "paid" || s === "settled";
+}
+
+function isBankTransferCategory(category?: string | null): boolean {
+  return (category || "").toLowerCase().includes("bank transfer");
+}
+
 async function adjustBank(accountName: string | null | undefined, delta: number) {
   if (!accountName || delta === 0) return;
   const trimmed = accountName.trim();
@@ -68,7 +79,118 @@ async function adjustBank(accountName: string | null | undefined, delta: number)
     });
   }
 }
+
 const cashDelta = (debit: number, credit: number) => debit - credit;
+
+/** History row for Bank page (BankTxn table). */
+async function recordBankTxn(opts: {
+  periodId: string;
+  accountName: string;
+  date: Date;
+  description?: string | null;
+  deposit?: number;
+  withdrawal?: number;
+  transferIn?: number;
+  transferOut?: number;
+  notes?: string | null;
+}) {
+  const name = opts.accountName.trim();
+  if (!name) return;
+  const bal = await prisma.bankBalance.findFirst({
+    where: { accountName: { equals: name, mode: "insensitive" } },
+  });
+  await prisma.bankTxn.create({
+    data: {
+      periodId: opts.periodId,
+      accountName: name,
+      accountId: bal?.id ?? null,
+      date: opts.date,
+      description: opts.description ?? null,
+      deposit: opts.deposit ?? 0,
+      withdrawal: opts.withdrawal ?? 0,
+      transferIn: opts.transferIn ?? 0,
+      transferOut: opts.transferOut ?? 0,
+      balance: bal?.balance ?? 0,
+      notes: opts.notes ?? null,
+    },
+  });
+}
+
+/**
+ * Apply bank effect for a transaction.
+ * - Bank Transfer: bankAccount = FROM, party = TO; amount = credit or debit
+ * - Normal: debit increases balance, credit decreases (cashDelta)
+ * No-op when status is Pending / Cancelled.
+ */
+async function applyBankEffect(input: {
+  periodId: string;
+  date: string | Date;
+  description?: string | null;
+  category?: string | null;
+  party?: string | null;
+  subCategory?: string | null;
+  bankAccount?: string | null;
+  debit: number;
+  credit: number;
+  status?: string | null;
+  notes?: string | null;
+  sign?: 1 | -1;
+}) {
+  if (!isCompletedStatus(input.status)) return;
+
+  const sign = input.sign ?? 1;
+  const date = new Date(input.date);
+
+  if (isBankTransferCategory(input.category)) {
+    const from = (input.bankAccount || "").trim();
+    const to = (input.party || input.subCategory || "").trim();
+    const amount =
+      Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
+    if (!from || !to || amount <= 0) {
+      if (sign === 1) {
+        throw new Error(
+          "Bank Transfer requires From account (Account), To account (Party), and amount > 0."
+        );
+      }
+      return;
+    }
+    await adjustBank(from, sign * -amount);
+    await adjustBank(to, sign * amount);
+    if (sign === 1) {
+      await recordBankTxn({
+        periodId: input.periodId,
+        accountName: from,
+        date,
+        description: input.description || `Transfer to ${to}`,
+        transferOut: amount,
+        notes: input.notes,
+      });
+      await recordBankTxn({
+        periodId: input.periodId,
+        accountName: to,
+        date,
+        description: input.description || `Transfer from ${from}`,
+        transferIn: amount,
+        notes: input.notes,
+      });
+    }
+    return;
+  }
+
+  const delta = sign * cashDelta(input.debit || 0, input.credit || 0);
+  await adjustBank(input.bankAccount, delta);
+  if (sign === 1 && input.bankAccount && delta !== 0) {
+    await recordBankTxn({
+      periodId: input.periodId,
+      accountName: input.bankAccount,
+      date,
+      description: input.description,
+      deposit: delta > 0 ? delta : 0,
+      withdrawal: delta < 0 ? -delta : 0,
+      notes: input.notes,
+    });
+  }
+}
 
 /* ------ REFUND HELPERS ------ */
 
@@ -367,17 +489,51 @@ export async function postTransaction(input: TxnInput) {
     },
   });
 
-  await adjustBank(input.bankAccount, cashDelta(input.debit || 0, input.credit || 0));
+  // Pending / Cancelled do not move bank balances
+  try {
+    await applyBankEffect({
+      periodId: input.periodId,
+      date: input.date,
+      description: input.description,
+      category: input.category,
+      party: input.party,
+      subCategory: input.subCategory,
+      bankAccount: input.bankAccount,
+      debit: input.debit || 0,
+      credit: input.credit || 0,
+      status: input.status || "Completed",
+      notes: input.notes,
+      sign: 1,
+    });
+  } catch (err) {
+    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
+    throw err;
+  }
 
   let links;
   try {
-    links = await resolveLinks(input);
+    // Bank Transfer has no operational links
+    if (isBankTransferCategory(input.category)) {
+      links = [];
+    } else {
+      links = await resolveLinks(input);
+    }
   } catch (err) {
     // Roll back txn + bank so a failed loan/payable link does not leave orphans
-    await adjustBank(
-      input.bankAccount,
-      -cashDelta(input.debit || 0, input.credit || 0)
-    ).catch(() => {});
+    await applyBankEffect({
+      periodId: input.periodId,
+      date: input.date,
+      description: input.description,
+      category: input.category,
+      party: input.party,
+      subCategory: input.subCategory,
+      bankAccount: input.bankAccount,
+      debit: input.debit || 0,
+      credit: input.credit || 0,
+      status: input.status || "Completed",
+      notes: input.notes,
+      sign: -1,
+    }).catch(() => {});
     await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
     throw err;
   }
@@ -528,10 +684,20 @@ export async function postTransaction(input: TxnInput) {
         if (wouldBe > newTotal && !input.isNewClient) {
           const over = wouldBe - newTotal;
           await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => {});
-          await adjustBank(
-            input.bankAccount,
-            -cashDelta(input.debit || 0, input.credit || 0)
-          ).catch(() => {});
+          await applyBankEffect({
+            periodId: input.periodId,
+            date: input.date,
+            description: input.description,
+            category: input.category,
+            party: input.party,
+            subCategory: input.subCategory,
+            bankAccount: input.bankAccount,
+            debit: input.debit || 0,
+            credit: input.credit || 0,
+            status: input.status || "Completed",
+            notes: input.notes,
+            sign: -1,
+          }).catch(() => {});
           throw new Error(
             `Overpayment blocked: ${party} owes ${newTotal - newReceived} ` +
               `but ${paidNow} was entered (excess ${over}).`
@@ -698,7 +864,20 @@ export async function deleteTransaction(id: string) {
   });
   for (const link of links) await reverseLink(link);
 
-  await adjustBank(txn.bankAccount, -cashDelta(txn.debit, txn.credit));
+  await applyBankEffect({
+    periodId: txn.periodId,
+    date: txn.date,
+    description: txn.description,
+    category: txn.category,
+    party: txn.party,
+    subCategory: txn.subCategory,
+    bankAccount: txn.bankAccount,
+    debit: txn.debit,
+    credit: txn.credit,
+    status: txn.status,
+    notes: txn.notes,
+    sign: -1,
+  });
   await prisma.transaction.delete({ where: { id } });
   return txn;
 }
@@ -862,7 +1041,20 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
   const old = await prisma.transaction.findUnique({ where: { id } });
   if (!old) return null;
 
-  await adjustBank(old.bankAccount, -cashDelta(old.debit, old.credit));
+  await applyBankEffect({
+    periodId: old.periodId,
+    date: old.date,
+    description: old.description,
+    category: old.category,
+    party: old.party,
+    subCategory: old.subCategory,
+    bankAccount: old.bankAccount,
+    debit: old.debit,
+    credit: old.credit,
+    status: old.status,
+    notes: old.notes,
+    sign: -1,
+  });
   const links = await prisma.transactionLink.findMany({
     where: { transactionId: id },
   });
@@ -896,20 +1088,35 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
     },
   });
 
-  await adjustBank(updated.bankAccount, cashDelta(updated.debit, updated.credit));
-
-  const newLinks = await resolveLinks({
+  await applyBankEffect({
     periodId: updated.periodId,
-    date: updated.date.toISOString(),
+    date: updated.date,
     description: updated.description,
     category: updated.category,
-    subCategory: updated.subCategory,
     party: updated.party,
-    tripRef: updated.tripRef,
+    subCategory: updated.subCategory,
+    bankAccount: updated.bankAccount,
     debit: updated.debit,
     credit: updated.credit,
-    hotelAgreedCost: input.hotelAgreedCost,
+    status: updated.status,
+    notes: updated.notes,
+    sign: 1,
   });
+
+  const newLinks = isBankTransferCategory(updated.category)
+    ? []
+    : await resolveLinks({
+        periodId: updated.periodId,
+        date: updated.date.toISOString(),
+        description: updated.description,
+        category: updated.category,
+        subCategory: updated.subCategory,
+        party: updated.party,
+        tripRef: updated.tripRef,
+        debit: updated.debit,
+        credit: updated.credit,
+        hotelAgreedCost: input.hotelAgreedCost,
+      });
 
   for (const link of newLinks) {
     await prisma.transactionLink.create({
