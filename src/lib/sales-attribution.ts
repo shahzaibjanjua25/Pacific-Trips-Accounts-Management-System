@@ -10,9 +10,9 @@ import { computeSalesPayroll } from "./payroll-service";
  * Called whenever a client is created with (salesperson, totalPackage).
  *
  * Team Lead rules are handled inside computeSalesPayroll():
- *   - Team total < 70 lacs              → flat 55,000
- *   - 70 lacs ≤ team total < target     → 1% of team total
- *   - team total ≥ target               → 2.5% of team total
+ *   - Team total < 70 lacs              -> flat 55,000
+ *   - 70 lacs <= team total < target     -> 1.5% of team total
+ *   - team total >= target               -> 2.5% of team total
  */
 export async function attributeSaleToSalesperson(opts: {
   periodId: string;
