@@ -84,7 +84,7 @@ export function Sidebar() {
               Pacific Trips
             </h1>
             <p className="text-[10px] text-slate-400 truncate">
-              Lahore Â· PKR Â· Confidential
+              Lahore  ·  PKR  ·  Confidential
             </p>
           </div>
         </div>
@@ -123,7 +123,7 @@ export function Sidebar() {
         </button>
 
         <div className="p-3 border-t border-slate-700 text-[10px] text-slate-500">
-          Every transaction Â· No amount too small
+          Every transaction  ·  No amount too small
         </div>
       </aside>
     </>
