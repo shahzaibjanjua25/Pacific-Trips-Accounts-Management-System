@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ArrowLeftRight, Users, FileText, Plane, CreditCard,
   Building2, Truck, Ticket, Wallet, RotateCcw, UserCheck, Megaphone,
   Banknote, Landmark, TrendingUp, Package, Scale, User,
-  CalendarCheck, Settings, Menu, X, ShieldCheck,
+  CalendarCheck, Settings, Menu, X, ShieldCheck, BookOpen,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ const nav = [
   { href: "/liabilities", label: "Liabilities", icon: Scale },
   { href: "/owner", label: "Owner Account", icon: User },
   { href: "/monthly-closing", label: "Monthly Closing", icon: CalendarCheck },
+  { href: "/balance-sheet", label: "Balance Sheet", icon: BookOpen },
   { href: "/sales-team", label: "Sales Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/settings/security", label: "Security", icon: ShieldCheck },
@@ -83,7 +84,7 @@ export function Sidebar() {
               Pacific Trips
             </h1>
             <p className="text-[10px] text-slate-400 truncate">
-              Lahore · PKR · Confidential
+              Lahore Â· PKR Â· Confidential
             </p>
           </div>
         </div>
@@ -118,11 +119,11 @@ export function Sidebar() {
           disabled={signingOut}
           className="mx-2 mb-2 text-left text-sm text-red-400 hover:bg-red-500/10 rounded-lg px-3 py-2 disabled:opacity-50"
         >
-          {signingOut ? "Signing out…" : "Sign out"}
+          {signingOut ? "Signing outâ€¦" : "Sign out"}
         </button>
 
         <div className="p-3 border-t border-slate-700 text-[10px] text-slate-500">
-          Every transaction · No amount too small
+          Every transaction Â· No amount too small
         </div>
       </aside>
     </>

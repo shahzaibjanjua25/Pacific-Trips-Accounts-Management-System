@@ -139,9 +139,10 @@ export function TransactionManager({
   const isBankTransfer = form.category === "Bank Transfer";
   // Employee loan: only check limit on repayment (debit). Credit (giving loan) is unlimited.
   const shouldCheckOutstanding =
-    isClientCategory ||
-    (isOutboundCategory && !isEmployeeLoan) ||
-    (isEmployeeLoan && (parseFloat(form.debit) || 0) > 0);
+    !isBankTransfer &&
+    (isClientCategory ||
+      (isOutboundCategory && !isEmployeeLoan) ||
+      (isEmployeeLoan && (parseFloat(form.debit) || 0) > 0));
 
   useEffect(() => {
     let cancelled = false;
@@ -370,7 +371,7 @@ export function TransactionManager({
       }
     }
 
-    if (isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
+    if (!isBankTransfer && isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
       const ok = confirm(
         ` Wrong direction\n\n` +
           `"${form.category}" is a payment OUT of the company, so the amount ` +
@@ -856,6 +857,43 @@ export function TransactionManager({
               </select>
             </label>
 
+            {isBankTransfer ? (
+            <label className="block text-xs">
+              <span className="text-slate-600 font-medium">
+                To Account (transfer into)
+              </span>
+              <select
+                value={showOther ? "__other__" : form.party || ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__other__") {
+                    setShowOther(true);
+                    setForm((f) => ({ ...f, party: "", subCategory: "" }));
+                  } else {
+                    setShowOther(false);
+                    setForm((f) => ({
+                      ...f,
+                      party: v,
+                      subCategory: v,
+                      otherName: "",
+                    }));
+                  }
+                }}
+                className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                required
+              >
+                <option value="">Select destination account…</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
+                <option value="Cash">Cash</option>
+                <option value="Petty Cash">Petty Cash</option>
+                <option value="__other__">Other…</option>
+              </select>
+            </label>
+          ) : (
             <label className="block text-xs">
               <span className="text-slate-600 font-medium">
                 Party / Sub-Category (from {form.category})
@@ -873,6 +911,7 @@ export function TransactionManager({
                 ))}
               </select>
             </label>
+          )}
 
             {showOther && (
               <Field
