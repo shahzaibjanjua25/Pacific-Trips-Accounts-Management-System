@@ -26,7 +26,15 @@ type Txn = {
 
 type Option = { label: string; value: string; remaining: number; id?: string };
 type Account = { id: string; name: string; balance: number };
-type Outstanding = { value: number | null; exists: boolean; reason?: string } | null;
+type Outstanding = {
+  value: number | null;
+  exists: boolean;
+  reason?: string;
+  totalPackage?: number;
+  amountReceived?: number;
+  totalAmount?: number;
+  amountPaid?: number;
+} | null;
 
 type ClientPaidMap = Record<
   string,
@@ -219,6 +227,16 @@ export function TransactionManager({
               typeof data.outstanding === "number" ? data.outstanding : null,
             exists: data.exists !== false,
             reason: typeof data.reason === "string" ? data.reason : undefined,
+            totalPackage:
+              typeof data.totalPackage === "number" ? data.totalPackage : undefined,
+            amountReceived:
+              typeof data.amountReceived === "number"
+                ? data.amountReceived
+                : undefined,
+            totalAmount:
+              typeof data.totalAmount === "number" ? data.totalAmount : undefined,
+            amountPaid:
+              typeof data.amountPaid === "number" ? data.amountPaid : undefined,
           });
         }
       } catch {
@@ -330,7 +348,7 @@ export function TransactionManager({
 
     if (isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
       const ok = confirm(
-        `⚠️ Wrong direction\n\n` +
+        ` Wrong direction\n\n` +
           `"${form.category}" is a payment OUT of the company, so the amount ` +
           `belongs in the Credit column, not Debit.\n\n` +
           `You entered ${formatPKR(debitAmount)} in Debit.\n\n` +
@@ -343,7 +361,7 @@ export function TransactionManager({
 
     if (isClientCategory && creditAmount > 0 && debitAmount === 0) {
       const ok = confirm(
-        `⚠️ Wrong direction\n\n` +
+        ` Wrong direction\n\n` +
           `"${form.category}" is money IN from a client, so the amount ` +
           `belongs in the Debit column, not Credit.\n\n` +
           `You entered ${formatPKR(creditAmount)} in Credit.\n\n` +
@@ -378,17 +396,49 @@ export function TransactionManager({
             typeof data.outstanding === "number" ? data.outstanding : null;
           liveExists = data.exists !== false;
           liveReason = typeof data.reason === "string" ? data.reason : undefined;
+
+          // Form Total Package / Agreed Cost can raise the allowed amount live
+          if (isClientReceipt) {
+            const formPkg = parseFloat(form.clientTotalPackage) || 0;
+            const paid =
+              typeof data.amountReceived === "number" ? data.amountReceived : 0;
+            const serverTotal =
+              typeof data.totalPackage === "number" ? data.totalPackage : 0;
+            const total = formPkg > 0 ? formPkg : serverTotal;
+            if (total > 0) {
+              liveOutstanding = Math.max(0, total - paid);
+            }
+          } else if (isHotelCategory) {
+            const formCost = parseFloat(form.hotelAgreedCost) || 0;
+            const paid =
+              typeof data.amountPaid === "number" ? data.amountPaid : 0;
+            const serverTotal =
+              typeof data.totalAmount === "number" ? data.totalAmount : 0;
+            const total = formCost > 0 ? formCost : serverTotal;
+            if (total > 0) {
+              liveOutstanding = Math.max(0, total - paid);
+            }
+          }
         }
       } catch {
         liveOutstanding = outstanding?.value ?? null;
         liveExists = outstanding?.exists ?? true;
         liveReason = outstanding?.reason;
+        if (liveOutstanding != null && isClientReceipt) {
+          const formPkg = parseFloat(form.clientTotalPackage) || 0;
+          const paid = outstanding?.amountReceived ?? 0;
+          const serverTotal = outstanding?.totalPackage ?? 0;
+          const total = formPkg > 0 ? formPkg : serverTotal;
+          if (total > 0) {
+            liveOutstanding = Math.max(0, total - paid);
+          }
+        }
       }
 
       if (isRefundCategory && clientRefundable != null) {
         if (movingAmount > clientRefundable) {
           alert(
-            `❌ Cannot refund more than the client paid us\n\n` +
+            ` Cannot refund more than the client paid us\n\n` +
               `Client: ${party}\n` +
               `Refundable: ${formatPKR(clientRefundable)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
@@ -404,7 +454,7 @@ export function TransactionManager({
         const over = movingAmount - liveOutstanding;
         if (isClientReceipt) {
           alert(
-            `❌ Cannot add transaction — amount exceeds what the client owes\n\n` +
+            ` Cannot add transaction - amount exceeds what the client owes\n\n` +
               `Client: ${party}\n` +
               `Client owes (remaining): ${formatPKR(liveOutstanding)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
@@ -414,15 +464,15 @@ export function TransactionManager({
           );
         } else if (isRefundCategory) {
           alert(
-            `❌ Cannot refund more than the client paid us\n\n` +
+            ` Cannot refund more than the client paid us\n\n` +
               `Client: ${party}\n` +
-              `Refundable (paid − already refunded): ${formatPKR(liveOutstanding)}\n` +
+              `Refundable (paid - already refunded): ${formatPKR(liveOutstanding)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
               `Excess: ${formatPKR(over)}`
           );
         } else {
           alert(
-            `❌ Cannot add transaction — amount exceeds what we owe\n\n` +
+            ` Cannot add transaction - amount exceeds what we owe\n\n` +
               `Party: ${party} (${form.category})\n` +
               `Net payable (remaining): ${formatPKR(liveOutstanding)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
@@ -435,7 +485,7 @@ export function TransactionManager({
 
       if (!treatAsNew && liveExists && liveReason === "no-name-match") {
         const ok = confirm(
-          `⚠️ Warning\n\n` +
+          ` Warning\n\n` +
             `No exact match found for "${party}" in ${form.category} for this month, ` +
             `but similar records exist.\n\n` +
             `You are about to save ${formatPKR(movingAmount)}.\n\n` +
@@ -450,7 +500,7 @@ export function TransactionManager({
       const pkg = parseFloat(form.clientTotalPackage) || 0;
       if (pkg > 0 && receivedIn > pkg) {
         alert(
-          `❌ Client package is ${formatPKR(pkg)}, but receipt is ${formatPKR(
+          ` Client package is ${formatPKR(pkg)}, but receipt is ${formatPKR(
             receivedIn
           )}.\n\nEither lower the receipt or raise the Total Package.`
         );
@@ -493,7 +543,7 @@ export function TransactionManager({
         } catch {
           /* keep raw text */
         }
-        alert("❌ Cannot add transaction\n\n" + msg);
+        alert(" Cannot add transaction\n\n" + msg);
         return;
       }
       setOpen(false);
@@ -532,7 +582,7 @@ export function TransactionManager({
     if (isOutboundCategory && debitNum > 0 && creditNum === 0) {
       return (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          ⚠️ You put the amount in <strong>Debit</strong>, but{" "}
+           You put the amount in <strong>Debit</strong>, but{" "}
           <strong>{form.category}</strong> is money going OUT. Put it in{" "}
           <strong>Credit</strong>. (It will be auto-moved on save.)
         </p>
@@ -541,7 +591,7 @@ export function TransactionManager({
     if (isClientCategory && creditNum > 0 && debitNum === 0) {
       return (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          ⚠️ You put the amount in <strong>Credit</strong>, but{" "}
+           You put the amount in <strong>Credit</strong>, but{" "}
           <strong>{form.category}</strong> is money coming IN. Put it in{" "}
           <strong>Debit</strong>. (It will be auto-moved on save.)
         </p>
@@ -558,7 +608,7 @@ export function TransactionManager({
       if (movingAmount > clientRefundable) {
         return (
           <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            ⚠️ Refund exceeds what the client paid us. Refundable is{" "}
+             Refund exceeds what the client paid us. Refundable is{" "}
             <strong>{formatPKR(clientRefundable)}</strong>, you entered{" "}
             <strong>{formatPKR(movingAmount)}</strong>. Saving will be blocked.
           </p>
@@ -567,7 +617,7 @@ export function TransactionManager({
       if (clientRefundable === 0) {
         return (
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            ⚠️ This client has <strong>₨ 0</strong> refundable — either they haven't
+             This client has <strong>â‚¨ 0</strong> refundable - either they haven't
             paid us, or they've already been fully refunded.
           </p>
         );
@@ -599,14 +649,14 @@ export function TransactionManager({
           if (movingAmount > pkg) {
             return (
               <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-                ⚠️ Receipt ({formatPKR(movingAmount)}) exceeds Total Package (
+                 Receipt ({formatPKR(movingAmount)}) exceeds Total Package (
                 {formatPKR(pkg)}). Saving will be blocked.
               </p>
             );
           }
           return (
             <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-              New client — package {formatPKR(pkg)}, paying {formatPKR(movingAmount)},
+              New client - package {formatPKR(pkg)}, paying {formatPKR(movingAmount)},
               remaining {formatPKR(Math.max(0, pkg - movingAmount))}
             </p>
           );
@@ -614,29 +664,67 @@ export function TransactionManager({
       }
       return (
         <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          No existing record for this party in this month — will be treated as new.
+          No existing record for this party in this month - will be treated as new.
         </p>
       );
     }
 
-    if (outstanding.value == null) return null;
+    // Live limit: prefer form Total Package / Agreed Cost when the user raised it
+    const formPkg = parseFloat(form.clientTotalPackage) || 0;
+    const formHotel = parseFloat(form.hotelAgreedCost) || 0;
+    let effectiveLimit: number | null = outstanding.value;
 
-    if (movingAmount > outstanding.value) {
+    if (isClientCategory) {
+      const paid = outstanding.amountReceived ?? 0;
+      const serverTotal = outstanding.totalPackage ?? 0;
+      const total = formPkg > 0 ? formPkg : serverTotal;
+      if (total > 0 || formPkg > 0) {
+        effectiveLimit = Math.max(0, total - paid);
+      }
+    } else if (isHotelCategory) {
+      const paid = outstanding.amountPaid ?? 0;
+      const serverTotal = outstanding.totalAmount ?? 0;
+      const total = formHotel > 0 ? formHotel : serverTotal;
+      if (total > 0 || formHotel > 0) {
+        effectiveLimit = Math.max(0, total - paid);
+      }
+    }
+
+    if (effectiveLimit == null) return null;
+
+    if (movingAmount > effectiveLimit) {
       return (
         <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          ⚠️ Amount exceeds what is owed. Outstanding is{" "}
-          <strong>{formatPKR(outstanding.value)}</strong>, but you entered{" "}
+          Amount exceeds what is owed. Limit is{" "}
+          <strong>{formatPKR(effectiveLimit)}</strong>, but you entered{" "}
           <strong>{formatPKR(movingAmount)}</strong>. Saving will be blocked.
+          {isClientCategory && formPkg > 0 ? (
+            <span className="block mt-1 text-slate-600">
+              Using Total Package {formatPKR(formPkg)}
+              {outstanding.amountReceived != null
+                ? ` minus already received ${formatPKR(outstanding.amountReceived)}`
+                : ""}
+              .
+            </span>
+          ) : null}
         </p>
       );
     }
 
     return (
       <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-        Outstanding: <strong>{formatPKR(outstanding.value)}</strong>
+        Outstanding: <strong>{formatPKR(effectiveLimit)}</strong>
         {" · "}
         Remaining after this:{" "}
-        <strong>{formatPKR(Math.max(0, outstanding.value - movingAmount))}</strong>
+        <strong>{formatPKR(Math.max(0, effectiveLimit - movingAmount))}</strong>
+        {isClientCategory && formPkg > 0 ? (
+          <span className="block text-slate-600">
+            Package {formatPKR(formPkg)}
+            {outstanding.amountReceived != null
+              ? ` · received so far ${formatPKR(outstanding.amountReceived)}`
+              : ""}
+          </span>
+        ) : null}
       </p>
     );
   })();
@@ -682,8 +770,8 @@ export function TransactionManager({
             </button>
           </div>
           <p className="text-xs text-slate-600">
-            Choose <strong>Category</strong> first — Sub-Category / Party lists hotels, suppliers,
-            clients or staff you owe / who owe you. Pick <strong>Other…</strong> to type a new name.
+            Choose <strong>Category</strong> first - Sub-Category / Party lists hotels, suppliers,
+            clients or staff you owe / who owe you. Pick <strong>Otherâ€¦</strong> to type a new name.
             {" "}<strong>Debit = money IN · Credit = money OUT.</strong>
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -732,7 +820,7 @@ export function TransactionManager({
                 onChange={(e) => onPartySelect(e.target.value)}
                 className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="">— Select —</option>
+                <option value="">- Select -</option>
                 {options.map((o) => (
                   <option key={o.value + o.label} value={o.value}>
                     {o.label}
@@ -773,10 +861,10 @@ export function TransactionManager({
             {isClientCategory && (
               <>
                 <Field
-                  label="Client Total Package (PKR) — full trip value"
+                  label="Client Total Package (PKR) - full trip value"
                   type="number"
                   value={form.clientTotalPackage}
-                  onChange={(v) => setForm({ ...form, clientTotalPackage: v })}
+                  onChange={(v) => setForm((f) => ({ ...f, clientTotalPackage: v }))}
                 />
                 <label className="block text-xs col-span-2 md:col-span-1">
                   <span className="text-slate-600 font-medium">
@@ -833,7 +921,7 @@ export function TransactionManager({
                   label="Hotel Agreed / Booking Cost (PKR)"
                   type="number"
                   value={form.hotelAgreedCost}
-                  onChange={(v) => setForm({ ...form, hotelAgreedCost: v })}
+                  onChange={(v) => setForm((f) => ({ ...f, hotelAgreedCost: v }))}
                 />
                 <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
                   Total agreed amount with the hotel. Credit = amount paid now.
@@ -873,7 +961,7 @@ export function TransactionManager({
 
                 <optgroup label="Other">
                   <option value="Cheque">Cheque</option>
-                  <option value="__other__">Other…</option>
+                  <option value="__other__">Otherâ€¦</option>
                 </optgroup>
               </select>
             </label>

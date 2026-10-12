@@ -18,7 +18,7 @@ import { getSessionUserId } from "@/lib/auth";
  *   amounts in that category as a defensive fallback. This makes it
  *   impossible to bypass the overpayment guard by misspelling a name.
  *
- * SPECIAL CASE — Refund to Client:
+ * SPECIAL CASE - Refund to Client:
  *   A client can only be refunded up to what they've ALREADY PAID us
  *   (Receivable.amountReceived), minus any refunds already issued
  *   (Pending or Paid) for that client in this period.
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     return !!lastA && lastA === lastB && lastA.length > 2;
   };
 
-  // ── Client Receipt / Revenue ──
+  // -- Client Receipt / Revenue --
   if (
     category.includes("receipt") ||
     category.includes("revenue") ||
@@ -77,10 +77,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         outstanding: r.remainingAmount,
         exists: true,
+        totalPackage: r.totalPackage,
+        amountReceived: r.amountReceived,
       });
     }
 
-    // No name match — check if the client master exists
+    // No name match - check if the client master exists
     const clients = await prisma.client.findMany();
     const c =
       clients.find((row) => nameMatch(row.name, party)) ??
@@ -106,7 +108,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Salary / Payroll ──
+  // -- Salary / Payroll --
   if (category.includes("salary") || category.includes("payroll")) {
     const rows = await prisma.payrollEntry.findMany({ where: { periodId } });
     if (rows.length === 0) {
@@ -127,7 +129,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // No name match — return the SUM of all outstanding payroll in
+    // No name match - return the SUM of all outstanding payroll in
     // the period as a defensive fallback so we still block huge overpays.
     const totalOutstanding = rows.reduce(
       (s, r) => s + Math.max(0, r.netPayable - (r.amountPaid ?? 0)),
@@ -140,7 +142,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Hotel ──
+  // -- Hotel --
   if (category.includes("hotel")) {
     const rows = await prisma.payable.findMany({
       where: { periodId, category: { contains: "Hotel" } },
@@ -156,9 +158,14 @@ export async function GET(req: NextRequest) {
       rows.find((r) => nameMatch(r.supplierName, party)) ??
       rows.find((r) => lastNameMatch(r.supplierName, party));
     if (p) {
-      return NextResponse.json({ outstanding: p.remaining, exists: true });
+      return NextResponse.json({
+        outstanding: p.remaining,
+        exists: true,
+        totalAmount: p.totalAmount,
+        amountPaid: p.amountPaid,
+      });
     }
-    // No name match — return the total remaining across all hotel payables.
+    // No name match - return the total remaining across all hotel payables.
     const totalRemaining = rows.reduce((s, r) => s + r.remaining, 0);
     return NextResponse.json({
       outstanding: totalRemaining,
@@ -167,7 +174,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Transport ──
+  // -- Transport --
   if (category.includes("transport") || category.includes("driver")) {
     const rows = await prisma.payable.findMany({
       where: { periodId, category: { contains: "Transport" } },
@@ -193,7 +200,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Ticketing ──
+  // -- Ticketing --
   if (category.includes("ticketing")) {
     const rows = await prisma.payable.findMany({
       where: { periodId, category: { contains: "Ticketing" } },
@@ -219,7 +226,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Supplier / Payable (generic) ──
+  // -- Supplier / Payable (generic) --
   if (category.includes("supplier") || category.includes("payable")) {
     const rows = await prisma.payable.findMany({ where: { periodId } });
     if (rows.length === 0) {
@@ -243,7 +250,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Commission ──
+  // -- Commission --
   if (category.includes("commission")) {
     const rows = await prisma.commission.findMany({
       where: { periodId, status: "Accrued" },
@@ -269,7 +276,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Refund to Client ──
+  // -- Refund to Client --
   // A client can only be refunded up to what they've ALREADY PAID us
   // (Receivable.amountReceived), minus any refunds already issued
   // (Pending or Paid) for that same client in this period.
@@ -279,7 +286,7 @@ export async function GET(req: NextRequest) {
       where: { periodId },
     });
 
-    // 2. All refunds for this period (both Pending and Paid) — these
+    // 2. All refunds for this period (both Pending and Paid) - these
     //    count against the refundable balance so we don't double-refund.
     const allRefunds = await prisma.refund.findMany({ where: { periodId } });
 
@@ -291,7 +298,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Helper — sum of refunds for one client (any status)
+    // Helper - sum of refunds for one client (any status)
     const refundedTo = (clientName: string) =>
       allRefunds
         .filter((r) => nameMatch(r.clientName, clientName))
@@ -319,7 +326,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // No matching receivable — maybe the client exists with zero receipts
+    // No matching receivable - maybe the client exists with zero receipts
     const clients = await prisma.client.findMany();
     const c =
       clients.find((row) => nameMatch(row.name, party)) ??
@@ -348,7 +355,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // No name match — return the total refundable across ALL clients in
+    // No name match - return the total refundable across ALL clients in
     // this period, as a defensive fallback so huge refunds are blocked.
     const totalPaidIn = receivables.reduce(
       (s, r) => s + Math.max(0, r.amountReceived || 0),
@@ -364,7 +371,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Employee Loan ──
+  // -- Employee Loan --
   if (category.includes("employee loan") || category.includes("staff advance")) {
     const emps = await prisma.employee.findMany({ where: { isActive: true } });
     if (emps.length === 0) {
@@ -379,7 +386,7 @@ export async function GET(req: NextRequest) {
       emps.find((e) => lastNameMatch(e.name, party));
 
     if (!emp) {
-      // No name match — return the sum of all outstanding loans
+      // No name match - return the sum of all outstanding loans
       const loans = await prisma.employeeLoan.findMany({
         where: { remainingAmount: { gt: 0 } },
       });
@@ -400,7 +407,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Supplier Advance ──
+  // -- Supplier Advance --
   if (category.includes("advance")) {
     const rows = await prisma.supplierAdvance.findMany({
       where: { periodId, remaining: { gt: 0 } },
