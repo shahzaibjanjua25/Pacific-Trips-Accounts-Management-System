@@ -181,9 +181,18 @@ async function carryForwardTx(
     console.error("[carry-forward] refunds failed:", e);
   }
 
-  // --- Employee loans: ALWAYS apply monthly installment when entering new month ---
-  // Example: remaining 185,000, installment 20,000 -> new remaining 165,000
-  // Continues each month until remaining is 0.
+  // --- Employee loans (month boundary) ---
+  // Schedule the user expects:
+  //   Oct start: remaining 100,000, installment 20,000 (taken from Oct salary)
+  //   After Oct installment: remaining 80,000
+  //   Nov start: remaining 80,000, installment 20,000
+  //   After Nov installment: remaining 60,000
+  //   Dec start: remaining 60,000, ... until 0
+  //
+  // Installment is applied ONCE per month:
+  //   - Prefer: already applied when that month's payroll was marked Paid
+  //   - Otherwise: apply it here when rolling into the next month
+  // Never double-deduct.
   try {
     const loans = await tx.employeeLoan.findMany({
       where: { remainingAmount: { gt: 0 } },
@@ -195,12 +204,7 @@ async function carryForwardTx(
         empName,
         loan.monthlyInstallment || 0
       );
-      // Cap installment at what is still owed
-      if (installment > loan.remainingAmount) {
-        installment = loan.remainingAmount;
-      }
       if (installment <= 0) {
-        // Still ensure monthlyInstallment is stored for payroll display
         const fixed = installmentFor(empName, 0);
         if (fixed > 0 && (loan.monthlyInstallment || 0) === 0) {
           await tx.employeeLoan.update({
@@ -211,16 +215,46 @@ async function carryForwardTx(
         continue;
       }
 
-      const newRemaining = Math.max(0, loan.remainingAmount - installment);
+      // Did previous month's payroll already recover this installment?
+      let alreadyApplied = false;
+      if (loan.employeeId) {
+        const prevPay = await tx.payrollEntry.findFirst({
+          where: {
+            periodId: fromPeriodId,
+            employeeId: loan.employeeId,
+            status: "Paid",
+            loanInstallment: { gt: 0 },
+          },
+        });
+        if (prevPay) alreadyApplied = true;
+        if (!prevPay) {
+          const byName = await tx.payrollEntry.findFirst({
+            where: {
+              periodId: fromPeriodId,
+              employeeName: empName,
+              status: "Paid",
+              loanInstallment: { gt: 0 },
+            },
+          });
+          if (byName) alreadyApplied = true;
+        }
+      }
+
+      let remaining = loan.remainingAmount;
+      if (!alreadyApplied) {
+        const take = Math.min(installment, remaining);
+        remaining = Math.max(0, remaining - take);
+      }
+
+      // Installment for the NEW month = scheduled amount, capped at what is still owed
+      const nextInstallment =
+        remaining <= 0 ? 0 : Math.min(installment, remaining);
+
       await tx.employeeLoan.update({
         where: { id: loan.id },
         data: {
-          remainingAmount: newRemaining,
-          // Keep scheduled installment for future months (or clear if paid off)
-          monthlyInstallment:
-            newRemaining <= 0
-              ? 0
-              : installmentFor(empName, loan.monthlyInstallment || installment),
+          remainingAmount: remaining,
+          monthlyInstallment: nextInstallment,
         },
       });
     }
