@@ -50,6 +50,10 @@ export function CrudPanel({
 
   const tableFields = fields.filter((f) => f.showInTable !== false && !f.transient);
 
+  function setField(key: string, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
   function openAdd() {
     setEditing(null);
     const init: Record<string, string> = {};
@@ -71,7 +75,20 @@ export function CrudPanel({
       if (f.readOnly) return;
       const v = row[f.key];
       if (f.type === "date" && v) {
-        init[f.key] = new Date(v as string).toISOString().slice(0, 10);
+        try {
+          // Use local date parts to avoid UTC day-shift for pure dates
+          const d = new Date(v as string);
+          if (!isNaN(d.getTime())) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, "0");
+            const day = String(d.getDate()).padStart(2, "0");
+            init[f.key] = `${y}-${m}-${day}`;
+          } else {
+            init[f.key] = "";
+          }
+        } catch {
+          init[f.key] = "";
+        }
       } else if (v == null) {
         init[f.key] = f.type === "number" ? "0" : "";
       } else {
@@ -89,8 +106,14 @@ export function CrudPanel({
       const payload: Record<string, unknown> = { periodId, ...extraPayload };
       fields.forEach((f) => {
         if (f.readOnly) return;
-        if (f.type === "number") payload[f.key] = parseFloat(form[f.key]) || 0;
-        else payload[f.key] = form[f.key] || null;
+        if (f.type === "number") {
+          const n = parseFloat(form[f.key]);
+          payload[f.key] = Number.isFinite(n) ? n : 0;
+        } else {
+          // Keep empty string as null for optional text; allow "0" for text
+          const raw = form[f.key];
+          payload[f.key] = raw === undefined || raw === "" ? null : raw;
+        }
       });
 
       if (editing) {
@@ -116,6 +139,7 @@ export function CrudPanel({
         }
       }
       setOpen(false);
+      setEditing(null);
       router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -150,7 +174,8 @@ export function CrudPanel({
         const short =
           typeof body === "string"
             ? body.slice(0, 200)
-            : body?.error || JSON.stringify(body).slice(0, 200);
+            : (body as { error?: string })?.error ||
+              JSON.stringify(body).slice(0, 200);
         alert(`Delete failed (${res.status}):\n${short}`);
         return;
       }
@@ -175,13 +200,15 @@ export function CrudPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
         <button
+          type="button"
           onClick={openAdd}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+          className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
         >
-          <Plus size={16} /> Add
+          <Plus size={16} />
+          Add
         </button>
       </div>
 
@@ -196,7 +223,10 @@ export function CrudPanel({
             </h3>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                setEditing(null);
+              }}
               className="text-slate-500"
             >
               <X size={18} />
@@ -214,15 +244,13 @@ export function CrudPanel({
                       lookupKey={f.lookupKey}
                       periodId={periodId}
                       value={form[f.key] || ""}
-                      onChange={(v) => setForm({ ...form, [f.key]: v })}
+                      onChange={(v) => setField(f.key, v)}
                       required={f.required}
                     />
                   ) : f.type === "select" ? (
                     <select
                       value={form[f.key] || ""}
-                      onChange={(e) =>
-                        setForm({ ...form, [f.key]: e.target.value })
-                      }
+                      onChange={(e) => setField(f.key, e.target.value)}
                       required={f.required}
                       className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
@@ -235,9 +263,7 @@ export function CrudPanel({
                   ) : f.type === "textarea" ? (
                     <textarea
                       value={form[f.key] || ""}
-                      onChange={(e) =>
-                        setForm({ ...form, [f.key]: e.target.value })
-                      }
+                      onChange={(e) => setField(f.key, e.target.value)}
                       className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       rows={2}
                     />
@@ -245,9 +271,7 @@ export function CrudPanel({
                     <input
                       type={f.type || "text"}
                       value={form[f.key] || ""}
-                      onChange={(e) =>
-                        setForm({ ...form, [f.key]: e.target.value })
-                      }
+                      onChange={(e) => setField(f.key, e.target.value)}
                       required={f.required}
                       className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
@@ -297,12 +321,14 @@ export function CrudPanel({
                     row.payableId ||
                     (row.payable as { id?: string } | undefined)?.id;
                   const linkId = linkedEntityType
-                    ? linkedEntityType === "hotel" || linkedEntityType === "transport"
+                    ? linkedEntityType === "hotel" ||
+                      linkedEntityType === "transport"
                       ? (payableId as string) || row.id
                       : row.id
                     : null;
                   const linkType =
-                    linkedEntityType === "hotel" || linkedEntityType === "transport"
+                    linkedEntityType === "hotel" ||
+                    linkedEntityType === "transport"
                       ? "payable"
                       : linkedEntityType;
 
@@ -387,6 +413,7 @@ function FragmentRow({
         })}
         <td className="px-3 py-2 text-right whitespace-nowrap">
           <button
+            type="button"
             onClick={onEdit}
             className="inline-flex p-1.5 text-sky-600 hover:bg-sky-50 rounded"
             title="Edit"
@@ -394,6 +421,7 @@ function FragmentRow({
             <Pencil size={15} />
           </button>
           <button
+            type="button"
             onClick={onRemove}
             className="inline-flex p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
             title="Delete"

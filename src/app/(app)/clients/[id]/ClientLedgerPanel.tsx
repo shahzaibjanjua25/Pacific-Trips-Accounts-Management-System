@@ -82,11 +82,18 @@ export function ClientLedgerPanel({
     setLoading(true);
     try {
       const payload = {
-        ...form,
-        clientId,
-        clientName,
+        tourDate: form.tourDate || null,
+        description: form.description || null,
+        category: form.category || null,
+        subCategory: form.subCategory || null,
+        hotel: form.hotel || null,
         debit: parseFloat(form.debit) || 0,
         credit: parseFloat(form.credit) || 0,
+        status: form.status || null,
+        receiptRef: form.receiptRef || null,
+        enteredBy: form.enteredBy || null,
+        notes: form.notes || null,
+        clientId, // needed for POST only; PUT ignores it
       };
       const res = await fetch("/api/client-ledger", {
         method: editing ? "PUT" : "POST",
@@ -187,7 +194,7 @@ export function ClientLedgerPanel({
             disabled={loading}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Saving…" : editing ? "Update" : "Save"}
+            {loading ? "Savingâ€¦" : editing ? "Update" : "Save"}
           </button>
         </form>
       )}
@@ -213,18 +220,18 @@ export function ClientLedgerPanel({
                 {rows.map((r) => (
                   <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50/80">
                     <td className="px-3 py-2 whitespace-nowrap">
-                      {r.tourDate ? new Date(r.tourDate).toLocaleDateString("en-GB") : "—"}
+                      {r.tourDate ? new Date(r.tourDate).toLocaleDateString("en-GB") : "â€”"}
                     </td>
-                    <td className="px-3 py-2 max-w-[220px] truncate">{r.description || "—"}</td>
-                    <td className="px-3 py-2">{r.category || r.subCategory || "—"}</td>
-                    <td className="px-3 py-2">{r.hotel || "—"}</td>
+                    <td className="px-3 py-2 max-w-[220px] truncate">{r.description || "â€”"}</td>
+                    <td className="px-3 py-2">{r.category || r.subCategory || "â€”"}</td>
+                    <td className="px-3 py-2">{r.hotel || "â€”"}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
-                      {r.debit ? formatPKR(r.debit) : "—"}
+                      {r.debit ? formatPKR(r.debit) : "â€”"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-sky-700">
-                      {r.credit ? formatPKR(r.credit) : "—"}
+                      {r.credit ? formatPKR(r.credit) : "â€”"}
                     </td>
-                    <td className="px-3 py-2">{r.status || "—"}</td>
+                    <td className="px-3 py-2">{r.status || "â€”"}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button onClick={() => openEdit(r)} className="p-1.5 text-sky-600 hover:bg-sky-50 rounded">
                         <Pencil size={15} />

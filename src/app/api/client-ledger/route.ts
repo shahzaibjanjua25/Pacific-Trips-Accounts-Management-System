@@ -8,6 +8,28 @@ async function guard() {
   return null;
 }
 
+/** Only columns that exist on ClientLedger */
+function pickLedger(body: Record<string, unknown>, includeClientId = false) {
+  const data: Record<string, unknown> = {
+    tourDate: body.tourDate ? new Date(body.tourDate as string) : null,
+    description: body.description ?? null,
+    category: body.category ?? null,
+    subCategory: body.subCategory ?? null,
+    hotel: body.hotel ?? null,
+    debit: Number(body.debit) || 0,
+    credit: Number(body.credit) || 0,
+    status: body.status ?? null,
+    receiptRef: body.receiptRef ?? null,
+    enteredBy: body.enteredBy ?? null,
+    notes: body.notes ?? null,
+  };
+  if (includeClientId && body.clientId) {
+    data.clientId = body.clientId;
+  }
+  // Explicitly NEVER include: clientName, client, id, createdAt, updatedAt
+  return data;
+}
+
 export async function GET(req: NextRequest) {
   const g = await guard();
   if (g) return g;
@@ -25,26 +47,14 @@ export async function POST(req: NextRequest) {
   if (g) return g;
   try {
     const body = await req.json();
-    if (!body.clientId) return NextResponse.json({ error: "clientId required" }, { status: 400 });
-    const row = await prisma.clientLedger.create({
-      data: {
-        clientId: body.clientId,
-        tourDate: body.tourDate ? new Date(body.tourDate) : null,
-        description: body.description || null,
-        category: body.category || null,
-        subCategory: body.subCategory || null,
-        hotel: body.hotel || null,
-        debit: Number(body.debit) || 0,
-        credit: Number(body.credit) || 0,
-        status: body.status || null,
-        receiptRef: body.receiptRef || null,
-        enteredBy: body.enteredBy || null,
-        notes: body.notes || null,
-      },
-    });
+    if (!body.clientId) {
+      return NextResponse.json({ error: "clientId required" }, { status: 400 });
+    }
+    const data = pickLedger(body, true);
+    const row = await prisma.clientLedger.create({ data: data as never });
     return NextResponse.json(row);
   } catch (e) {
-    console.error(e);
+    console.error("[client-ledger:POST]", e);
     return NextResponse.json({ error: "Save failed" }, { status: 500 });
   }
 }
@@ -54,18 +64,18 @@ export async function PUT(req: NextRequest) {
   if (g) return g;
   try {
     const body = await req.json();
-    if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
-    const { id, ...rest } = body;
-    if (rest.tourDate) rest.tourDate = new Date(rest.tourDate);
-    if (rest.debit != null) rest.debit = Number(rest.debit);
-    if (rest.credit != null) rest.credit = Number(rest.credit);
-    delete rest.createdAt;
-    delete rest.updatedAt;
-    delete rest.client;
-    const row = await prisma.clientLedger.update({ where: { id }, data: rest });
+    if (!body.id) {
+      return NextResponse.json({ error: "id required" }, { status: 400 });
+    }
+    const id = body.id as string;
+    const data = pickLedger(body, false);
+    const row = await prisma.clientLedger.update({
+      where: { id },
+      data: data as never,
+    });
     return NextResponse.json(row);
   } catch (e) {
-    console.error(e);
+    console.error("[client-ledger:PUT]", e);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }
 }
