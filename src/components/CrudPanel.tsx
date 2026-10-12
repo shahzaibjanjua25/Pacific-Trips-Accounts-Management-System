@@ -16,7 +16,7 @@ export type FieldDef = {
   money?: boolean;
   showInTable?: boolean;
   transient?: boolean;
-  /** Display in table only — never sent to the form or the API */
+  /** Display in table only - never sent to the form or the API */
   readOnly?: boolean;
   /** Load options dynamically from /api/lookup?key=<lookupKey> */
   lookupKey?: string;
@@ -285,7 +285,7 @@ export function CrudPanel({
             disabled={loading}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Saving…" : editing ? "Update" : "Save"}
+            {loading ? "Saving..." : editing ? "Update" : "Save"}
           </button>
         </form>
       )}
@@ -393,7 +393,7 @@ function FragmentRow({
         )}
         {tableFields.map((f) => {
           const v = row[f.key];
-          let display: React.ReactNode = "—";
+          let display: React.ReactNode = "-";
           if (v != null && v !== "") {
             if (f.money && typeof v === "number") display = formatPKR(v);
             else if (f.type === "date")

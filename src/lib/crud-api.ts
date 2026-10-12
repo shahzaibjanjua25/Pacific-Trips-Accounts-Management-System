@@ -186,7 +186,7 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     else d.status = d.status || "Open";
   }
 
-  // HotelBooking has no money fields — those live on Payable.
+  // HotelBooking has no money fields - those live on Payable.
   // Do NOT inject agreedCost / amountPaid / remaining here (Prisma will reject them).
   if (model === "hotelBooking") {
     // status only; leave as client provided
@@ -242,7 +242,7 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     if (d.outstanding === 0) d.status = "Paid";
   }
 
-  // TransportJob has no remaining/agreedCost — money lives on Payable.
+  // TransportJob has no remaining/agreedCost - money lives on Payable.
   if (model === "transportJob") {
     // status only
   }

@@ -2,19 +2,20 @@
  * Sales team payroll rules (Pacific Trips policy):
  * - Each sales member: Basic 40,000 PKR + 2.5% commission on THEIR individual sales
  * - Team Lead "Ahmad/Amad/Ammar Amjad":
- *     team sales < 70 lacs              → fixed salary 55,000
- *     70 lacs ≤ sales < monthly target  → 1% of team sales
- *     sales ≥ monthly target            → 2.5% of team sales
- *   Target is stored per period in the SalesTarget table.
+ *     team sales < 70 lacs              -> fixed 55,000 only
+ *     70 lacs <= sales < monthly target -> 1.5% of team sales
+ *     sales >= monthly target           -> 2.5% of team sales
+ *   Monthly target is per period in SalesTarget (editable; default 1.2 crore).
  *
- * Individual / team sales are taken only from SalesPerformance (single source of
- * truth) so deleting a sale removes the full amount, not a partial double-count.
+ * Individual / team sales use SalesPerformance only (single source of truth)
+ * so edits/deletes fully update Individual Sales and Sale Base (including to 0).
  */
 
 import { prisma } from "./prisma";
 import { syncPayrollForEmployee } from "./links-service";
 
 const COMMISSION_RATE = 0.025;
+const LEAD_MID_RATE = 0.015; // 1.5%
 const LEAD_FLOOR = 7_000_000; // 70 lacs
 const LEAD_MIN_SALARY = 55_000;
 const DEFAULT_LEAD_TARGET = 12_000_000; // 1.2 crore fallback
@@ -37,22 +38,31 @@ export function computeLeadPay(
     return {
       amount: LEAD_MIN_SALARY,
       ratePct: 0,
-      note: `Team Lead — fixed ${LEAD_MIN_SALARY.toLocaleString()} (team sales < 70 lacs)`,
+      note:
+        "Team Lead - fixed " +
+        LEAD_MIN_SALARY.toLocaleString() +
+        " (team sales < 70 lacs)",
     };
   }
   if (teamTotal < target) {
-    const amount = teamTotal * 0.01;
+    const amount = teamTotal * LEAD_MID_RATE;
     return {
       amount,
-      ratePct: 1,
-      note: `Team Lead — 1% of team sales (70 lacs – ${(target / 1e7).toFixed(2)} cr)`,
+      ratePct: 1.5,
+      note:
+        "Team Lead - 1.5% of team sales (70 lacs to target " +
+        target.toLocaleString() +
+        ")",
     };
   }
   const amount = teamTotal * COMMISSION_RATE;
   return {
     amount,
     ratePct: 2.5,
-    note: `Team Lead — 2.5% of team sales (target ${target.toLocaleString()}+ achieved)`,
+    note:
+      "Team Lead - 2.5% of team sales (target " +
+      target.toLocaleString() +
+      "+ achieved)",
   };
 }
 
@@ -68,8 +78,7 @@ export async function computeSalesPayroll(periodId: string) {
     where: { periodId },
   });
 
-  // Single source of truth: SalesPerformance only (avoids double-count with
-  // Receivables / Trips created from the same sale entry).
+  // Single source of truth: SalesPerformance only
   const salesByPerson: Record<string, number> = {};
   for (const e of salesEntries) {
     salesByPerson[e.employeeName] =
@@ -106,6 +115,8 @@ export async function computeSalesPayroll(periodId: string) {
     const existingComm = await prisma.commission.findFirst({
       where: { periodId, employeeName: emp.name },
     });
+
+    // Always upsert commission so zero sales clear prior amounts
     if (existingComm) {
       await prisma.commission.update({
         where: { id: existingComm.id },
@@ -114,9 +125,10 @@ export async function computeSalesPayroll(periodId: string) {
           commissionRate: ratePct,
           commissionAmt: commission,
           notes: leadNote ?? existingComm.notes,
+          status: existingComm.status === "Paid" ? "Paid" : "Accrued",
         },
       });
-    } else if (commission > 0 || isLead) {
+    } else {
       await prisma.commission.create({
         data: {
           periodId,

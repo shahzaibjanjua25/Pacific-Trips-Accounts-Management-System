@@ -82,7 +82,7 @@ async function loadLookup(key: LookupKey, periodId: string | null): Promise<Look
     }
 
     case "salesEmployees": {
-      // Team Lead does not close sales directly — exclude from attribution dropdowns
+      // Team Lead does not close sales directly - exclude from attribution dropdowns
       const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
       const rows = await prisma.employee.findMany({
         where: { isActive: true, role: "Sales" },
