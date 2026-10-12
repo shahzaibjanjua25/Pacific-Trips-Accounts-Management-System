@@ -1,13 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
-import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 import { formatPKR } from "@/lib/utils";
-
-const fields: FieldDef[] = [
-  { key: "accountName", label: "Account Name", required: true },
-  { key: "balance", label: "Balance (PKR)", type: "number" as const, required: true, money: true },
-];
+import {
+  BankAccountsPanel,
+  type BankRow,
+} from "@/components/BankAccountsPanel";
 
 export default async function Page({
   searchParams,
@@ -25,16 +23,30 @@ export default async function Page({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [rows, bankTxns] = await Promise.all([
-    prisma.bankBalance.findMany({
-      orderBy: { accountName: "asc" },
-    }),
-    prisma.bankTxn.findMany({
+  const rows = await prisma.bankBalance.findMany({
+    orderBy: { accountName: "asc" },
+  });
+
+  let bankTxns: {
+    id: string;
+    date: Date;
+    accountName: string;
+    description: string | null;
+    deposit: number;
+    withdrawal: number;
+    transferIn: number;
+    transferOut: number;
+    balance: number;
+  }[] = [];
+  try {
+    bankTxns = await prisma.bankTxn.findMany({
       where: { periodId: current.id },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: 200,
-    }),
-  ]);
+    });
+  } catch {
+    bankTxns = [];
+  }
 
   return (
     <div className="space-y-6">
@@ -42,20 +54,16 @@ export default async function Page({
         <div>
           <h1 className="text-2xl font-bold">Bank Accounts</h1>
           <p className="text-sm text-slate-500">
-            Account balances. Updated when you post <strong>Completed</strong> transactions
-            (including Bank Transfers). Pending payments do not change balances.
-            You can also set balances manually to match the bank statement.
+            Manage account balances (Add / Edit / Delete). Completed transactions and bank
+            transfers update balances automatically. Pending does not.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
-      <CrudPanel
-        title="Bank Accounts"
-        apiPath="/api/bank"
+      <BankAccountsPanel
         periodId={current.id}
-        fields={fields}
-        rows={rows as unknown as (Record<string, unknown> & { id: string })[]}
+        initialRows={rows as unknown as BankRow[]}
       />
 
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
@@ -64,9 +72,9 @@ export default async function Page({
             Bank movements — {current.label}
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Deposits, withdrawals, and transfers recorded from Completed transactions.
-            Use category <strong>Bank Transfer</strong> on the Transactions page
-            (Account = From, Party = To).
+            History from Completed transactions. Use category{" "}
+            <strong>Bank Transfer</strong> on Transactions (Account = From, Party = To).
+            To change a transfer, edit or delete it on the Transactions page.
           </p>
         </div>
         {bankTxns.length === 0 ? (
