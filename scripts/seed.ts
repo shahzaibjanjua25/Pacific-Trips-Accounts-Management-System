@@ -271,71 +271,71 @@ async function main() {
     salesperson?: string;
     notes?: string;
   }> = [
-    {
-      name: "Mr Haris",
-      tourDate: new Date("2026-10-05"),
-      desc: "5 days, Skardu By Air",
-      payment: 169000,
-      totalPackage: 169000,
-      costs: [
-        { hotel: "Qayyam (2x nights)", credit: 34650 },
-        { hotel: "Khoj", credit: 41930 },
-        { hotel: "Kisar Baltistan", credit: 9500 },
-        { hotel: "Transportation", credit: 70000, notes: "Fuel: 34000, Rent 36000" },
-      ],
-    },
-    {
-      name: "Mr Bilal",
-      tourDate: new Date("2026-10-17"),
-      desc: "8 Days, Hunza Skardu Trip By Road",
-      payment: 330000,
-      totalPackage: 650000,
-    },
-    {
-      name: "Dr Ali",
-      tourDate: new Date("2026-10-11"),
-      desc: "5 days, Skardu By Air",
-      payment: 260000,
-      totalPackage: 349000,
-    },
-    {
-      name: "Mr Moiz",
-      tourDate: new Date("2026-11-01"),
-      desc: "6 days, Skardu By Air",
-      payment: 10000,
-      totalPackage: 200000,
-    },
-    {
-      name: "Mr Shahid",
-      tourDate: new Date("2026-11-20"),
-      desc: "6 days, Skardu By Air",
-      payment: 140000,
-      totalPackage: 420000,
-    },
-    {
-      name: "Mr Zeeshan",
-      tourDate: new Date("2027-05-03"),
-      desc: "6 days, Skardu By Road",
-      payment: 10000,
-      totalPackage: 238000,
-    },
-    {
-      name: "Ms Aiman",
-      tourDate: new Date("2026-10-18"),
-      desc: "5 days, Skardu By Air",
-      payment: 10000,
-      totalPackage: 245000,
-    },
-    {
-      name: "Mr Baqir",
-      tourDate: null,
-      desc: "advance payment",
-      payment: 10000,
-      totalPackage: 10000,
-      salesperson: "Maira",
-      notes: "Auto-created from transaction",
-    },
-  ];
+      {
+        name: "Mr Haris",
+        tourDate: new Date("2026-10-05"),
+        desc: "5 days, Skardu By Air",
+        payment: 169000,
+        totalPackage: 169000,
+        costs: [
+          { hotel: "Qayyam (2x nights)", credit: 34650 },
+          { hotel: "Khoj", credit: 41930 },
+          { hotel: "Kisar Baltistan", credit: 9500 },
+          { hotel: "Transportation", credit: 70000, notes: "Fuel: 34000, Rent 36000" },
+        ],
+      },
+      {
+        name: "Mr Bilal",
+        tourDate: new Date("2026-10-17"),
+        desc: "8 Days, Hunza Skardu Trip By Road",
+        payment: 330000,
+        totalPackage: 650000,
+      },
+      {
+        name: "Dr Ali",
+        tourDate: new Date("2026-10-11"),
+        desc: "5 days, Skardu By Air",
+        payment: 260000,
+        totalPackage: 349000,
+      },
+      {
+        name: "Mr Moiz",
+        tourDate: new Date("2026-11-01"),
+        desc: "6 days, Skardu By Air",
+        payment: 10000,
+        totalPackage: 200000,
+      },
+      {
+        name: "Mr Shahid",
+        tourDate: new Date("2026-11-20"),
+        desc: "6 days, Skardu By Air",
+        payment: 140000,
+        totalPackage: 420000,
+      },
+      {
+        name: "Mr Zeeshan",
+        tourDate: new Date("2027-05-03"),
+        desc: "6 days, Skardu By Road",
+        payment: 10000,
+        totalPackage: 238000,
+      },
+      {
+        name: "Ms Aiman",
+        tourDate: new Date("2026-10-18"),
+        desc: "5 days, Skardu By Air",
+        payment: 10000,
+        totalPackage: 245000,
+      },
+      {
+        name: "Mr Baqir",
+        tourDate: null,
+        desc: "advance payment",
+        payment: 10000,
+        totalPackage: 10000,
+        salesperson: "Maira",
+        notes: "Auto-created from transaction",
+      },
+    ];
 
   for (const c of clientRows) {
     const client = await prisma.client.create({ data: { name: c.name } });
@@ -428,7 +428,7 @@ async function main() {
         description: t.description,
         category: t.category,
         subCategory: t.subCategory ?? null,
-        clientVendor: t.clientVendor ?? null,
+        party: t.clientVendor ?? null,          // ✅ map to `party`
         tripRef: t.tripRef ?? null,
         debit: t.debit,
         credit: t.credit,
