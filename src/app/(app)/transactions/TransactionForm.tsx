@@ -131,8 +131,16 @@ export function TransactionManager({
   const isClientCategory = INBOUND_CATEGORIES.includes(form.category);
   const isHotelCategory = form.category === "Hotel Payment";
   const isRefundCategory = form.category === "Refund to Client";
+  const isEmployeeLoan =
+    form.category === "Employee Loan" ||
+    form.category.toLowerCase().includes("employee loan") ||
+    form.category.toLowerCase().includes("staff advance");
   const isOutboundCategory = OUTBOUND_CHECK_CATEGORIES.includes(form.category);
-  const shouldCheckOutstanding = isClientCategory || isOutboundCategory;
+  // Employee loan: only check limit on repayment (debit). Credit (giving loan) is unlimited.
+  const shouldCheckOutstanding =
+    isClientCategory ||
+    (isOutboundCategory && !isEmployeeLoan) ||
+    (isEmployeeLoan && (parseFloat(form.debit) || 0) > 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -375,7 +383,16 @@ export function TransactionManager({
     const isClientReceipt = isClientCategory;
     const paidOut = creditAmount;
     const receivedIn = debitAmount;
-    const movingAmount = isClientReceipt ? receivedIn : paidOut;
+    const isEmployeeLoanTxn =
+      form.category === "Employee Loan" ||
+      form.category.toLowerCase().includes("employee loan") ||
+      form.category.toLowerCase().includes("staff advance");
+    // Loan repayment = debit (money back from employee). Giving loan = credit (no limit).
+    const movingAmount = isClientReceipt
+      ? receivedIn
+      : isEmployeeLoanTxn
+        ? receivedIn // debit = repayment amount to check against loan remaining
+        : paidOut;
 
     const isTypedNew = showOther && form.otherName.trim().length > 0;
 
@@ -577,7 +594,11 @@ export function TransactionManager({
 
   const liveHint = (() => {
     if (!shouldCheckOutstanding) return null;
-    const movingAmount = isClientCategory ? debitNum : creditNum;
+    const movingAmount = isClientCategory
+      ? debitNum
+      : isEmployeeLoan
+        ? debitNum // only repayment (debit) is limited against outstanding loan
+        : creditNum;
 
     if (isOutboundCategory && debitNum > 0 && creditNum === 0) {
       return (
@@ -635,6 +656,14 @@ export function TransactionManager({
       return (
         <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
           Refundable from this client: <strong>{formatPKR(clientRefundable)}</strong>
+        </p>
+      );
+    }
+
+    if (isEmployeeLoan && creditNum > 0 && debitNum <= 0) {
+      return (
+        <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+          Giving loan (credit): this amount will be added to the employee&apos;s loan balance. No repayment limit applies.
         </p>
       );
     }
