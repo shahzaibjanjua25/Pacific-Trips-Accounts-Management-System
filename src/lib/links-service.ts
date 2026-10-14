@@ -466,7 +466,7 @@ export async function applyPayrollPayment(
     if (amount > outstanding && outstanding > 0) {
         console.warn(
             `[applyPayrollPayment] OVERPAYMENT reached service layer: ${entry.employeeName} ` +
-                `outstanding ${outstanding}, paying ${amount}, capping to ${outstanding}`
+            `outstanding ${outstanding}, paying ${amount}, capping to ${outstanding}`
         );
     }
 
@@ -660,15 +660,9 @@ export async function findOrCreateHotelPayable(
     });
 
     if (payable) {
-        // If an explicit agreed cost was supplied and differs, update it
-        if (opts?.agreedCost && opts.agreedCost > 0 && payable.originalAmount !== opts.agreedCost) {
-            await prisma.payable.update({
-                where: { id: payable.id },
-                data: { originalAmount: opts.agreedCost },
-            });
-        }
-
-        // Make sure a HotelBooking exists and is linked
+        // Make sure a HotelBooking exists and is linked.
+        // Do NOT touch originalAmount here — applyHotelPayment handles the
+        // "new tranche" logic. This function only guarantees a payable exists.
         const existingBooking = await prisma.hotelBooking.findFirst({
             where: { payableId: payable.id },
         });
@@ -685,7 +679,8 @@ export async function findOrCreateHotelPayable(
         return payable.id;
     }
 
-    // Create both
+    // Create both. If an agreed cost was supplied on the very first
+    // transaction for this hotel, seed originalAmount with it.
     const initialOriginal =
         opts?.agreedCost && opts.agreedCost > 0 ? opts.agreedCost : 0;
 
@@ -816,18 +811,89 @@ export async function findOrCreateGenericPayable(
  * Apply a hotel payment: find-or-create the payable,
  * then apply the payment to it.
  */
+/**
+ * Apply a hotel payment.
+ *
+ * A Hotel Payment transaction may represent a BRAND NEW booking (a fresh
+ * tranche of debt) OR a payment against the existing outstanding balance.
+ *
+ *   agreedCost > 0  →  treat as a new tranche:
+ *                        originalAmount += agreedCost
+ *                        then apply `amount` as payment (capped at new remaining)
+ *   agreedCost = 0  →  pure payment against existing outstanding:
+ *                        apply `amount` (capped at existing remaining)
+ *
+ * This lets you have multiple bookings with the same hotel over time without
+ * the "Limit is Rs 0" block on the second booking.
+ */
 export async function applyHotelPayment(
-    periodId: string,
-    hotelName: string,
-    amount: number,
-    opts?: { description?: string; tripRef?: string; agreedCost?: number }
+  periodId: string,
+  hotelName: string,
+  amount: number,
+  opts?: { description?: string; tripRef?: string; agreedCost?: number }
 ): Promise<AppliedLink[]> {
-    if (!hotelName || amount <= 0) return [];
-    const payableId = await findOrCreateHotelPayable(periodId, hotelName, opts);
-    const applied = await applyToPayable(periodId, payableId, amount, opts?.agreedCost);
-    return applied > 0
-        ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
-        : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
+  if (!hotelName) return [];
+
+  const agreedCost = Number(opts?.agreedCost) || 0;
+  const payment = Number(amount) || 0;
+  if (payment <= 0 && agreedCost <= 0) return [];
+
+  // Was there already a payable for this hotel? (before we create one)
+  const existingBefore = await prisma.payable.findFirst({
+    where: {
+      periodId,
+      category: "Hotel",
+      supplierName: { equals: hotelName },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const payableId = await findOrCreateHotelPayable(periodId, hotelName, opts);
+  if (!payableId) return [];
+
+  const p = await prisma.payable.findUnique({ where: { id: payableId } });
+  if (!p) return [];
+
+  // Raise the hotel's total bill only when:
+  //   - agreed cost was supplied, AND
+  //   - the payable already existed (new tranche on an existing account).
+  //
+  // If the payable is brand new, findOrCreateHotelPayable already seeded
+  // originalAmount = agreedCost, so we must not add it again.
+  let newOriginal = p.originalAmount;
+  if (agreedCost > 0 && existingBefore) {
+    newOriginal = p.originalAmount + agreedCost;
+  }
+
+  const outstanding = Math.max(0, newOriginal - p.amountPaid);
+  const applied = Math.min(Math.max(0, payment), outstanding);
+  const newPaid = p.amountPaid + applied;
+  const newRemaining = Math.max(0, newOriginal - newPaid);
+
+  await prisma.payable.update({
+    where: { id: p.id },
+    data: {
+      originalAmount: newOriginal,
+      amountPaid: newPaid,
+      remaining: newRemaining,
+      status:
+        newRemaining <= 0 && newPaid > 0
+          ? "Paid"
+          : newPaid > 0
+            ? "Partial"
+            : "Open",
+    },
+  });
+
+  await propagatePayableToOperational(p.id);
+
+  return [
+    {
+      entityType: "payable",
+      entityId: payableId,
+      appliedAmount: applied,
+    },
+  ];
 }
 
 export async function applyTransportPayment(
