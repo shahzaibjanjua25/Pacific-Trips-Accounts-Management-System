@@ -48,10 +48,10 @@ async function loadLookup(key: LookupKey, periodId: string | null): Promise<Look
       // Also include receivable-only names
       const recvNames = periodId
         ? await prisma.receivable.findMany({
-            where: { periodId, clientId: null },
-            select: { clientName: true },
-            distinct: ["clientName"],
-          })
+          where: { periodId, clientId: null },
+          select: { clientName: true },
+          distinct: ["clientName"],
+        })
         : [];
       const out: LookupItem[] = rows.map((c) => ({
         value: c.name,
@@ -82,21 +82,23 @@ async function loadLookup(key: LookupKey, periodId: string | null): Promise<Look
     }
 
     case "salesEmployees": {
-      // Team Lead does not close sales directly - exclude from attribution dropdowns
       const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
       const rows = await prisma.employee.findMany({
         where: { isActive: true, role: "Sales" },
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       });
-      return rows
-        .filter(
-          (e) =>
-            !TEAM_LEAD_KEYWORDS.some((k) => e.name.toLowerCase().includes(k))
-        )
-        .map((e) => ({ value: e.name, label: e.name }));
+      return rows.map((e) => {
+        const isLead = TEAM_LEAD_KEYWORDS.some((k) =>
+          e.name.toLowerCase().includes(k)
+        );
+        return {
+          value: e.name,
+          label: isLead ? `${e.name} (Team Lead)` : e.name,
+          meta: isLead ? "Team Lead" : undefined,
+        };
+      });
     }
-
     case "hotels": {
       const rows = await prisma.payable.findMany({
         where: {

@@ -149,15 +149,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (isTeamLeadName(employeeName)) {
-      return NextResponse.json(
-        {
-          error:
-            "Team Lead cannot be attributed individual sales. Choose a sales team member.",
-        },
-        { status: 400 }
-      );
-    }
+    // if (isTeamLeadName(employeeName)) {
+    //   return NextResponse.json(
+    //     { error: "Team Lead cannot be attributed individual sales..." },
+    //     { status: 400 }
+    //   );
+    // }
 
     await prisma.salesPerformance.create({
       data: {
