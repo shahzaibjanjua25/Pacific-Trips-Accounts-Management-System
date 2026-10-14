@@ -48,7 +48,9 @@ export async function POST(req: NextRequest) {
       !isNewClient &&
       !(isEmployeeLoan && credit > 0 && debit <= 0)
     ) {
-      const outstanding = await lookupOutstanding(body.periodId, cat, party);
+      const outstanding = await lookupOutstanding(body.periodId, cat, party, {
+        hotelAgreedCost: Number(body.hotelAgreedCost) || 0,
+      });
       if (outstanding != null && amountMoving > outstanding) {
         return NextResponse.json(
           {
@@ -136,7 +138,8 @@ export async function PUT(req: NextRequest) {
         const outstanding = await lookupOutstanding(
           existing.periodId,
           cat,
-          party
+          party,
+          { hotelAgreedCost: Number(body.hotelAgreedCost) || 0 }
         );
         if (outstanding != null && amountMoving > outstanding) {
           return NextResponse.json(
@@ -191,7 +194,8 @@ export async function DELETE(req: NextRequest) {
 async function lookupOutstanding(
   periodId: string,
   category: string,
-  party: string
+  party: string,
+  opts?: { hotelAgreedCost?: number }
 ): Promise<number | null> {
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -246,7 +250,13 @@ async function lookupOutstanding(
       where: { periodId, category: { contains: "Hotel" } },
     });
     const p = find(rows, "supplierName");
-    return p ? p.remaining : null;
+    const newBooking = Number(opts?.hotelAgreedCost) || 0;
+    if (p) {
+      // A new booking cost raises the ceiling — you're allowed to pay it.
+      return p.remaining + newBooking;
+    }
+    // No existing payable — new booking's cost is the ceiling.
+    return newBooking > 0 ? newBooking : null;
   }
 
   if (category.includes("transport") || category.includes("driver")) {

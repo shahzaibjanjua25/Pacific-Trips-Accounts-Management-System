@@ -448,10 +448,10 @@ export function TransactionManager({
               typeof data.amountPaid === "number" ? data.amountPaid : 0;
             const serverTotal =
               typeof data.totalAmount === "number" ? data.totalAmount : 0;
-            const total = formCost > 0 ? formCost : serverTotal;
-            if (total > 0) {
-              liveOutstanding = Math.max(0, total - paid);
-            }
+            const serverRemaining = Math.max(0, serverTotal - paid);
+            // A new booking cost raises the ceiling:
+            //   ceiling = existing remaining + new booking agreed cost
+            liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
           }
         }
       } catch {
@@ -466,6 +466,12 @@ export function TransactionManager({
           if (total > 0) {
             liveOutstanding = Math.max(0, total - paid);
           }
+        } else if (liveOutstanding != null && isHotelCategory) {
+          const formCost = parseFloat(form.hotelAgreedCost) || 0;
+          const paid = outstanding?.amountPaid ?? 0;
+          const serverTotal = outstanding?.totalAmount ?? 0;
+          const serverRemaining = Math.max(0, serverTotal - paid);
+          liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
         }
       }
 
@@ -611,11 +617,36 @@ export function TransactionManager({
 
   const liveHint = (() => {
     if (!shouldCheckOutstanding) return null;
+
     const movingAmount = isClientCategory
       ? debitNum
       : isEmployeeLoan
         ? debitNum // only repayment (debit) is limited against outstanding loan
         : creditNum;
+
+    // Compute the effective ceiling ONCE here so it's visible everywhere below.
+    const formPkg = parseFloat(form.clientTotalPackage) || 0;
+    const formHotel = parseFloat(form.hotelAgreedCost) || 0;
+
+    let effectiveLimit: number | null = outstanding ? outstanding.value : null;
+    let serverRemaining = 0;
+
+    if (outstanding && outstanding.exists) {
+      if (isClientCategory) {
+        const paid = outstanding.amountReceived ?? 0;
+        const serverTotal = outstanding.totalPackage ?? 0;
+        const total = formPkg > 0 ? formPkg : serverTotal;
+        if (total > 0 || formPkg > 0) {
+          effectiveLimit = Math.max(0, total - paid);
+        }
+      } else if (isHotelCategory) {
+        const paid = outstanding.amountPaid ?? 0;
+        const serverTotal = outstanding.totalAmount ?? 0;
+        serverRemaining = Math.max(0, serverTotal - paid);
+        // A new booking raises the ceiling by its agreed cost.
+        effectiveLimit = serverRemaining + (formHotel > 0 ? formHotel : 0);
+      }
+    }
 
     if (isOutboundCategory && debitNum > 0 && creditNum === 0) {
       return (
@@ -655,8 +686,8 @@ export function TransactionManager({
       if (clientRefundable === 0) {
         return (
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            This client has <strong>Ã¢â€šÂ¨ 0</strong> refundable - either they haven't
-            paid us, or they've already been fully refunded.
+            This client has <strong>Rs 0</strong> refundable - either they haven&apos;t
+            paid us, or they&apos;ve already been fully refunded.
           </p>
         );
       }
@@ -690,51 +721,46 @@ export function TransactionManager({
 
     if (!outstanding.exists) {
       if (isClientCategory) {
-        const pkg = parseFloat(form.clientTotalPackage) || 0;
-        if (pkg > 0) {
-          if (movingAmount > pkg) {
+        if (formPkg > 0) {
+          if (movingAmount > formPkg) {
             return (
               <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
                 Receipt ({formatPKR(movingAmount)}) exceeds Total Package (
-                {formatPKR(pkg)}). Saving will be blocked.
+                {formatPKR(formPkg)}). Saving will be blocked.
               </p>
             );
           }
           return (
             <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-              New client - package {formatPKR(pkg)}, paying {formatPKR(movingAmount)},
-              remaining {formatPKR(Math.max(0, pkg - movingAmount))}
+              New client - package {formatPKR(formPkg)}, paying {formatPKR(movingAmount)},
+              remaining {formatPKR(Math.max(0, formPkg - movingAmount))}
             </p>
           );
         }
+      }
+      if (isHotelCategory && formHotel > 0) {
+        // No existing payable — the new booking is the entire ceiling
+        if (movingAmount > formHotel) {
+          return (
+            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+              Payment ({formatPKR(movingAmount)}) exceeds new booking cost (
+              {formatPKR(formHotel)}). Saving will be blocked.
+            </p>
+          );
+        }
+        return (
+          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+            New hotel booking - cost {formatPKR(formHotel)}, paying{" "}
+            {formatPKR(movingAmount)}, remaining{" "}
+            {formatPKR(Math.max(0, formHotel - movingAmount))}
+          </p>
+        );
       }
       return (
         <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
           No existing record for this party in this month - will be treated as new.
         </p>
       );
-    }
-
-    // Live limit: prefer form Total Package / Agreed Cost when the user raised it
-    const formPkg = parseFloat(form.clientTotalPackage) || 0;
-    const formHotel = parseFloat(form.hotelAgreedCost) || 0;
-    let effectiveLimit: number | null = outstanding.value;
-
-    if (isClientCategory) {
-      const paid = outstanding.amountReceived ?? 0;
-      const serverTotal = outstanding.totalPackage ?? 0;
-      const total = formPkg > 0 ? formPkg : serverTotal;
-      if (total > 0 || formPkg > 0) {
-        effectiveLimit = Math.max(0, total - paid);
-      }
-    } else if (isHotelCategory) {
-      const paid = outstanding.amountPaid ?? 0;
-      const serverTotal = outstanding.totalAmount ?? 0;
-      // A NEW booking on top of the existing balance raises the amount owed.
-      // effectiveLimit = serverRemaining + (new booking cost, if any)
-      const serverRemaining = Math.max(0, serverTotal - paid);
-      const newTranche = formHotel > 0 ? formHotel : 0;
-      effectiveLimit = serverRemaining + newTranche;
     }
 
     if (effectiveLimit == null) return null;
@@ -754,6 +780,12 @@ export function TransactionManager({
               .
             </span>
           ) : null}
+          {isHotelCategory && formHotel > 0 ? (
+            <span className="block mt-1 text-slate-600">
+              Ceiling = existing remaining {formatPKR(serverRemaining)} + new
+              booking cost {formatPKR(formHotel)}.
+            </span>
+          ) : null}
         </p>
       );
     }
@@ -769,6 +801,14 @@ export function TransactionManager({
             Package {formatPKR(formPkg)}
             {outstanding.amountReceived != null
               ? `  ·  received so far ${formatPKR(outstanding.amountReceived)}`
+              : ""}
+          </span>
+        ) : null}
+        {isHotelCategory && formHotel > 0 ? (
+          <span className="block text-slate-600">
+            Including new booking cost {formatPKR(formHotel)}
+            {outstanding.amountPaid != null
+              ? `  ·  already paid ${formatPKR(outstanding.amountPaid)}`
               : ""}
           </span>
         ) : null}
@@ -1009,9 +1049,10 @@ export function TransactionManager({
                   onChange={(v) => setForm((f) => ({ ...f, hotelAgreedCost: v }))}
                 />
                 <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
-                  Total agreed amount with the hotel. Credit = amount paid now.
-                  Enter the full booking cost here so the hotel&apos;s remaining
-                  payable is calculated correctly.
+                  Total agreed amount with the hotel for THIS booking. Credit = amount paid now.
+                  Enter the full booking cost here so the hotel&apos;s running payable
+                  is raised by the new booking before your payment is applied.
+                  Leave blank to just pay down the existing balance.
                 </p>
               </>
             )}
