@@ -103,6 +103,7 @@ const empty = {
   clientTotalPackage: "",
   clientAmountPaid: "",
   hotelAgreedCost: "",
+  transportAgreedCost: "",
   clientPhone: "",
   clientContact: "",
   clientEmail: "",
@@ -130,6 +131,7 @@ export function TransactionManager({
 
   const isClientCategory = INBOUND_CATEGORIES.includes(form.category);
   const isHotelCategory = form.category === "Hotel Payment";
+  const isTransportCategory = form.category === "Transport Payment";
   const isRefundCategory = form.category === "Refund to Client";
   const isEmployeeLoan =
     form.category === "Employee Loan" ||
@@ -374,10 +376,10 @@ export function TransactionManager({
     if (!isBankTransfer && isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
       const ok = confirm(
         ` Wrong direction\n\n` +
-        `"${form.category}" is a payment OUT of the company, so the amount ` +
-        `belongs in the Credit column, not Debit.\n\n` +
-        `You entered ${formatPKR(debitAmount)} in Debit.\n\n` +
-        `Click OK to move it to Credit automatically, or Cancel to fix it yourself.`
+          `"${form.category}" is a payment OUT of the company, so the amount ` +
+          `belongs in the Credit column, not Debit.\n\n` +
+          `You entered ${formatPKR(debitAmount)} in Debit.\n\n` +
+          `Click OK to move it to Credit automatically, or Cancel to fix it yourself.`
       );
       if (!ok) return;
       setForm((f) => ({ ...f, credit: String(debitAmount), debit: "" }));
@@ -387,10 +389,10 @@ export function TransactionManager({
     if (isClientCategory && creditAmount > 0 && debitAmount === 0) {
       const ok = confirm(
         ` Wrong direction\n\n` +
-        `"${form.category}" is money IN from a client, so the amount ` +
-        `belongs in the Debit column, not Credit.\n\n` +
-        `You entered ${formatPKR(creditAmount)} in Credit.\n\n` +
-        `Click OK to move it to Debit automatically, or Cancel to fix it yourself.`
+          `"${form.category}" is money IN from a client, so the amount ` +
+          `belongs in the Debit column, not Credit.\n\n` +
+          `You entered ${formatPKR(creditAmount)} in Credit.\n\n` +
+          `Click OK to move it to Debit automatically, or Cancel to fix it yourself.`
       );
       if (!ok) return;
       setForm((f) => ({ ...f, debit: String(creditAmount), credit: "" }));
@@ -449,8 +451,14 @@ export function TransactionManager({
             const serverTotal =
               typeof data.totalAmount === "number" ? data.totalAmount : 0;
             const serverRemaining = Math.max(0, serverTotal - paid);
-            // A new booking cost raises the ceiling:
-            //   ceiling = existing remaining + new booking agreed cost
+            liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
+          } else if (isTransportCategory) {
+            const formCost = parseFloat(form.transportAgreedCost) || 0;
+            const paid =
+              typeof data.amountPaid === "number" ? data.amountPaid : 0;
+            const serverTotal =
+              typeof data.totalAmount === "number" ? data.totalAmount : 0;
+            const serverRemaining = Math.max(0, serverTotal - paid);
             liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
           }
         }
@@ -472,6 +480,12 @@ export function TransactionManager({
           const serverTotal = outstanding?.totalAmount ?? 0;
           const serverRemaining = Math.max(0, serverTotal - paid);
           liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
+        } else if (liveOutstanding != null && isTransportCategory) {
+          const formCost = parseFloat(form.transportAgreedCost) || 0;
+          const paid = outstanding?.amountPaid ?? 0;
+          const serverTotal = outstanding?.totalAmount ?? 0;
+          const serverRemaining = Math.max(0, serverTotal - paid);
+          liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
         }
       }
 
@@ -479,10 +493,10 @@ export function TransactionManager({
         if (movingAmount > clientRefundable) {
           alert(
             ` Cannot refund more than the client paid us\n\n` +
-            `Client: ${party}\n` +
-            `Refundable: ${formatPKR(clientRefundable)}\n` +
-            `You entered: ${formatPKR(movingAmount)}\n` +
-            `Excess: ${formatPKR(movingAmount - clientRefundable)}`
+              `Client: ${party}\n` +
+              `Refundable: ${formatPKR(clientRefundable)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(movingAmount - clientRefundable)}`
           );
           return;
         }
@@ -495,29 +509,29 @@ export function TransactionManager({
         if (isClientReceipt) {
           alert(
             ` Cannot add transaction - amount exceeds what the client owes\n\n` +
-            `Client: ${party}\n` +
-            `Client owes (remaining): ${formatPKR(liveOutstanding)}\n` +
-            `You entered: ${formatPKR(movingAmount)}\n` +
-            `Excess: ${formatPKR(over)}\n\n` +
-            `Reduce the amount to ${formatPKR(liveOutstanding)} or less, ` +
-            `or increase the client's Total Package on the Receivables page first.`
+              `Client: ${party}\n` +
+              `Client owes (remaining): ${formatPKR(liveOutstanding)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(over)}\n\n` +
+              `Reduce the amount to ${formatPKR(liveOutstanding)} or less, ` +
+              `or increase the client's Total Package on the Receivables page first.`
           );
         } else if (isRefundCategory) {
           alert(
             ` Cannot refund more than the client paid us\n\n` +
-            `Client: ${party}\n` +
-            `Refundable (paid - already refunded): ${formatPKR(liveOutstanding)}\n` +
-            `You entered: ${formatPKR(movingAmount)}\n` +
-            `Excess: ${formatPKR(over)}`
+              `Client: ${party}\n` +
+              `Refundable (paid - already refunded): ${formatPKR(liveOutstanding)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(over)}`
           );
         } else {
           alert(
             ` Cannot add transaction - amount exceeds what we owe\n\n` +
-            `Party: ${party} (${form.category})\n` +
-            `Net payable (remaining): ${formatPKR(liveOutstanding)}\n` +
-            `You entered: ${formatPKR(movingAmount)}\n` +
-            `Excess: ${formatPKR(over)}\n\n` +
-            `Reduce the amount to ${formatPKR(liveOutstanding)} or less.`
+              `Party: ${party} (${form.category})\n` +
+              `Net payable (remaining): ${formatPKR(liveOutstanding)}\n` +
+              `You entered: ${formatPKR(movingAmount)}\n` +
+              `Excess: ${formatPKR(over)}\n\n` +
+              `Reduce the amount to ${formatPKR(liveOutstanding)} or less.`
           );
         }
         return;
@@ -526,11 +540,11 @@ export function TransactionManager({
       if (!treatAsNew && liveExists && liveReason === "no-name-match") {
         const ok = confirm(
           ` Warning\n\n` +
-          `No exact match found for "${party}" in ${form.category} for this month, ` +
-          `but similar records exist.\n\n` +
-          `You are about to save ${formatPKR(movingAmount)}.\n\n` +
-          `Click OK to proceed anyway, or Cancel to go back and pick the ` +
-          `party from the dropdown.`
+            `No exact match found for "${party}" in ${form.category} for this month, ` +
+            `but similar records exist.\n\n` +
+            `You are about to save ${formatPKR(movingAmount)}.\n\n` +
+            `Click OK to proceed anyway, or Cancel to go back and pick the ` +
+            `party from the dropdown.`
         );
         if (!ok) return;
       }
@@ -562,6 +576,7 @@ export function TransactionManager({
         clientTotalPackage: parseFloat(form.clientTotalPackage) || 0,
         clientAmountPaid: parseFloat(form.clientAmountPaid) || 0,
         hotelAgreedCost: parseFloat(form.hotelAgreedCost) || 0,
+        transportAgreedCost: parseFloat(form.transportAgreedCost) || 0,
         clientPhone: form.clientPhone || null,
         clientContact: form.clientContact || null,
         clientEmail: form.clientEmail || null,
@@ -627,6 +642,7 @@ export function TransactionManager({
     // Compute the effective ceiling ONCE here so it's visible everywhere below.
     const formPkg = parseFloat(form.clientTotalPackage) || 0;
     const formHotel = parseFloat(form.hotelAgreedCost) || 0;
+    const formTransport = parseFloat(form.transportAgreedCost) || 0;
 
     let effectiveLimit: number | null = outstanding ? outstanding.value : null;
     let serverRemaining = 0;
@@ -645,6 +661,12 @@ export function TransactionManager({
         serverRemaining = Math.max(0, serverTotal - paid);
         // A new booking raises the ceiling by its agreed cost.
         effectiveLimit = serverRemaining + (formHotel > 0 ? formHotel : 0);
+      } else if (isTransportCategory) {
+        const paid = outstanding.amountPaid ?? 0;
+        const serverTotal = outstanding.totalAmount ?? 0;
+        serverRemaining = Math.max(0, serverTotal - paid);
+        // A new job raises the ceiling by its agreed cost.
+        effectiveLimit = serverRemaining + (formTransport > 0 ? formTransport : 0);
       }
     }
 
@@ -756,6 +778,24 @@ export function TransactionManager({
           </p>
         );
       }
+      if (isTransportCategory && formTransport > 0) {
+        // No existing payable — the new job is the entire ceiling
+        if (movingAmount > formTransport) {
+          return (
+            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+              Payment ({formatPKR(movingAmount)}) exceeds new job cost (
+              {formatPKR(formTransport)}). Saving will be blocked.
+            </p>
+          );
+        }
+        return (
+          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
+            New transport job - cost {formatPKR(formTransport)}, paying{" "}
+            {formatPKR(movingAmount)}, remaining{" "}
+            {formatPKR(Math.max(0, formTransport - movingAmount))}
+          </p>
+        );
+      }
       return (
         <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
           No existing record for this party in this month - will be treated as new.
@@ -786,6 +826,12 @@ export function TransactionManager({
               booking cost {formatPKR(formHotel)}.
             </span>
           ) : null}
+          {isTransportCategory && formTransport > 0 ? (
+            <span className="block mt-1 text-slate-600">
+              Ceiling = existing remaining {formatPKR(serverRemaining)} + new
+              job cost {formatPKR(formTransport)}.
+            </span>
+          ) : null}
         </p>
       );
     }
@@ -807,6 +853,14 @@ export function TransactionManager({
         {isHotelCategory && formHotel > 0 ? (
           <span className="block text-slate-600">
             Including new booking cost {formatPKR(formHotel)}
+            {outstanding.amountPaid != null
+              ? `  ·  already paid ${formatPKR(outstanding.amountPaid)}`
+              : ""}
+          </span>
+        ) : null}
+        {isTransportCategory && formTransport > 0 ? (
+          <span className="block text-slate-600">
+            Including new job cost {formatPKR(formTransport)}
             {outstanding.amountPaid != null
               ? `  ·  already paid ${formatPKR(outstanding.amountPaid)}`
               : ""}
@@ -1052,6 +1106,25 @@ export function TransactionManager({
                   Total agreed amount with the hotel for THIS booking. Credit = amount paid now.
                   Enter the full booking cost here so the hotel&apos;s running payable
                   is raised by the new booking before your payment is applied.
+                  Leave blank to just pay down the existing balance.
+                </p>
+              </>
+            )}
+
+            {isTransportCategory && (
+              <>
+                <Field
+                  label="Transport Agreed / Job Cost (PKR)"
+                  type="number"
+                  value={form.transportAgreedCost}
+                  onChange={(v) =>
+                    setForm((f) => ({ ...f, transportAgreedCost: v }))
+                  }
+                />
+                <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
+                  Total agreed amount with the driver/transporter for THIS job. Credit = amount paid now.
+                  Enter the full job cost here so the driver&apos;s running payable
+                  is raised by the new job before your payment is applied.
                   Leave blank to just pay down the existing balance.
                 </p>
               </>

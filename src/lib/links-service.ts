@@ -6,13 +6,14 @@
  * Overpayments are blocked upstream (in TransactionForm + the API) before they
  * reach these functions. The caps here are a defensive backstop.
  *
- * HOTEL SPECIAL CASE:
- *   A Hotel Payment may be for a BRAND NEW booking (a fresh tranche of debt),
- *   not just a payment against the existing outstanding balance.
- *   When the transaction supplies a `hotelAgreedCost`, we add it to the
+ * HOTEL + TRANSPORT SPECIAL CASE:
+ *   A Hotel or Transport payment may be for a BRAND NEW booking/job
+ *   (a fresh tranche of debt), not just a payment against the existing
+ *   outstanding balance.
+ *   When the transaction supplies an `agreedCost`, we add it to the
  *   payable's `originalAmount` (the bill) BEFORE applying the payment.
- *   This lets you keep paying the same hotel across multiple bookings without
- *   ever being blocked by "Limit is Rs 0".
+ *   This lets you keep paying the same hotel/driver across multiple
+ *   bookings/jobs without ever being blocked by "Limit is Rs 0".
  */
 import { prisma } from "./prisma";
 
@@ -157,7 +158,13 @@ export async function ensurePayableForHotel(
   return payable.id;
 }
 
-/** Ensure a Payable exists for a TransportJob. Returns payable id. */
+/**
+ * Ensure a Payable exists for a TransportJob. Returns payable id.
+ *
+ * IMPORTANT: This function NEVER overwrites `originalAmount` on an existing
+ * payable. Raising the bill for a NEW job is handled by applyTransportPayment,
+ * which knows whether the call is creating a new tranche or not.
+ */
 export async function ensurePayableForTransport(
   jobId: string
 ): Promise<string | null> {
@@ -729,10 +736,16 @@ export async function findOrCreateHotelPayable(
   return payable.id;
 }
 
+/**
+ * Find or create a Payable + TransportJob pair by driver name.
+ *
+ * IMPORTANT: NEVER overwrites `originalAmount` on an existing payable.
+ * The applyTransportPayment function handles raising the bill for a new job.
+ */
 export async function findOrCreateTransportPayable(
   periodId: string,
   driverName: string,
-  opts?: { description?: string; tripRef?: string }
+  opts?: { description?: string; tripRef?: string; agreedCost?: number }
 ): Promise<string> {
   let payable = await prisma.payable.findFirst({
     where: {
@@ -744,6 +757,8 @@ export async function findOrCreateTransportPayable(
   });
 
   if (payable) {
+    // Only ensure a TransportJob is linked. Do NOT touch originalAmount —
+    // applyTransportPayment handles the "new tranche" logic.
     const existing = await prisma.transportJob.findFirst({
       where: { payableId: payable.id },
     });
@@ -760,15 +775,20 @@ export async function findOrCreateTransportPayable(
     return payable.id;
   }
 
+  // Create both. If an agreed cost was supplied on the very first
+  // transaction for this driver, seed originalAmount with it.
+  const initialOriginal =
+    opts?.agreedCost && opts.agreedCost > 0 ? opts.agreedCost : 0;
+
   payable = await prisma.payable.create({
     data: {
       periodId,
       supplierName: driverName,
       category: "Transport",
       description: opts?.description ?? "Transport job (auto-created)",
-      originalAmount: 0,
+      originalAmount: initialOriginal,
       amountPaid: 0,
-      remaining: 0,
+      remaining: initialOriginal,
       relatedTrip: opts?.tripRef ?? null,
       status: "Open",
       notes: "Auto-created from transaction",
@@ -912,18 +932,93 @@ export async function applyHotelPayment(
   ];
 }
 
+/**
+ * Apply a transport payment.
+ *
+ * A Transport Payment transaction may represent a BRAND NEW job (a fresh
+ * tranche of debt) OR a payment against the existing outstanding balance.
+ *
+ *   agreedCost > 0  →  treat as a new tranche:
+ *                        originalAmount += agreedCost
+ *                        then apply `amount` as payment (capped at new remaining)
+ *   agreedCost = 0  →  pure payment against existing outstanding:
+ *                        apply `amount` (capped at existing remaining)
+ *
+ * This lets you have multiple jobs with the same driver over time without
+ * the "Limit is Rs 0" block on the second job.
+ *
+ * Special case: if the payable does NOT yet exist, findOrCreateTransportPayable
+ * seeds originalAmount = agreedCost, so we must NOT add it again.
+ */
 export async function applyTransportPayment(
   periodId: string,
   driverName: string,
   amount: number,
-  opts?: { description?: string; tripRef?: string }
+  opts?: { description?: string; tripRef?: string; agreedCost?: number }
 ): Promise<AppliedLink[]> {
-  if (!driverName || amount <= 0) return [];
+  if (!driverName) return [];
+
+  const agreedCost = Number(opts?.agreedCost) || 0;
+  const payment = Number(amount) || 0;
+
+  // Nothing to do if neither a payment nor a new job cost is supplied.
+  if (payment <= 0 && agreedCost <= 0) return [];
+
+  // Was there already a payable for this driver BEFORE we ran findOrCreate?
+  // If yes, a supplied agreedCost = NEW job → raise the bill.
+  // If no, findOrCreate will seed the bill with agreedCost for us.
+  const existingBefore = await prisma.payable.findFirst({
+    where: {
+      periodId,
+      category: "Transport",
+      supplierName: { equals: driverName },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
   const payableId = await findOrCreateTransportPayable(periodId, driverName, opts);
-  const applied = await applyToPayable(periodId, payableId, amount);
-  return applied > 0
-    ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
-    : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
+  if (!payableId) return [];
+
+  const p = await prisma.payable.findUnique({ where: { id: payableId } });
+  if (!p) return [];
+
+  // 1. If a new job cost is given AND the payable already existed,
+  //    raise the original (the driver's running bill) by that amount.
+  let newOriginal = p.originalAmount;
+  if (agreedCost > 0 && existingBefore) {
+    newOriginal = p.originalAmount + agreedCost;
+  }
+
+  // 2. Apply the payment, capped at (newOriginal - amountPaid).
+  const outstanding = Math.max(0, newOriginal - p.amountPaid);
+  const applied = Math.min(Math.max(0, payment), outstanding);
+  const newPaid = p.amountPaid + applied;
+  const newRemaining = Math.max(0, newOriginal - newPaid);
+
+  await prisma.payable.update({
+    where: { id: p.id },
+    data: {
+      originalAmount: newOriginal,
+      amountPaid: newPaid,
+      remaining: newRemaining,
+      status:
+        newRemaining <= 0 && newPaid > 0
+          ? "Paid"
+          : newPaid > 0
+            ? "Partial"
+            : "Open",
+    },
+  });
+
+  await propagatePayableToOperational(p.id);
+
+  return [
+    {
+      entityType: "payable",
+      entityId: payableId,
+      appliedAmount: applied,
+    },
+  ];
 }
 
 export async function applyGenericPayablePayment(

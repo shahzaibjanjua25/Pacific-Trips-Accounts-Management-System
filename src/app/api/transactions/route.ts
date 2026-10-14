@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
     ) {
       const outstanding = await lookupOutstanding(body.periodId, cat, party, {
         hotelAgreedCost: Number(body.hotelAgreedCost) || 0,
+        transportAgreedCost: Number(body.transportAgreedCost) || 0,
       });
       if (outstanding != null && amountMoving > outstanding) {
         return NextResponse.json(
@@ -89,6 +90,7 @@ export async function POST(req: NextRequest) {
       clientTotalPackage: Number(body.clientTotalPackage) || 0,
       clientAmountPaid: Number(body.clientAmountPaid) || 0,
       hotelAgreedCost: Number(body.hotelAgreedCost) || 0,
+      transportAgreedCost: Number(body.transportAgreedCost) || 0,
       clientPhone: body.clientPhone || null,
       clientContact: body.clientContact || null,
       clientEmail: body.clientEmail || null,
@@ -139,7 +141,10 @@ export async function PUT(req: NextRequest) {
           existing.periodId,
           cat,
           party,
-          { hotelAgreedCost: Number(body.hotelAgreedCost) || 0 }
+          {
+            hotelAgreedCost: Number(body.hotelAgreedCost) || 0,
+            transportAgreedCost: Number(body.transportAgreedCost) || 0,
+          }
         );
         if (outstanding != null && amountMoving > outstanding) {
           return NextResponse.json(
@@ -170,6 +175,10 @@ export async function PUT(req: NextRequest) {
       notes: body.notes,
       hotelAgreedCost:
         body.hotelAgreedCost != null ? Number(body.hotelAgreedCost) : undefined,
+      transportAgreedCost:
+        body.transportAgreedCost != null
+          ? Number(body.transportAgreedCost)
+          : undefined,
       salesperson: body.salesperson || null,
     });
     return NextResponse.json(txn);
@@ -195,7 +204,7 @@ async function lookupOutstanding(
   periodId: string,
   category: string,
   party: string,
-  opts?: { hotelAgreedCost?: number }
+  opts?: { hotelAgreedCost?: number; transportAgreedCost?: number }
 ): Promise<number | null> {
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -264,7 +273,13 @@ async function lookupOutstanding(
       where: { periodId, category: { contains: "Transport" } },
     });
     const p = find(rows, "supplierName");
-    return p ? p.remaining : null;
+    const newJob = Number(opts?.transportAgreedCost) || 0;
+    if (p) {
+      // A new job cost raises the ceiling — you're allowed to pay it.
+      return p.remaining + newJob;
+    }
+    // No existing payable — new job's cost is the ceiling.
+    return newJob > 0 ? newJob : null;
   }
 
   if (category.includes("ticketing")) {
