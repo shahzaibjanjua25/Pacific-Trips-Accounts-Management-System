@@ -39,6 +39,7 @@ export type TxnInput = {
   clientTotalPackage?: number;
   clientAmountPaid?: number;
   hotelAgreedCost?: number;
+  transportAgreedCost?: number;
   clientPhone?: string | null;
   clientContact?: string | null;
   clientEmail?: string | null;
@@ -326,6 +327,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     return applyTransportPayment(periodId, party, signedPayAmount, {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
+      agreedCost: input.transportAgreedCost,
     });
   }
 
@@ -1124,6 +1126,7 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
       debit: updated.debit,
       credit: updated.credit,
       hotelAgreedCost: input.hotelAgreedCost,
+      transportAgreedCost: input.transportAgreedCost,
     });
 
   for (const link of newLinks) {
