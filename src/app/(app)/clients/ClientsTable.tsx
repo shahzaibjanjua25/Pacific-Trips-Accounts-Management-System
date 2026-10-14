@@ -20,6 +20,39 @@ type Row = {
   status: string;
   tripInfo: string;
   salesperson: string | null;
+  // Receivable-side fields (nullable if client has no receivable yet)
+  bookingDate: string | null;
+  dueDate: string | null;
+  tripStart: string | null;
+  tripDates: string | null;
+  destination: string | null;
+  discounts: number;
+  additionalCharges: number;
+  finalSettlement: number | null;
+  receivableNotes: string | null;
+};
+
+const emptyForm = {
+  // Client master
+  name: "",
+  phone: "",
+  contact: "",
+  email: "",
+  notes: "",
+  // Receivable
+  totalPackage: "",
+  amountPaid: "",
+  salesperson: "",
+  bookingDate: "",
+  dueDate: "",
+  tripStart: "",
+  tripDates: "",
+  destination: "",
+  discounts: "",
+  additionalCharges: "",
+  finalSettlement: "",
+  status: "Open",
+  receivableNotes: "",
 };
 
 export function ClientsTable({
@@ -33,30 +66,12 @@ export function ClientsTable({
   const [editing, setEditing] = useState<Row | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    phone: "",
-    contact: "",
-    email: "",
-    notes: "",
-    totalPackage: "",
-    amountPaid: "",
-    salesperson: "",
-  });
+  const [form, setForm] = useState(emptyForm);
 
   function openAdd() {
     setEditing(null);
     setAdding(true);
-    setForm({
-      name: "",
-      phone: "",
-      contact: "",
-      email: "",
-      notes: "",
-      totalPackage: "",
-      amountPaid: "",
-      salesperson: "",
-    });
+    setForm({ ...emptyForm });
   }
 
   function openEdit(r: Row) {
@@ -71,7 +86,23 @@ export function ClientsTable({
       totalPackage: String(r.totalPackage || 0),
       amountPaid: String(r.amountPaid || 0),
       salesperson: r.salesperson || "",
+      bookingDate: r.bookingDate ? r.bookingDate.slice(0, 10) : "",
+      dueDate: r.dueDate ? r.dueDate.slice(0, 10) : "",
+      tripStart: r.tripStart ? r.tripStart.slice(0, 10) : "",
+      tripDates: r.tripDates || "",
+      destination: r.destination || "",
+      discounts: String(r.discounts || 0),
+      additionalCharges: String(r.additionalCharges || 0),
+      finalSettlement:
+        r.finalSettlement != null ? String(r.finalSettlement) : "",
+      status: r.status || "Open",
+      receivableNotes: r.receivableNotes || "",
     });
+  }
+
+  function closeForm() {
+    setEditing(null);
+    setAdding(false);
   }
 
   async function save(e: React.FormEvent) {
@@ -79,21 +110,36 @@ export function ClientsTable({
     if (!editing && !adding) return;
     setLoading(true);
     try {
+      // Common payload for both Client master and Receivable fields
+      const common = {
+        name: form.name,
+        phone: form.phone || null,
+        contact: form.contact || null,
+        email: form.email || null,
+        notes: form.notes || null,
+        totalPackage: parseFloat(form.totalPackage) || 0,
+        amountPaid: parseFloat(form.amountPaid) || 0,
+        salesperson: form.salesperson || null,
+        bookingDate: form.bookingDate || null,
+        dueDate: form.dueDate || null,
+        tripStart: form.tripStart || null,
+        tripDates: form.tripDates || null,
+        destination: form.destination || null,
+        discounts: parseFloat(form.discounts) || 0,
+        additionalCharges: parseFloat(form.additionalCharges) || 0,
+        finalSettlement:
+          form.finalSettlement === ""
+            ? null
+            : parseFloat(form.finalSettlement) || 0,
+        status: form.status || "Open",
+        receivableNotes: form.receivableNotes || null,
+      };
+
       if (adding) {
         const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: form.name,
-            phone: form.phone || null,
-            contact: form.contact || null,
-            email: form.email || null,
-            notes: form.notes || null,
-            totalPackage: parseFloat(form.totalPackage) || 0,
-            amountPaid: parseFloat(form.amountPaid) || 0,
-            salesperson: form.salesperson || null,
-            periodId,
-          }),
+          body: JSON.stringify({ ...common, periodId }),
         });
         if (!res.ok) {
           const text = await res.text();
@@ -104,17 +150,7 @@ export function ClientsTable({
         const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: editing.id,
-            name: form.name,
-            phone: form.phone || null,
-            contact: form.contact || null,
-            email: form.email || null,
-            notes: form.notes || null,
-            totalPackage: parseFloat(form.totalPackage) || 0,
-            amountPaid: parseFloat(form.amountPaid) || 0,
-            salesperson: form.salesperson || null,
-          }),
+          body: JSON.stringify({ id: editing.id, ...common }),
         });
         if (!res.ok) {
           const text = await res.text();
@@ -132,10 +168,13 @@ export function ClientsTable({
   }
 
   async function remove(id: string) {
-    if (!confirm("Delete this client and all its ledger/receivable records?")) return;
+    if (!confirm("Delete this client and all its ledger/receivable records?"))
+      return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/clients/manage?id=${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/clients/manage?id=${id}`, {
+        method: "DELETE",
+      });
       if (!res.ok) throw new Error(await res.text());
       router.refresh();
     } catch (err) {
@@ -150,89 +189,194 @@ export function ClientsTable({
       {(editing || adding) && (
         <form
           onSubmit={save}
-          className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3"
+          className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-4"
         >
           <div className="flex justify-between items-center">
             <h3 className="font-semibold text-slate-800">
               {adding ? "Add Client" : `Edit Client: ${editing?.name}`}
             </h3>
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(null);
-                setAdding(false);
-              }}
-            >
+            <button type="button" onClick={closeForm}>
               <X size={18} />
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <Input
-              label="Name"
-              value={form.name}
-              onChange={(v) => setForm({ ...form, name: v })}
-              required
-            />
-            <Input
-              label="Phone"
-              value={form.phone}
-              onChange={(v) => setForm({ ...form, phone: v })}
-            />
-            <Input
-              label="Contact / Ref"
-              value={form.contact}
-              onChange={(v) => setForm({ ...form, contact: v })}
-            />
-            <Input
-              label="Email"
-              value={form.email}
-              onChange={(v) => setForm({ ...form, email: v })}
-            />
-            <Input
-              label="Total Package (PKR)"
-              type="number"
-              value={form.totalPackage}
-              onChange={(v) => setForm({ ...form, totalPackage: v })}
-            />
-            <Input
-              label="Amount Paid (PKR)"
-              type="number"
-              value={form.amountPaid}
-              onChange={(v) => setForm({ ...form, amountPaid: v })}
-            />
-            <label className="block text-xs">
-              <span className="text-slate-600 font-medium">
-                Salesperson (who brought this client)
-              </span>
-              <div className="mt-1">
-                <LookupSelect
-                  lookupKey="salesEmployees"
-                  periodId={periodId}
-                  value={form.salesperson}
-                  onChange={(v) => setForm({ ...form, salesperson: v })}
+
+          {/* ─── Client master ─── */}
+          <section className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Client Details
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <Input
+                label="Name"
+                value={form.name}
+                onChange={(v) => setForm({ ...form, name: v })}
+                required
+              />
+              <Input
+                label="Phone"
+                value={form.phone}
+                onChange={(v) => setForm({ ...form, phone: v })}
+              />
+              <Input
+                label="Contact / Ref"
+                value={form.contact}
+                onChange={(v) => setForm({ ...form, contact: v })}
+              />
+              <Input
+                label="Email"
+                value={form.email}
+                onChange={(v) => setForm({ ...form, email: v })}
+              />
+              <div className="col-span-2 md:col-span-3">
+                <Input
+                  label="Client Notes"
+                  value={form.notes}
+                  onChange={(v) => setForm({ ...form, notes: v })}
                 />
               </div>
-            </label>
-            <div className="col-span-2 md:col-span-3">
-              <Input
-                label="Notes"
-                value={form.notes}
-                onChange={(v) => setForm({ ...form, notes: v })}
-              />
             </div>
-          </div>
+          </section>
+
+          {/* ─── Sale / package ─── */}
+          <section className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Package & Payment
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <Input
+                label="Total Package (PKR)"
+                type="number"
+                value={form.totalPackage}
+                onChange={(v) => setForm({ ...form, totalPackage: v })}
+              />
+              <Input
+                label="Amount Paid (PKR)"
+                type="number"
+                value={form.amountPaid}
+                onChange={(v) => setForm({ ...form, amountPaid: v })}
+              />
+              <label className="block text-xs">
+                <span className="text-slate-600 font-medium">
+                  Salesperson (who brought this client)
+                </span>
+                <div className="mt-1">
+                  <LookupSelect
+                    lookupKey="salesEmployees"
+                    periodId={periodId}
+                    value={form.salesperson}
+                    onChange={(v) => setForm({ ...form, salesperson: v })}
+                  />
+                </div>
+              </label>
+            </div>
+          </section>
+
+          {/* ─── Trip info ─── */}
+          <section className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Trip Information
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <Input
+                label="Booking Date"
+                type="date"
+                value={form.bookingDate}
+                onChange={(v) => setForm({ ...form, bookingDate: v })}
+              />
+              <Input
+                label="Trip Start"
+                type="date"
+                value={form.tripStart}
+                onChange={(v) => setForm({ ...form, tripStart: v })}
+              />
+              <Input
+                label="Due Date"
+                type="date"
+                value={form.dueDate}
+                onChange={(v) => setForm({ ...form, dueDate: v })}
+              />
+              <Input
+                label="Trip Dates (free text)"
+                value={form.tripDates}
+                onChange={(v) => setForm({ ...form, tripDates: v })}
+              />
+              <Input
+                label="Destination"
+                value={form.destination}
+                onChange={(v) => setForm({ ...form, destination: v })}
+              />
+              <label className="block text-xs">
+                <span className="text-slate-600 font-medium">Status</span>
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="Open">Open</option>
+                  <option value="Partial">Partial</option>
+                  <option value="Settled">Settled</option>
+                  <option value="Overdue">Overdue</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          {/* ─── Adjustments ─── */}
+          <section className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Adjustments
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <Input
+                label="Discounts (PKR)"
+                type="number"
+                value={form.discounts}
+                onChange={(v) => setForm({ ...form, discounts: v })}
+              />
+              <Input
+                label="Additional Charges (PKR)"
+                type="number"
+                value={form.additionalCharges}
+                onChange={(v) => setForm({ ...form, additionalCharges: v })}
+              />
+              <Input
+                label="Final Settlement (PKR)"
+                type="number"
+                value={form.finalSettlement}
+                onChange={(v) => setForm({ ...form, finalSettlement: v })}
+              />
+              <div className="col-span-2 md:col-span-3">
+                <Input
+                  label="Receivable Notes"
+                  value={form.receivableNotes}
+                  onChange={(v) => setForm({ ...form, receivableNotes: v })}
+                />
+              </div>
+            </div>
+          </section>
+
           <p className="text-xs text-slate-600">
-            Selecting a salesperson with a Total Package records the sale
-            in the Sales Team page and adds 2.5% commission (or the Team
-            Lead tiered rate).
+            Selecting a salesperson with a Total Package records the sale in
+            the Sales Team page and adds commission (2.5%, or the Team Lead
+            tiered rate).
           </p>
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
-          >
-            {loading ? "Saving…" : adding ? "Create Client" : "Update"}
-          </button>
+
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+            >
+              {loading ? "Saving…" : adding ? "Create Client" : "Update"}
+            </button>
+            <button
+              type="button"
+              onClick={closeForm}
+              className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-5 py-2 rounded-lg text-sm font-medium"
+            >
+              Cancel
+            </button>
+          </div>
         </form>
       )}
 
@@ -248,7 +392,8 @@ export function ClientsTable({
 
       {rows.length === 0 ? (
         <div className="bg-white rounded-xl border p-10 text-center text-slate-500 text-sm">
-          No clients yet. Click <strong>Add Client</strong> or post a Client Receipt in Transactions.
+          No clients yet. Click <strong>Add Client</strong> or post a Client
+          Receipt in Transactions.
         </div>
       ) : (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
@@ -282,7 +427,10 @@ export function ClientsTable({
                   const editable = !r.id.startsWith("recv-");
                   const href = `/clients/${r.id}?period=${periodId}`;
                   return (
-                    <tr key={r.id} className="border-b border-slate-100 hover:bg-emerald-50/40">
+                    <tr
+                      key={r.id}
+                      className="border-b border-slate-100 hover:bg-emerald-50/40"
+                    >
                       <td className="px-3 py-3 font-medium text-slate-900">
                         {editable ? (
                           <Link
@@ -323,7 +471,8 @@ export function ClientsTable({
                       <td className="px-3 py-3">
                         <span
                           className={`text-xs px-2 py-0.5 rounded-full ${
-                            r.status === "Settled" || r.status === "Completed"
+                            r.status === "Settled" ||
+                            r.status === "Completed"
                               ? "bg-emerald-100 text-emerald-800"
                               : r.status === "Partial"
                                 ? "bg-amber-100 text-amber-800"
