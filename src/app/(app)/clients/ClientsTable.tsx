@@ -20,6 +20,7 @@ type Row = {
   status: string;
   tripInfo: string;
   salesperson: string | null;
+  
   // NEW — which bank/cash account this client's payments went through
   bankAccount: string | null;
   // Receivable-side fields (nullable if client has no receivable yet)
