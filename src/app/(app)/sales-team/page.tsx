@@ -41,7 +41,7 @@ export default async function SalesTeamPage({
   const isTeamLead = (name: string) =>
     TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
 
-  // 3-tier lead pay: <70L = 55k flat, <target = 1.5%, >=target = 2.5%
+  // 3-tier lead pay: <70L = 55k flat, <target = 1.0%, >=target = 2.5%
   function leadPay(teamTotal: number, target: number) {
     if (teamTotal < 7_000_000) return { amount: 55_000, rate: 0 };
     if (teamTotal < target) return { amount: teamTotal * 0.015, rate: 1.5 };

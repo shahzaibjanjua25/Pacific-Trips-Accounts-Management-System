@@ -926,7 +926,7 @@ export function SalesTeamPanel({
               <br />
               - Team sales &lt; 70 lacs: flat 55,000 only
               <br />
-              - 70 lacs to below monthly target: 1.5% of team sales
+              - 70 lacs to below monthly target: 1.0% of team sales
               <br />
               - At or above monthly target: 2.5% of team sales
             </p>

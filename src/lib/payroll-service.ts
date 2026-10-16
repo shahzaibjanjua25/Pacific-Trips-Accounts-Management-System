@@ -3,7 +3,7 @@
  * - Each sales member: Basic 40,000 PKR + 2.5% commission on THEIR individual sales
  * - Team Lead "Ahmad/Amad/Ammar Amjad":
  *     team sales < 70 lacs              -> fixed 55,000 only
- *     70 lacs <= sales < monthly target -> 1.5% of team sales
+ *     70 lacs <= sales < monthly target -> 1.0% of team sales
  *     sales >= monthly target           -> 2.5% of team sales
  *   Monthly target is per period in SalesTarget (editable; default 1.2 crore).
  *
@@ -15,7 +15,7 @@ import { prisma } from "./prisma";
 import { syncPayrollForEmployee } from "./links-service";
 
 const COMMISSION_RATE = 0.025;
-const LEAD_MID_RATE = 0.015; // 1.5%
+const LEAD_MID_RATE = 0.010; // 1.0%
 const LEAD_FLOOR = 7_000_000; // 70 lacs
 const LEAD_MIN_SALARY = 55_000;
 const DEFAULT_LEAD_TARGET = 12_000_000; // 1.2 crore fallback
@@ -50,7 +50,7 @@ export function computeLeadPay(
       amount,
       ratePct: 1.5,
       note:
-        "Team Lead - 1.5% of team sales (70 lacs to target " +
+        "Team Lead - 1.0% of team sales (70 lacs to target " +
         target.toLocaleString() +
         ")",
     };
