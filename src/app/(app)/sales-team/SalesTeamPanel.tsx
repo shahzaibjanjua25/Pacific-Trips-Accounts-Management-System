@@ -63,7 +63,11 @@ async function readError(res: Response): Promise<string> {
   } catch {
     /* not JSON */
   }
-  return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+  return text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
 }
 
 export function SalesTeamPanel({
@@ -71,6 +75,7 @@ export function SalesTeamPanel({
   rows,
   totalTeamSales,
   monthlyTarget,
+  commissionBase,
   targetNotes,
   employees,
   salesEntries,
@@ -79,6 +84,7 @@ export function SalesTeamPanel({
   rows: Row[];
   totalTeamSales: number;
   monthlyTarget: number;
+  commissionBase: number;
   targetNotes: string;
   employees: Employee[];
   salesEntries: SaleEntry[];
@@ -99,6 +105,7 @@ export function SalesTeamPanel({
   // Target form
   const [targetForm, setTargetForm] = useState({
     targetAmount: String(monthlyTarget),
+    commissionBaseAmount: String(commissionBase),
     notes: targetNotes || "",
   });
   const [savingTarget, setSavingTarget] = useState(false);
@@ -217,7 +224,7 @@ export function SalesTeamPanel({
     }
   }
 
-  // â”€â”€ Row edit â”€â”€
+  // ── Row edit ──
   function openEditRow(r: Row) {
     setEditingRow(r);
     setRowForm({
@@ -306,6 +313,7 @@ export function SalesTeamPanel({
         body: JSON.stringify({
           periodId,
           targetAmount: parseFloat(targetForm.targetAmount) || 0,
+          commissionBaseAmount: parseFloat(targetForm.commissionBaseAmount) || 0,
           notes: targetForm.notes,
         }),
       });
@@ -380,6 +388,9 @@ export function SalesTeamPanel({
             <span className="bg-indigo-100 text-indigo-900 px-3 py-1.5 rounded-md">
               Target: <strong>{formatPKR(monthlyTarget)}</strong> &middot;{" "}
               <strong>{progressPct.toFixed(1)}%</strong>
+            </span>
+            <span className="bg-violet-100 text-violet-900 px-3 py-1.5 rounded-md">
+              Commission base: <strong>{formatPKR(commissionBase)}</strong>
             </span>
           </div>
 
@@ -473,11 +484,13 @@ export function SalesTeamPanel({
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                   >
                     <option value="">- Select employee -</option>
-                    {employees.filter((e) => !e.isLead).map((e) => (
-                  <option key={e.id} value={e.name}>
-                    {e.name}
-                  </option>
-                ))}
+                    {employees
+                      .filter((e) => !e.isLead)
+                      .map((e) => (
+                        <option key={e.id} value={e.name}>
+                          {e.name}
+                        </option>
+                      ))}
                   </select>
                 </label>
                 <label className="block text-xs">
@@ -569,7 +582,7 @@ export function SalesTeamPanel({
               <p className="text-xs text-slate-600">
                 Every column is editable. Leave Net Payable blank to
                 auto-calculate as Basic + Commission. Remaining is always
-                Net âˆ’ Paid.
+                Net minus Paid.
               </p>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -593,9 +606,7 @@ export function SalesTeamPanel({
                 <NumField
                   label="Basic Salary"
                   value={rowForm.basicSalary}
-                  onChange={(v) =>
-                    setRowForm({ ...rowForm, basicSalary: v })
-                  }
+                  onChange={(v) => setRowForm({ ...rowForm, basicSalary: v })}
                 />
                 <NumField
                   label="Individual Sales"
@@ -626,9 +637,7 @@ export function SalesTeamPanel({
                 <NumField
                   label="Net Payable (blank = auto)"
                   value={rowForm.netPayable}
-                  onChange={(v) =>
-                    setRowForm({ ...rowForm, netPayable: v })
-                  }
+                  onChange={(v) => setRowForm({ ...rowForm, netPayable: v })}
                 />
                 <NumField
                   label="Amount Paid"
@@ -785,9 +794,7 @@ export function SalesTeamPanel({
                         </td>
                         <td
                           className={`px-3 py-2 text-right tabular-nums font-medium ${
-                            r.remaining > 0
-                              ? "text-red-600"
-                              : "text-slate-500"
+                            r.remaining > 0 ? "text-red-600" : "text-slate-500"
                           }`}
                         >
                           {formatPKR(r.remaining)}
@@ -807,6 +814,7 @@ export function SalesTeamPanel({
                         </td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">
                           <button
+                            type="button"
                             onClick={() => openEditRow(r)}
                             className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
                             title="Edit full row"
@@ -814,6 +822,7 @@ export function SalesTeamPanel({
                             <Pencil size={15} />
                           </button>
                           <button
+                            type="button"
                             onClick={() => removeRow(r)}
                             className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
                             title="Delete commission + payroll row"
@@ -891,6 +900,7 @@ export function SalesTeamPanel({
                         </td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">
                           <button
+                            type="button"
                             onClick={() => openEditEntry(s)}
                             className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
                             title="Edit entry"
@@ -898,6 +908,7 @@ export function SalesTeamPanel({
                             <Pencil size={15} />
                           </button>
                           <button
+                            type="button"
                             onClick={() => removeEntry(s.id)}
                             className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
                             title="Delete entry"
@@ -922,50 +933,53 @@ export function SalesTeamPanel({
               Monthly Sales Team Target
             </h2>
             <p className="text-sm text-slate-500 mt-1">
-              The target drives the Team Lead commission tier:
-              <br />
-              - Team sales &lt; 70 lacs: flat 55,000 only
-              <br />
-              - 70 lacs to below monthly target: 1.0% of team sales
-              <br />
-              - At or above monthly target: 2.5% of team sales
+              The target and commission base drive the Team Lead tiered pay:
+              <br />- Team sales below <strong>Commission Base</strong>: flat
+              55,000 only
+              <br />- From Commission Base up to <strong>Monthly Target</strong>
+              : 1.0% of team sales
+              <br />- At or above Monthly Target: 2.5% of team sales
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-sky-50 rounded-lg p-3">
               <p className="text-xs text-slate-600">Current Team Sales</p>
-              <p className="text-xl font-bold">
-                {formatPKR(totalTeamSales)}
-              </p>
+              <p className="text-xl font-bold">{formatPKR(totalTeamSales)}</p>
+            </div>
+            <div className="bg-violet-50 rounded-lg p-3">
+              <p className="text-xs text-slate-600">Commission Base</p>
+              <p className="text-xl font-bold">{formatPKR(commissionBase)}</p>
             </div>
             <div className="bg-indigo-50 rounded-lg p-3">
-              <p className="text-xs text-slate-600">Target</p>
+              <p className="text-xs text-slate-600">Monthly Target</p>
               <p className="text-xl font-bold">{formatPKR(monthlyTarget)}</p>
             </div>
-            <div className="bg-emerald-50 rounded-lg p-3">
-              <p className="text-xs text-slate-600">Progress</p>
-              <p className="text-xl font-bold">{progressPct.toFixed(1)}%</p>
+          </div>
+
+          <div>
+            <div className="flex justify-between text-xs text-slate-600 mb-1">
+              <span>Progress to target</span>
+              <span>{progressPct.toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+              <div
+                className={`h-3 rounded-full transition-all ${
+                  progressPct >= 100
+                    ? "bg-emerald-500"
+                    : progressPct >= 70
+                      ? "bg-amber-500"
+                      : "bg-sky-500"
+                }`}
+                style={{ width: `${Math.min(100, progressPct)}%` }}
+              />
             </div>
           </div>
 
-          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-            <div
-              className={`h-3 rounded-full transition-all ${
-                progressPct >= 100
-                  ? "bg-emerald-500"
-                  : progressPct >= 70
-                    ? "bg-amber-500"
-                    : "bg-sky-500"
-              }`}
-              style={{ width: `${Math.min(100, progressPct)}%` }}
-            />
-          </div>
-
-          <form onSubmit={saveTarget} className="space-y-3">
+          <form onSubmit={saveTarget} className="space-y-4">
             <label className="block text-sm">
               <span className="font-medium text-slate-700">
-                Target Amount (PKR)
+                Monthly Target Amount (PKR)
               </span>
               <input
                 type="number"
@@ -980,7 +994,30 @@ export function SalesTeamPanel({
                 required
               />
               <span className="text-xs text-slate-500 mt-1 block">
-                1 crore = 10,000,000 · 1.2 crore = 12,000,000
+                1 crore = 10,000,000 &middot; 1.2 crore = 12,000,000
+              </span>
+            </label>
+
+            <label className="block text-sm">
+              <span className="font-medium text-slate-700">
+                Commission Base Amount (PKR)
+              </span>
+              <input
+                type="number"
+                value={targetForm.commissionBaseAmount}
+                onChange={(e) =>
+                  setTargetForm({
+                    ...targetForm,
+                    commissionBaseAmount: e.target.value,
+                  })
+                }
+                className="mt-1 w-full border border-amber-300 bg-white rounded-md px-3 py-2 text-sm"
+                required
+              />
+              <span className="text-xs text-slate-500 mt-1 block">
+                Team sales must reach this amount before the Team Lead moves
+                from the flat 55,000 to the 1.0% tier. Default: 7,000,000 (70
+                lacs).
               </span>
             </label>
 
@@ -1002,7 +1039,7 @@ export function SalesTeamPanel({
               disabled={savingTarget}
               className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
             >
-              {savingTarget ? "Saving..." : "Save Target"}
+              {savingTarget ? "Saving..." : "Save Target & Commission Base"}
             </button>
           </form>
         </div>
