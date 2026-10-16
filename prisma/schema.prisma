@@ -57,13 +57,14 @@ model Period {
 // SALES TARGET (drives Team Lead commission tier)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 model SalesTarget {
-  id           String   @id @default(cuid())
-  periodId     String   @unique
-  period       Period   @relation(fields: [periodId], references: [id])
-  targetAmount Float    @default(12000000)  // 1.2 crore default
-  notes        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  periodId              String   @unique
+  period                Period   @relation(fields: [periodId], references: [id])
+  targetAmount          Float    @default(12000000)  // 1.2 crore default
+  commissionBaseAmount  Float    @default(7000000)   // 70 lacs default — Team Lead 1% kicks in above this
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // CLIENTS

@@ -35,16 +35,17 @@ export default async function SalesTeamPage({
     ]);
 
   const monthlyTarget = targetRow?.targetAmount ?? 12_000_000;
+  const commissionBase = targetRow?.commissionBaseAmount ?? 7_000_000;
   const targetNotes = targetRow?.notes ?? "";
 
   const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
   const isTeamLead = (name: string) =>
     TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
 
-  // 3-tier lead pay: <70L = 55k flat, <target = 1.0%, >=target = 2.5%
-  function leadPay(teamTotal: number, target: number) {
-    if (teamTotal < 7_000_000) return { amount: 55_000, rate: 0 };
-    if (teamTotal < target) return { amount: teamTotal * 0.015, rate: 1.5 };
+  // 3-tier lead pay: < commissionBase = 55k flat, < target = 1.0%, >= target = 2.5%
+  function leadPay(teamTotal: number, target: number, base: number) {
+    if (teamTotal < base) return { amount: 55_000, rate: 0 };
+    if (teamTotal < target) return { amount: teamTotal * 0.01, rate: 1.0 };
     return { amount: teamTotal * 0.025, rate: 2.5 };
   }
 
@@ -65,12 +66,12 @@ export default async function SalesTeamPage({
     const comm = commissions.find((c) => c.employeeName === e.name);
     const pay = payroll.find((p) => p.employeeName === e.name);
     const saleBase = lead ? totalTeamSales : individual;
-    const leadCalc = lead ? leadPay(totalTeamSales, monthlyTarget) : null;
+    const leadCalc = lead
+      ? leadPay(totalTeamSales, monthlyTarget, commissionBase)
+      : null;
 
     // Prefer live calc for display so UI matches current entries (including zero)
-    const commissionAmt = lead
-      ? leadCalc!.amount
-      : individual * 0.025;
+    const commissionAmt = lead ? leadCalc!.amount : individual * 0.025;
     const commissionRate = lead ? leadCalc!.rate : 2.5;
 
     return {
@@ -82,10 +83,14 @@ export default async function SalesTeamPage({
       saleBase,
       commissionRate,
       commissionAmt,
-      // Prefer live commission in net display baseline if payroll not synced
       netPayable:
         pay?.netPayable ??
-        Math.max(0, (lead ? 0 : 40000) + commissionAmt - (pay?.loanInstallment ?? 0)),
+        Math.max(
+          0,
+          (lead ? 0 : 40000) +
+            commissionAmt -
+            (pay?.loanInstallment ?? 0)
+        ),
       amountPaid: pay?.amountPaid ?? 0,
       remaining:
         pay?.remaining ??
@@ -105,8 +110,7 @@ export default async function SalesTeamPage({
           <h1 className="text-2xl font-bold">Sales Team Performance</h1>
           <p className="text-sm text-slate-500">
             Individual sales, 2.5% commission, and Team Lead tiered pay.
-            Monthly target is editable. Sales here drive Individual Sales /
-            Sale Base (including down to zero after delete).
+            Monthly target and commission base are editable per month.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
@@ -117,6 +121,7 @@ export default async function SalesTeamPage({
         rows={rows}
         totalTeamSales={totalTeamSales}
         monthlyTarget={monthlyTarget}
+        commissionBase={commissionBase}
         targetNotes={targetNotes}
         employees={employees.map((e) => ({
           id: e.id,

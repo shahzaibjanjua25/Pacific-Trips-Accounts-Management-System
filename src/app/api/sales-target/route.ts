@@ -1,4 +1,4 @@
-// src/app/api/sales-target/route.ts — should already exist
+// src/app/api/sales-target/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
@@ -15,7 +15,11 @@ export async function GET(req: NextRequest) {
   let row = await prisma.salesTarget.findUnique({ where: { periodId } });
   if (!row) {
     row = await prisma.salesTarget.create({
-      data: { periodId, targetAmount: 12_000_000 },
+      data: {
+        periodId,
+        targetAmount: 12_000_000,
+        commissionBaseAmount: 7_000_000,
+      },
     });
   }
   return NextResponse.json(row);
@@ -27,7 +31,7 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { periodId, targetAmount, notes } = body;
+    const { periodId, targetAmount, commissionBaseAmount, notes } = body;
     if (!periodId) {
       return NextResponse.json({ error: "periodId required" }, { status: 400 });
     }
@@ -37,10 +41,12 @@ export async function PUT(req: NextRequest) {
       create: {
         periodId,
         targetAmount: Number(targetAmount) || 12_000_000,
+        commissionBaseAmount: Number(commissionBaseAmount) || 7_000_000,
         notes: notes || null,
       },
       update: {
         targetAmount: Number(targetAmount) || 12_000_000,
+        commissionBaseAmount: Number(commissionBaseAmount) || 7_000_000,
         notes: notes || null,
       },
     });
