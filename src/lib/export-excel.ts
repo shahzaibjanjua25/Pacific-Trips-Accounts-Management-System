@@ -95,7 +95,6 @@ export async function buildAccountingWorkbook(periodId: string) {
   const period = await prisma.period.findUnique({ where: { id: periodId } });
   if (!period) throw new Error("Period not found");
 
-  // ── Fetch EVERYTHING ──
   const [
     allPeriods,
     txns,
@@ -203,6 +202,18 @@ export async function buildAccountingWorkbook(periodId: string) {
     "3. Filters enabled on data sheets. Frozen header rows.";
   cover.getCell("A10").value =
     "4. Period-scoped tables show this month. Master tables (Clients, Employees, Assets) show all.";
+  cover.getCell("A12").value = "WHO CLOSED WHICH SALE";
+  cover.getCell("A12").font = { bold: true };
+  cover.getCell("A13").value =
+    "   • SalesAttribution  → one row per closed sale, sorted by salesperson";
+  cover.getCell("A14").value =
+    "   • SalesPerformance  → raw sales entry data (has Employee Name)";
+  cover.getCell("A15").value =
+    "   • Receivables       → per-client salesperson column";
+  cover.getCell("A16").value =
+    "   • Clients           → derived salesperson (most recent receivable)";
+  cover.getCell("A17").value =
+    "   • ClientLedger      → derived salesperson per ledger row";
   cover.getColumn(1).width = 90;
 
   // ══════════════════════════════════════════════════════════════════
@@ -271,6 +282,7 @@ export async function buildAccountingWorkbook(periodId: string) {
     `Client Receivables — ${period.label}`,
     [
       "Client Name",
+      "Salesperson",
       "Contact",
       "Booking Date",
       "Trip Dates",
@@ -282,7 +294,6 @@ export async function buildAccountingWorkbook(periodId: string) {
       "Due Date",
       "Days Overdue",
       "Trip Start",
-      "Salesperson",
       "Discounts",
       "Additional Charges",
       "Final Settlement",
@@ -291,6 +302,7 @@ export async function buildAccountingWorkbook(periodId: string) {
     ],
     receivables.map((r) => [
       r.clientName,
+      r.salesperson,
       r.contact,
       r.bookingDate,
       r.tripDates,
@@ -302,15 +314,14 @@ export async function buildAccountingWorkbook(periodId: string) {
       r.dueDate,
       r.daysOverdue,
       r.tripStart,
-      r.salesperson,
       r.discounts,
       r.additionalCharges,
       r.finalSettlement,
       r.status,
       r.notes,
     ]),
-    [6, 7, 8, 9, 14, 15, 16],
-    [3, 10, 12]
+    [7, 8, 9, 10, 15, 16, 17],
+    [4, 11, 13]
   );
 
   addSheet(
@@ -319,6 +330,7 @@ export async function buildAccountingWorkbook(periodId: string) {
     `Trip Profit & Loss — ${period.label}`,
     [
       "Client",
+      "Salesperson",
       "Trip Ref",
       "Destination",
       "Start",
@@ -332,12 +344,12 @@ export async function buildAccountingWorkbook(periodId: string) {
       "Gross Profit",
       "Overhead Alloc",
       "Net Profit",
-      "Salesperson",
       "Status",
       "Notes",
     ],
     trips.map((t) => [
       t.clientName,
+      t.salesperson,
       t.tripRef,
       t.destination,
       t.startDate,
@@ -351,12 +363,11 @@ export async function buildAccountingWorkbook(periodId: string) {
       t.grossProfit,
       t.overheadAlloc,
       t.netProfit,
-      t.salesperson,
       t.status,
       t.notes,
     ]),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14],
-    [4, 5]
+    [7, 8, 9, 10, 11, 12, 13, 14, 15],
+    [5, 6]
   );
 
   addSheet(
@@ -782,7 +793,7 @@ export async function buildAccountingWorkbook(periodId: string) {
     "SalesPerformance",
     `Sales Team Performance — ${period.label}`,
     [
-      "Employee",
+      "Employee (Salesperson)",
       "Tour Date",
       "Description",
       "Category",
@@ -809,6 +820,48 @@ export async function buildAccountingWorkbook(periodId: string) {
     ]),
     [7, 8],
     [2]
+  );
+
+  // ── NEW: SalesAttribution — clean pivot: who closed which sale ──
+  addSheet(
+    wb,
+    "SalesAttribution",
+    `Who Closed Which Sale — ${period.label}`,
+    [
+      "Salesperson",
+      "Client",
+      "Trip / Description",
+      "Tour Date",
+      "Sale Amount (PKR)",
+      "Receivable Status",
+      "Receivable Remaining",
+      "Trip Ref",
+    ],
+    salesPerformance
+      .filter((s) => (s.debit || 0) > 0)
+      .slice()
+      .sort((a, b) => {
+        const nameCmp = (a.employeeName || "").localeCompare(b.employeeName || "");
+        if (nameCmp !== 0) return nameCmp;
+        const ta = a.tourDate ? new Date(a.tourDate).getTime() : 0;
+        const tb = b.tourDate ? new Date(b.tourDate).getTime() : 0;
+        return ta - tb;
+      })
+      .map((s) => {
+        const recv = receivables.find((r) => r.clientName === s.clientName);
+        return [
+          s.employeeName || "",
+          s.clientName || "",
+          s.description || "",
+          s.tourDate,
+          s.debit || 0,
+          recv?.status ?? "",
+          recv?.remainingAmount ?? 0,
+          recv?.tripDates ?? "",
+        ];
+      }),
+    [5, 7],
+    [4]
   );
 
   addSheet(
@@ -967,19 +1020,40 @@ export async function buildAccountingWorkbook(periodId: string) {
   addSheet(
     wb,
     "Clients",
-    `Clients Master (all)`,
-    ["Name", "Contact", "Phone", "Email", "Notes", "Created At"],
-    clients.map((c) => [c.name, c.contact, c.phone, c.email, c.notes, c.createdAt]),
+    `Clients Master (all) — Salesperson derived from most recent receivable`,
+    ["Name", "Salesperson", "Contact", "Phone", "Email", "Notes", "Created At"],
+    clients.map((c) => {
+      const clientRecv = receivables
+        .filter((r) => r.clientId === c.id || r.clientName === c.name)
+        .slice()
+        .sort((a, b) => {
+          const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return bt - at;
+        });
+      const salesperson =
+        clientRecv.find((r) => r.salesperson)?.salesperson ?? "";
+      return [
+        c.name,
+        salesperson,
+        c.contact,
+        c.phone,
+        c.email,
+        c.notes,
+        c.createdAt,
+      ];
+    }),
     [],
-    [6]
+    [7]
   );
 
   addSheet(
     wb,
     "ClientLedger",
-    `Client Ledger (all)`,
+    `Client Ledger (all) — Salesperson derived per client`,
     [
       "Client",
+      "Salesperson",
       "Tour Date",
       "Description",
       "Category",
@@ -995,8 +1069,14 @@ export async function buildAccountingWorkbook(periodId: string) {
     ],
     clientLedgers.map((l) => {
       const client = clients.find((c) => c.id === l.clientId);
+      const clientRecv = receivables.filter(
+        (r) => r.clientId === l.clientId || r.clientName === l.clientName
+      );
+      const salesperson =
+        clientRecv.find((r) => r.salesperson)?.salesperson ?? "";
       return [
         l.clientName || client?.name || "",
+        salesperson,
         l.tourDate,
         l.description,
         l.category,
@@ -1011,8 +1091,8 @@ export async function buildAccountingWorkbook(periodId: string) {
         l.createdAt,
       ];
     }),
-    [7, 8],
-    [2, 13]
+    [8, 9],
+    [3, 14]
   );
 
   addSheet(
@@ -1185,6 +1265,7 @@ export async function buildClientDataWorkbook(periodId: string) {
   for (const name of clientNames) {
     const client = clients.find((c) => c.name === name);
     const recv = receivables.filter((r) => r.clientName === name);
+    const salesperson = recv.find((r) => r.salesperson)?.salesperson || "";
     const sheetName = name.replace(/[\\/*?[\]:]/g, "").slice(0, 31);
     const ws = wb.addWorksheet(sheetName || "Client");
 
@@ -1193,7 +1274,8 @@ export async function buildClientDataWorkbook(periodId: string) {
     ws.getCell("A1").font = TITLE_FONT;
     ws.getCell("A2").value = `Client: ${name}`;
     ws.getCell("C2").value = `Phone: ${client?.phone || ""}`;
-    ws.getCell("E2").value = `Period: ${period.label}`;
+    ws.getCell("E2").value = `Salesperson: ${salesperson}`;
+    ws.getCell("G2").value = `Period: ${period.label}`;
     ws.getRow(2).font = { italic: true, size: 10 };
 
     const headerRow = ws.addRow([

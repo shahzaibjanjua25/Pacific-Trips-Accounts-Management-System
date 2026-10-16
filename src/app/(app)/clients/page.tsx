@@ -25,6 +25,20 @@ export default async function ClientsPage({
   });
   const ledgers = await prisma.clientLedger.findMany();
 
+  // Fetch transactions that carry a bank account, so we can derive the
+  // bank/cash account for each client by looking at their most recent receipt.
+  const clientTxns = await prisma.transaction.findMany({
+    where: { periodId: current.id, bankAccount: { not: null } },
+    orderBy: { date: "desc" },
+    select: {
+      party: true,
+      subCategory: true,
+      bankAccount: true,
+      date: true,
+      category: true,
+    },
+  });
+
   type Row = {
     id: string;
     name: string;
@@ -38,7 +52,7 @@ export default async function ClientsPage({
     status: string;
     tripInfo: string;
     salesperson: string | null;
-    bankAccount: string | null;
+    bankAccount: string | null; // NEW
     bookingDate: string | null;
     dueDate: string | null;
     tripStart: string | null;
@@ -53,6 +67,14 @@ export default async function ClientsPage({
   const toISO = (d: Date | null | undefined) =>
     d ? new Date(d).toISOString() : null;
 
+  /** Find the most recent bank account used for this client's receipts */
+  function bankAccountForClient(clientName: string): string | null {
+    const match = clientTxns.find(
+      (t) => t.party === clientName || t.subCategory === clientName
+    );
+    return match?.bankAccount ?? null;
+  }
+
   const rows: Row[] = clients.map((c) => {
     const recv = receivables.filter(
       (r) => r.clientId === c.id || r.clientName === c.name
@@ -65,9 +87,7 @@ export default async function ClientsPage({
     let tripInfo = "-";
     let status = "-";
     let salesperson: string | null = null;
-    let bankAccount: string | null = null;
 
-    // Pick the most-recently-updated receivable as the "primary" for edit
     const primary =
       recv.slice().sort((a, b) => {
         const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
@@ -93,8 +113,17 @@ export default async function ClientsPage({
         recv.find((r) => r.tripDates)?.tripDates ||
         recv.find((r) => r.destination)?.destination ||
         "-";
-      salesperson = recv.find((r) => r.salesperson)?.salesperson || null;
-      bankAccount = recv.find((r) => r.bankAccount)?.bankAccount || null;
+
+      const mostRecentWithSalesperson = recv
+        .slice()
+        .sort((a, b) => {
+          const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return bt - at;
+        })
+        .find((r) => r.salesperson);
+      salesperson = mostRecentWithSalesperson?.salesperson || null;
+
       status =
         amountDue <= 0 && amountPaid > 0
           ? "Settled"
@@ -112,7 +141,6 @@ export default async function ClientsPage({
         additionalCharges = primary.additionalCharges ?? 0;
         finalSettlement = primary.finalSettlement ?? null;
         receivableNotes = primary.notes ?? null;
-        bankAccount = primary.bankAccount ?? bankAccount;
       }
     } else if (ledger.length > 0) {
       const paidRows = ledger.filter(
@@ -154,7 +182,7 @@ export default async function ClientsPage({
       status,
       tripInfo,
       salesperson,
-      bankAccount,
+      bankAccount: bankAccountForClient(c.name),
       bookingDate,
       dueDate,
       tripStart,
@@ -185,7 +213,7 @@ export default async function ClientsPage({
       status: r.status || "Open",
       tripInfo: r.tripDates || r.destination || "-",
       salesperson: r.salesperson || null,
-      bankAccount: r.bankAccount || null,
+      bankAccount: bankAccountForClient(r.clientName),
       bookingDate: toISO(r.bookingDate),
       dueDate: toISO(r.dueDate),
       tripStart: toISO(r.tripStart),
@@ -205,7 +233,7 @@ export default async function ClientsPage({
           <h1 className="text-2xl font-bold">Clients</h1>
           <p className="text-sm text-slate-500">
             Click a client to open their individual ledger, or edit any field
-            inline.
+            inline. Salesperson shows who closed the sale.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
