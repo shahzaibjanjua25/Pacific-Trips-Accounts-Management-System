@@ -3,6 +3,38 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
 import { attributeSaleToSalesperson } from "@/lib/sales-attribution";
 
+/**
+ * Move a delta in/out of a named bank account.
+ * Positive delta = money in. Negative delta = money out.
+ * No-op when account name is blank or delta is 0.
+ */
+async function adjustBank(
+  accountName: string | null | undefined,
+  delta: number
+) {
+  if (!accountName || delta === 0) return;
+  const trimmed = String(accountName).trim();
+  if (!trimmed) return;
+
+  const normalized = trimmed.toLowerCase();
+  const all = await prisma.bankBalance.findMany();
+  const existing = all.find(
+    (b) => b.accountName.trim().toLowerCase() === normalized
+  );
+
+  if (existing) {
+    await prisma.bankBalance.update({
+      where: { id: existing.id },
+      data: { balance: existing.balance + delta },
+    });
+  } else {
+    // Brand new account — start at the delta (never below zero)
+    await prisma.bankBalance.create({
+      data: { accountName: trimmed, balance: Math.max(0, delta) },
+    });
+  }
+}
+
 export async function GET(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -55,6 +87,7 @@ export async function POST(req: NextRequest) {
     const tp = Number(body.totalPackage) || 0;
     const paid = Number(body.amountPaid) || 0;
     const salesperson = (body.salesperson || "").trim();
+    const bankAccount = (body.bankAccount || "").trim() || null;
 
     if (periodId && (tp > 0 || paid > 0)) {
       const remaining = Math.max(0, tp - paid);
@@ -64,6 +97,7 @@ export async function POST(req: NextRequest) {
           clientId: client.id,
           clientName: client.name,
           salesperson: salesperson || null,
+          bankAccount,
           totalPackage: tp || paid,
           amountToReceive: tp || paid,
           amountReceived: paid,
@@ -78,7 +112,12 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Attribute the sale to the chosen salesperson â†’ Sales Team + commission
+      // Reflect the paid amount in the chosen bank account
+      if (paid > 0) {
+        await adjustBank(bankAccount, paid);
+      }
+
+      // Attribute the sale to the chosen salesperson → Sales Team + commission
       if (salesperson && (tp || paid) > 0) {
         await attributeSaleToSalesperson({
           periodId,
@@ -105,7 +144,7 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const {
       id, name, phone, contact, email, notes,
-      totalPackage, amountPaid, salesperson,
+      totalPackage, amountPaid, salesperson, bankAccount,
     } = body;
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
@@ -121,7 +160,7 @@ export async function PUT(req: NextRequest) {
     });
 
     const periodId = req.nextUrl.searchParams.get("periodId");
-    if (periodId && (totalPackage != null || amountPaid != null || salesperson)) {
+    if (periodId && (totalPackage != null || amountPaid != null || salesperson || bankAccount)) {
       const existing = await prisma.receivable.findFirst({
         where: { periodId, clientId: id },
         orderBy: { createdAt: "desc" },
@@ -130,9 +169,13 @@ export async function PUT(req: NextRequest) {
       const tp = Number(totalPackage) || 0;
       const paid = Number(amountPaid) || 0;
       const remaining = Math.max(0, tp - paid);
+      const nextBank = (typeof bankAccount === "string" ? bankAccount : "").trim() || null;
 
       if (existing) {
         const prevTp = existing.totalPackage;
+        const prevPaid = existing.amountReceived || 0;
+        const prevBank = existing.bankAccount || null;
+
         await prisma.receivable.update({
           where: { id: existing.id },
           data: {
@@ -141,6 +184,7 @@ export async function PUT(req: NextRequest) {
             amountReceived: paid,
             remainingAmount: remaining,
             salesperson: salesperson ?? existing.salesperson,
+            bankAccount: nextBank ?? existing.bankAccount,
             status:
               remaining <= 0 && paid > 0
                 ? "Settled"
@@ -149,6 +193,19 @@ export async function PUT(req: NextRequest) {
                   : "Open",
           },
         });
+
+        // ── Bank effect — move only the DIFFERENCE ──
+        if (nextBank && prevBank && nextBank.toLowerCase() !== prevBank.toLowerCase()) {
+          // Account changed: undo old, apply new
+          if (prevPaid > 0) await adjustBank(prevBank, -prevPaid);
+          if (paid > 0) await adjustBank(nextBank, paid);
+        } else {
+          // Same account (or no previous) → apply delta only
+          const paidDelta = paid - prevPaid;
+          if (paidDelta !== 0) {
+            await adjustBank(nextBank ?? prevBank, paidDelta);
+          }
+        }
 
         // Sales Team: package increase OR salesperson change must update
         // SalesPerformance (single source of truth for commissions).
@@ -227,6 +284,7 @@ export async function PUT(req: NextRequest) {
             clientId: id,
             clientName: client.name,
             salesperson: salesperson || null,
+            bankAccount: nextBank,
             totalPackage: tp,
             amountToReceive: tp,
             amountReceived: paid,
@@ -240,6 +298,11 @@ export async function PUT(req: NextRequest) {
             notes: "Edited from Clients page",
           },
         });
+
+        // Initial bank deposit for a newly-created receivable
+        if (paid > 0) {
+          await adjustBank(nextBank, paid);
+        }
 
         if (salesperson && tp > 0) {
           await attributeSaleToSalesperson({

@@ -20,6 +20,8 @@ type Row = {
   status: string;
   tripInfo: string;
   salesperson: string | null;
+  // NEW — which bank/cash account this client's payments went through
+  bankAccount: string | null;
   // Receivable-side fields (nullable if client has no receivable yet)
   bookingDate: string | null;
   dueDate: string | null;
@@ -42,6 +44,7 @@ const emptyForm = {
   // Receivable
   totalPackage: "",
   amountPaid: "",
+  bankAccount: "Faysal Bank",
   salesperson: "",
   bookingDate: "",
   dueDate: "",
@@ -85,6 +88,7 @@ export function ClientsTable({
       notes: r.notes || "",
       totalPackage: String(r.totalPackage || 0),
       amountPaid: String(r.amountPaid || 0),
+      bankAccount: r.bankAccount || "Faysal Bank",
       salesperson: r.salesperson || "",
       bookingDate: r.bookingDate ? r.bookingDate.slice(0, 10) : "",
       dueDate: r.dueDate ? r.dueDate.slice(0, 10) : "",
@@ -119,6 +123,7 @@ export function ClientsTable({
         notes: form.notes || null,
         totalPackage: parseFloat(form.totalPackage) || 0,
         amountPaid: parseFloat(form.amountPaid) || 0,
+        bankAccount: form.bankAccount || null,
         salesperson: form.salesperson || null,
         bookingDate: form.bookingDate || null,
         dueDate: form.dueDate || null,
@@ -257,6 +262,19 @@ export function ClientsTable({
               />
               <label className="block text-xs">
                 <span className="text-slate-600 font-medium">
+                  Bank / Cash account (payments go here)
+                </span>
+                <div className="mt-1">
+                  <LookupSelect
+                    lookupKey="accounts"
+                    periodId={periodId}
+                    value={form.bankAccount}
+                    onChange={(v) => setForm({ ...form, bankAccount: v })}
+                  />
+                </div>
+              </label>
+              <label className="block text-xs">
+                <span className="text-slate-600 font-medium">
                   Salesperson (who brought this client)
                 </span>
                 <div className="mt-1">
@@ -269,6 +287,12 @@ export function ClientsTable({
                 </div>
               </label>
             </div>
+            <p className="text-xs text-slate-600">
+              Amount Paid moves real money: increasing it adds the difference to
+              the chosen bank account; decreasing it removes the difference. If
+              you change the bank account, the old account is reversed and the
+              new one receives the full amount.
+            </p>
           </section>
 
           {/* ─── Trip info ─── */}
@@ -409,6 +433,7 @@ export function ClientsTable({
                     "Trip / Package",
                     "Total Package",
                     "Amount Paid",
+                    "Bank",
                     "Amount Due",
                     "Status",
                     "Actions",
@@ -460,6 +485,9 @@ export function ClientsTable({
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums text-emerald-700">
                         {formatPKR(r.amountPaid)}
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">
+                        {r.bankAccount || "-"}
                       </td>
                       <td
                         className={`px-3 py-3 text-right tabular-nums font-medium ${
