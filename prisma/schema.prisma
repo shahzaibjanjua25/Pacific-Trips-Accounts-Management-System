@@ -228,6 +228,7 @@ model Receivable {
   discounts         Float     @default(0)
   additionalCharges Float     @default(0)
   finalSettlement   Float?
+  bankAccount       String?                                    // ← NEW
   status            String    @default("Open")
   notes             String?
   createdAt         DateTime  @default(now())

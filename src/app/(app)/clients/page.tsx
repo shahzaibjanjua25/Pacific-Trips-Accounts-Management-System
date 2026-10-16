@@ -38,6 +38,7 @@ export default async function ClientsPage({
     status: string;
     tripInfo: string;
     salesperson: string | null;
+    bankAccount: string | null;
     bookingDate: string | null;
     dueDate: string | null;
     tripStart: string | null;
@@ -64,6 +65,7 @@ export default async function ClientsPage({
     let tripInfo = "-";
     let status = "-";
     let salesperson: string | null = null;
+    let bankAccount: string | null = null;
 
     // Pick the most-recently-updated receivable as the "primary" for edit
     const primary =
@@ -92,6 +94,7 @@ export default async function ClientsPage({
         recv.find((r) => r.destination)?.destination ||
         "-";
       salesperson = recv.find((r) => r.salesperson)?.salesperson || null;
+      bankAccount = recv.find((r) => r.bankAccount)?.bankAccount || null;
       status =
         amountDue <= 0 && amountPaid > 0
           ? "Settled"
@@ -109,6 +112,7 @@ export default async function ClientsPage({
         additionalCharges = primary.additionalCharges ?? 0;
         finalSettlement = primary.finalSettlement ?? null;
         receivableNotes = primary.notes ?? null;
+        bankAccount = primary.bankAccount ?? bankAccount;
       }
     } else if (ledger.length > 0) {
       const paidRows = ledger.filter(
@@ -150,6 +154,7 @@ export default async function ClientsPage({
       status,
       tripInfo,
       salesperson,
+      bankAccount,
       bookingDate,
       dueDate,
       tripStart,
@@ -180,6 +185,7 @@ export default async function ClientsPage({
       status: r.status || "Open",
       tripInfo: r.tripDates || r.destination || "-",
       salesperson: r.salesperson || null,
+      bankAccount: r.bankAccount || null,
       bookingDate: toISO(r.bookingDate),
       dueDate: toISO(r.dueDate),
       tripStart: toISO(r.tripStart),
