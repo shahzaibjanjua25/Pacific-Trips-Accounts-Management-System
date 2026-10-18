@@ -7,16 +7,14 @@ import {
   useMemo,
   useRef,
   useState,
+  useEffect,
 } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 
 type LoadingCtx = {
-  /** true if any operation is in flight */
   isLoading: boolean;
-  /** current label shown to user (e.g. "Saving transaction…") */
   label: string;
-  /** wrap any async function; shows overlay + returns result */
   run: <T>(label: string, fn: () => Promise<T>) => Promise<T>;
-  /** manual increment/decrement */
   begin: (label?: string) => void;
   end: () => void;
 };
@@ -27,6 +25,16 @@ export function LoadingProvider({ children }: { children: React.ReactNode }) {
   const [count, setCount] = useState(0);
   const [label, setLabel] = useState("");
   const labelStack = useRef<string[]>([]);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // ⭐ Auto-clear loading screen when route successfully changes
+  useEffect(() => {
+    // Whenever the URL changes, we force the loading state off
+    setCount(0);
+    setLabel("");
+    labelStack.current = [];
+  }, [pathname, searchParams]);
 
   const begin = useCallback((l?: string) => {
     setCount((c) => c + 1);

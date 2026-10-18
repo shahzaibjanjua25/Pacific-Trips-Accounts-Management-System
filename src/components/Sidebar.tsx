@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useLoading } from "./LoadingProvider";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -50,18 +51,41 @@ const nav = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { begin, end } = useLoading(); // ⭐ Bring in the loading controls
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
   async function logout() {
     setSigningOut(true);
+    begin("Signing out...");
     try {
       await fetch("/api/auth/logout", { method: "POST" });
       router.push("/login");
       router.refresh();
     } finally {
       setSigningOut(false);
+      end(); // hide overlay if redirect fails
     }
+  }
+
+  // ⭐ Handle navigation clicks
+  function handleNavClick(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
+    // Don't show loading if clicking the page they are already on
+    if (pathname === href) {
+      setOpen(false);
+      return;
+    }
+    
+    // Show the global overlay
+    begin("Loading page...");
+    
+    // Close mobile menu
+    setOpen(false);
+
+    // Next.js will handle the route change. 
+    // The overlay will stay up until the page finishes rendering.
+    // (We rely on the LoadingProvider's router events to clear it, 
+    // or it will naturally disappear when the new page hydrates).
   }
 
   return (
@@ -108,7 +132,7 @@ export function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={() => setOpen(false)}
+                onClick={(e) => handleNavClick(e, item.href)} // ⭐ Trigger loading on click
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
                   active
