@@ -1,17 +1,11 @@
+// src/app/api/clients/manage/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
-import { attributeSaleToSalesperson } from "@/lib/sales-attribution";
+import { setSaleForClient, clearSaleForClient } from "@/lib/sales-sync";
 
-/**
- * Move a delta in/out of a named bank account.
- * Positive delta = money in. Negative delta = money out.
- * No-op when account name is blank or delta is 0.
- */
-async function adjustBank(
-  accountName: string | null | undefined,
-  delta: number
-) {
+/** Move a delta in/out of a named bank account. Positive = money in. */
+async function adjustBank(accountName: string | null | undefined, delta: number) {
   if (!accountName || delta === 0) return;
   const trimmed = String(accountName).trim();
   if (!trimmed) return;
@@ -28,7 +22,6 @@ async function adjustBank(
       data: { balance: existing.balance + delta },
     });
   } else {
-    // Brand new account — start at the delta (never below zero)
     await prisma.bankBalance.create({
       data: { accountName: trimmed, balance: Math.max(0, delta) },
     });
@@ -112,14 +105,12 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Reflect the paid amount in the chosen bank account
       if (paid > 0) {
         await adjustBank(bankAccount, paid);
       }
 
-      // Attribute the sale to the chosen salesperson → Sales Team + commission
       if (salesperson && (tp || paid) > 0) {
-        await attributeSaleToSalesperson({
+        await setSaleForClient({
           periodId,
           salesperson,
           clientName: client.name,
@@ -175,6 +166,10 @@ export async function PUT(req: NextRequest) {
         const prevTp = existing.totalPackage;
         const prevPaid = existing.amountReceived || 0;
         const prevBank = existing.bankAccount || null;
+        const prevSalesperson = (existing.salesperson || "").trim();
+        const nextSalesperson = (
+          (typeof salesperson === "string" ? salesperson : prevSalesperson) || ""
+        ).trim();
 
         await prisma.receivable.update({
           where: { id: existing.id },
@@ -194,52 +189,36 @@ export async function PUT(req: NextRequest) {
           },
         });
 
-        // ── Bank effect — move only the DIFFERENCE ──
+        // ── Bank effect ─────────────────────────────────────
+        // If account changed → reverse old, apply full new amount to new acct
+        // If same account      → apply only the paid delta
         if (nextBank && prevBank && nextBank.toLowerCase() !== prevBank.toLowerCase()) {
-          // Account changed: undo old, apply new
           if (prevPaid > 0) await adjustBank(prevBank, -prevPaid);
-          if (paid > 0) await adjustBank(nextBank, paid);
+          if (paid > 0)     await adjustBank(nextBank, paid);
         } else {
-          // Same account (or no previous) → apply delta only
           const paidDelta = paid - prevPaid;
           if (paidDelta !== 0) {
             await adjustBank(nextBank ?? prevBank, paidDelta);
           }
         }
 
-        // Sales Team: package increase OR salesperson change must update
-        // SalesPerformance (single source of truth for commissions).
-        const delta = Math.max(0, (tp || existing.totalPackage) - prevTp);
-        const prevSalesperson = (existing.salesperson || "").trim();
-        const nextSalesperson = (
-          (typeof salesperson === "string" ? salesperson : prevSalesperson) || ""
-        ).trim();
-        const packageForSale =
-          (tp > 0 ? tp : existing.totalPackage) || 0;
+        // ── Sales Team sync ─────────────────────────────────
+        // One row per (client, salesperson). setSaleForClient upserts.
+        const packageForSale = (tp > 0 ? tp : existing.totalPackage) || 0;
         const salespersonChanged =
           prevSalesperson.toLowerCase() !== nextSalesperson.toLowerCase();
 
-        if (salespersonChanged && packageForSale > 0) {
-          // Remove prior attribution for this client in this period
+        if (salespersonChanged) {
+          // Remove old owner's row, then set new owner's row to full package
           if (prevSalesperson) {
-            await prisma.salesPerformance.deleteMany({
-              where: {
-                periodId,
-                clientName: client.name,
-                employeeName: prevSalesperson,
-              },
+            await clearSaleForClient({
+              periodId,
+              salesperson: prevSalesperson,
+              clientName: client.name,
             });
-            const { computeSalesPayroll } = await import(
-              "@/lib/payroll-service"
-            );
-            const { syncPayrollForEmployee } = await import(
-              "@/lib/links-service"
-            );
-            await computeSalesPayroll(periodId);
-            await syncPayrollForEmployee(periodId, prevSalesperson);
           }
-          if (nextSalesperson) {
-            await attributeSaleToSalesperson({
+          if (nextSalesperson && packageForSale > 0) {
+            await setSaleForClient({
               periodId,
               salesperson: nextSalesperson,
               clientName: client.name,
@@ -247,35 +226,28 @@ export async function PUT(req: NextRequest) {
               description: `Reassigned sale: ${client.name}`,
             });
           }
-        } else if (nextSalesperson && delta > 0) {
-          await attributeSaleToSalesperson({
+        } else if (nextSalesperson && packageForSale > 0) {
+          // Same salesperson — set to the new package value (upsert)
+          // This handles BOTH increases and decreases.
+          await setSaleForClient({
             periodId,
             salesperson: nextSalesperson,
             clientName: client.name,
-            amount: delta,
-            description: `Package increase: ${client.name}`,
+            amount: packageForSale,
+            description:
+              packageForSale > prevTp
+                ? `Package increase: ${client.name}`
+                : packageForSale < prevTp
+                  ? `Package reduced: ${client.name}`
+                  : `Sale to ${client.name}`,
           });
-        } else if (
-          salespersonChanged &&
-          !nextSalesperson &&
-          prevSalesperson
-        ) {
-          // Salesperson cleared — drop sales rows for this client
-          await prisma.salesPerformance.deleteMany({
-            where: {
-              periodId,
-              clientName: client.name,
-              employeeName: prevSalesperson,
-            },
+        } else if (!nextSalesperson && prevSalesperson) {
+          // Salesperson cleared → drop their rows for this client
+          await clearSaleForClient({
+            periodId,
+            salesperson: prevSalesperson,
+            clientName: client.name,
           });
-          const { computeSalesPayroll } = await import(
-            "@/lib/payroll-service"
-          );
-          const { syncPayrollForEmployee } = await import(
-            "@/lib/links-service"
-          );
-          await computeSalesPayroll(periodId);
-          await syncPayrollForEmployee(periodId, prevSalesperson);
         }
       } else if (tp > 0 || paid > 0) {
         await prisma.receivable.create({
@@ -299,13 +271,12 @@ export async function PUT(req: NextRequest) {
           },
         });
 
-        // Initial bank deposit for a newly-created receivable
         if (paid > 0) {
           await adjustBank(nextBank, paid);
         }
 
         if (salesperson && tp > 0) {
-          await attributeSaleToSalesperson({
+          await setSaleForClient({
             periodId,
             salesperson,
             clientName: client.name,
@@ -329,6 +300,15 @@ export async function DELETE(req: NextRequest) {
 
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  const client = await prisma.client.findUnique({ where: { id } });
+  if (!client) return NextResponse.json({ ok: true, alreadyGone: true });
+
+  // Clear any sales rows for this client across periods we can see
+  const periodId = req.nextUrl.searchParams.get("periodId");
+  if (periodId) {
+    await clearSaleForClient({ periodId, clientName: client.name });
+  }
 
   await prisma.clientLedger.deleteMany({ where: { clientId: id } });
   await prisma.receivable.deleteMany({ where: { clientId: id } });
