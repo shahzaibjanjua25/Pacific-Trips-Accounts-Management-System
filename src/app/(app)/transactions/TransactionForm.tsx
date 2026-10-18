@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Plus, X } from "lucide-react";
+import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
 import { LookupSelect } from "@/components/LookupSelect";
+import { useMutate } from "@/components/useMutate";
 
 type Txn = {
   id: string;
@@ -51,12 +52,9 @@ const CATEGORIES = [
   "Salary Payment",
   "Commission Payment",
   "Refund to Client",
-  // "Supplier Advance",
   "Employee Loan",
   "Office Expense",
   "Marketing Expense",
-  // "Owner Capital",
-  // "Owner Withdrawal",
   "Bank Transfer",
   "Other",
 ];
@@ -119,6 +117,7 @@ export function TransactionManager({
   txns: Txn[];
 }) {
   const router = useRouter();
+  const mutate = useMutate();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Txn | null>(null);
   const [loading, setLoading] = useState(false);
@@ -139,7 +138,6 @@ export function TransactionManager({
     form.category.toLowerCase().includes("staff advance");
   const isOutboundCategory = OUTBOUND_CHECK_CATEGORIES.includes(form.category);
   const isBankTransfer = form.category === "Bank Transfer";
-  // Employee loan: only check limit on repayment (debit). Credit (giving loan) is unlimited.
   const shouldCheckOutstanding =
     !isBankTransfer &&
     (isClientCategory ||
@@ -321,16 +319,13 @@ export function TransactionManager({
     if (!isRefundCategory) return null;
     const name = showOther ? form.otherName.trim() : form.party || form.subCategory;
     if (!name) return null;
-
     if (clientPaid[name]) return clientPaid[name].refundable;
-
     const key = Object.keys(clientPaid).find((k) => {
       const a = k.toLowerCase().trim();
       const b = name.toLowerCase().trim();
       return a === b || a.includes(b) || b.includes(a);
     });
     if (key) return clientPaid[key].refundable;
-
     return 0;
   })();
 
@@ -406,11 +401,10 @@ export function TransactionManager({
       form.category === "Employee Loan" ||
       form.category.toLowerCase().includes("employee loan") ||
       form.category.toLowerCase().includes("staff advance");
-    // Loan repayment = debit (money back from employee). Giving loan = credit (no limit).
     const movingAmount = isClientReceipt
       ? receivedIn
       : isEmployeeLoanTxn
-        ? receivedIn // debit = repayment amount to check against loan remaining
+        ? receivedIn
         : paidOut;
 
     const isTypedNew = showOther && form.otherName.trim().length > 0;
@@ -433,7 +427,6 @@ export function TransactionManager({
           liveExists = data.exists !== false;
           liveReason = typeof data.reason === "string" ? data.reason : undefined;
 
-          // Form Total Package / Agreed Cost can raise the allowed amount live
           if (isClientReceipt) {
             const formPkg = parseFloat(form.clientTotalPackage) || 0;
             const paid =
@@ -466,27 +459,6 @@ export function TransactionManager({
         liveOutstanding = outstanding?.value ?? null;
         liveExists = outstanding?.exists ?? true;
         liveReason = outstanding?.reason;
-        if (liveOutstanding != null && isClientReceipt) {
-          const formPkg = parseFloat(form.clientTotalPackage) || 0;
-          const paid = outstanding?.amountReceived ?? 0;
-          const serverTotal = outstanding?.totalPackage ?? 0;
-          const total = formPkg > 0 ? formPkg : serverTotal;
-          if (total > 0) {
-            liveOutstanding = Math.max(0, total - paid);
-          }
-        } else if (liveOutstanding != null && isHotelCategory) {
-          const formCost = parseFloat(form.hotelAgreedCost) || 0;
-          const paid = outstanding?.amountPaid ?? 0;
-          const serverTotal = outstanding?.totalAmount ?? 0;
-          const serverRemaining = Math.max(0, serverTotal - paid);
-          liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
-        } else if (liveOutstanding != null && isTransportCategory) {
-          const formCost = parseFloat(form.transportAgreedCost) || 0;
-          const paid = outstanding?.amountPaid ?? 0;
-          const serverTotal = outstanding?.totalAmount ?? 0;
-          const serverRemaining = Math.max(0, serverTotal - paid);
-          liveOutstanding = serverRemaining + (formCost > 0 ? formCost : 0);
-        }
       }
 
       if (isRefundCategory && clientRefundable != null) {
@@ -520,7 +492,7 @@ export function TransactionManager({
           alert(
             ` Cannot refund more than the client paid us\n\n` +
               `Client: ${party}\n` +
-              `Refundable (paid - already refunded): ${formatPKR(liveOutstanding)}\n` +
+              `Refundable: ${formatPKR(liveOutstanding)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
               `Excess: ${formatPKR(over)}`
           );
@@ -584,27 +556,31 @@ export function TransactionManager({
         salesperson: form.salesperson || null,
         isNewClient: isTypedNew,
       };
-      const res = await fetch("/api/transactions", {
-        method: editing ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editing ? { ...payload, id: editing.id } : payload),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        let msg = text;
-        try {
-          const parsed = JSON.parse(text);
-          if (parsed?.error) msg = parsed.error;
-        } catch {
-          /* keep raw text */
+
+      await mutate(
+        editing ? "Updating transaction…" : "Saving transaction…",
+        async () => {
+          const res = await fetch("/api/transactions", {
+            method: editing ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(editing ? { ...payload, id: editing.id } : payload),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            let msg = text;
+            try {
+              const parsed = JSON.parse(text);
+              if (parsed?.error) msg = parsed.error;
+            } catch {
+              /* keep raw text */
+            }
+            throw new Error(msg);
+          }
         }
-        alert(" Cannot add transaction\n\n" + msg);
-        return;
-      }
+      );
       setOpen(false);
-      router.refresh();
     } catch (err) {
-      alert("Failed: " + err);
+      alert(" Cannot add transaction\n\n" + err);
     } finally {
       setLoading(false);
     }
@@ -614,9 +590,10 @@ export function TransactionManager({
     if (!confirm("Delete this transaction? Bank balance will be reversed.")) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/transactions?id=${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
-      router.refresh();
+      await mutate("Deleting transaction…", async () => {
+        const res = await fetch(`/api/transactions?id=${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(await res.text());
+      });
     } catch (err) {
       alert("Delete failed: " + err);
     } finally {
@@ -626,249 +603,6 @@ export function TransactionManager({
 
   const totalDebit = txns.reduce((s, t) => s + t.debit, 0);
   const totalCredit = txns.reduce((s, t) => s + t.credit, 0);
-
-  const debitNum = parseFloat(form.debit) || 0;
-  const creditNum = parseFloat(form.credit) || 0;
-
-  const liveHint = (() => {
-    if (!shouldCheckOutstanding) return null;
-
-    const movingAmount = isClientCategory
-      ? debitNum
-      : isEmployeeLoan
-        ? debitNum // only repayment (debit) is limited against outstanding loan
-        : creditNum;
-
-    // Compute the effective ceiling ONCE here so it's visible everywhere below.
-    const formPkg = parseFloat(form.clientTotalPackage) || 0;
-    const formHotel = parseFloat(form.hotelAgreedCost) || 0;
-    const formTransport = parseFloat(form.transportAgreedCost) || 0;
-
-    let effectiveLimit: number | null = outstanding ? outstanding.value : null;
-    let serverRemaining = 0;
-
-    if (outstanding && outstanding.exists) {
-      if (isClientCategory) {
-        const paid = outstanding.amountReceived ?? 0;
-        const serverTotal = outstanding.totalPackage ?? 0;
-        const total = formPkg > 0 ? formPkg : serverTotal;
-        if (total > 0 || formPkg > 0) {
-          effectiveLimit = Math.max(0, total - paid);
-        }
-      } else if (isHotelCategory) {
-        const paid = outstanding.amountPaid ?? 0;
-        const serverTotal = outstanding.totalAmount ?? 0;
-        serverRemaining = Math.max(0, serverTotal - paid);
-        // A new booking raises the ceiling by its agreed cost.
-        effectiveLimit = serverRemaining + (formHotel > 0 ? formHotel : 0);
-      } else if (isTransportCategory) {
-        const paid = outstanding.amountPaid ?? 0;
-        const serverTotal = outstanding.totalAmount ?? 0;
-        serverRemaining = Math.max(0, serverTotal - paid);
-        // A new job raises the ceiling by its agreed cost.
-        effectiveLimit = serverRemaining + (formTransport > 0 ? formTransport : 0);
-      }
-    }
-
-    if (isOutboundCategory && debitNum > 0 && creditNum === 0) {
-      return (
-        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          You put the amount in <strong>Debit</strong>, but{" "}
-          <strong>{form.category}</strong> is money going OUT. Put it in{" "}
-          <strong>Credit</strong>. (It will be auto-moved on save.)
-        </p>
-      );
-    }
-    if (isClientCategory && creditNum > 0 && debitNum === 0) {
-      return (
-        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          You put the amount in <strong>Credit</strong>, but{" "}
-          <strong>{form.category}</strong> is money coming IN. Put it in{" "}
-          <strong>Debit</strong>. (It will be auto-moved on save.)
-        </p>
-      );
-    }
-
-    if (isRefundCategory) {
-      const name = showOther
-        ? form.otherName.trim()
-        : form.party || form.subCategory;
-      if (!name) return null;
-      if (clientRefundable == null) return null;
-
-      if (movingAmount > clientRefundable) {
-        return (
-          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            Refund exceeds what the client paid us. Refundable is{" "}
-            <strong>{formatPKR(clientRefundable)}</strong>, you entered{" "}
-            <strong>{formatPKR(movingAmount)}</strong>. Saving will be blocked.
-          </p>
-        );
-      }
-      if (clientRefundable === 0) {
-        return (
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            This client has <strong>Rs 0</strong> refundable - either they haven&apos;t
-            paid us, or they&apos;ve already been fully refunded.
-          </p>
-        );
-      }
-      if (movingAmount > 0) {
-        return (
-          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            Refundable: <strong>{formatPKR(clientRefundable)}</strong>
-            {"  ·  "}
-            Remaining after this refund:{" "}
-            <strong>{formatPKR(Math.max(0, clientRefundable - movingAmount))}</strong>
-          </p>
-        );
-      }
-      return (
-        <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          Refundable from this client: <strong>{formatPKR(clientRefundable)}</strong>
-        </p>
-      );
-    }
-
-    if (isEmployeeLoan && creditNum > 0 && debitNum <= 0) {
-      return (
-        <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          Giving loan (credit): this amount will be added to the employee&apos;s loan balance. No repayment limit applies.
-        </p>
-      );
-    }
-
-    if (movingAmount <= 0) return null;
-    if (outstanding == null) return null;
-
-    if (!outstanding.exists) {
-      if (isClientCategory) {
-        if (formPkg > 0) {
-          if (movingAmount > formPkg) {
-            return (
-              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-                Receipt ({formatPKR(movingAmount)}) exceeds Total Package (
-                {formatPKR(formPkg)}). Saving will be blocked.
-              </p>
-            );
-          }
-          return (
-            <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-              New client - package {formatPKR(formPkg)}, paying {formatPKR(movingAmount)},
-              remaining {formatPKR(Math.max(0, formPkg - movingAmount))}
-            </p>
-          );
-        }
-      }
-      if (isHotelCategory && formHotel > 0) {
-        // No existing payable — the new booking is the entire ceiling
-        if (movingAmount > formHotel) {
-          return (
-            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-              Payment ({formatPKR(movingAmount)}) exceeds new booking cost (
-              {formatPKR(formHotel)}). Saving will be blocked.
-            </p>
-          );
-        }
-        return (
-          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            New hotel booking - cost {formatPKR(formHotel)}, paying{" "}
-            {formatPKR(movingAmount)}, remaining{" "}
-            {formatPKR(Math.max(0, formHotel - movingAmount))}
-          </p>
-        );
-      }
-      if (isTransportCategory && formTransport > 0) {
-        // No existing payable — the new job is the entire ceiling
-        if (movingAmount > formTransport) {
-          return (
-            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-              Payment ({formatPKR(movingAmount)}) exceeds new job cost (
-              {formatPKR(formTransport)}). Saving will be blocked.
-            </p>
-          );
-        }
-        return (
-          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-            New transport job - cost {formatPKR(formTransport)}, paying{" "}
-            {formatPKR(movingAmount)}, remaining{" "}
-            {formatPKR(Math.max(0, formTransport - movingAmount))}
-          </p>
-        );
-      }
-      return (
-        <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          No existing record for this party in this month - will be treated as new.
-        </p>
-      );
-    }
-
-    if (effectiveLimit == null) return null;
-
-    if (movingAmount > effectiveLimit) {
-      return (
-        <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-          Amount exceeds what is owed. Limit is{" "}
-          <strong>{formatPKR(effectiveLimit)}</strong>, but you entered{" "}
-          <strong>{formatPKR(movingAmount)}</strong>. Saving will be blocked.
-          {isClientCategory && formPkg > 0 ? (
-            <span className="block mt-1 text-slate-600">
-              Using Total Package {formatPKR(formPkg)}
-              {outstanding.amountReceived != null
-                ? ` minus already received ${formatPKR(outstanding.amountReceived)}`
-                : ""}
-              .
-            </span>
-          ) : null}
-          {isHotelCategory && formHotel > 0 ? (
-            <span className="block mt-1 text-slate-600">
-              Ceiling = existing remaining {formatPKR(serverRemaining)} + new
-              booking cost {formatPKR(formHotel)}.
-            </span>
-          ) : null}
-          {isTransportCategory && formTransport > 0 ? (
-            <span className="block mt-1 text-slate-600">
-              Ceiling = existing remaining {formatPKR(serverRemaining)} + new
-              job cost {formatPKR(formTransport)}.
-            </span>
-          ) : null}
-        </p>
-      );
-    }
-
-    return (
-      <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5 col-span-2 md:col-span-4">
-        Outstanding: <strong>{formatPKR(effectiveLimit)}</strong>
-        {"  ·  "}
-        Remaining after this:{" "}
-        <strong>{formatPKR(Math.max(0, effectiveLimit - movingAmount))}</strong>
-        {isClientCategory && formPkg > 0 ? (
-          <span className="block text-slate-600">
-            Package {formatPKR(formPkg)}
-            {outstanding.amountReceived != null
-              ? `  ·  received so far ${formatPKR(outstanding.amountReceived)}`
-              : ""}
-          </span>
-        ) : null}
-        {isHotelCategory && formHotel > 0 ? (
-          <span className="block text-slate-600">
-            Including new booking cost {formatPKR(formHotel)}
-            {outstanding.amountPaid != null
-              ? `  ·  already paid ${formatPKR(outstanding.amountPaid)}`
-              : ""}
-          </span>
-        ) : null}
-        {isTransportCategory && formTransport > 0 ? (
-          <span className="block text-slate-600">
-            Including new job cost {formatPKR(formTransport)}
-            {outstanding.amountPaid != null
-              ? `  ·  already paid ${formatPKR(outstanding.amountPaid)}`
-              : ""}
-          </span>
-        ) : null}
-      </p>
-    );
-  })();
 
   return (
     <div className="space-y-4">
@@ -881,17 +615,19 @@ export function TransactionManager({
             Credits: <strong>{formatPKR(totalCredit)}</strong>
           </span>
           <span
-            className={`px-3 py-1.5 rounded-md ${totalDebit - totalCredit === 0
-              ? "bg-emerald-100 text-emerald-800"
-              : "bg-amber-100 text-amber-800"
-              }`}
+            className={`px-3 py-1.5 rounded-md ${
+              totalDebit - totalCredit === 0
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-amber-100 text-amber-800"
+            }`}
           >
             Balance (D-C): <strong>{formatPKR(totalDebit - totalCredit)}</strong>
           </span>
         </div>
         <button
           onClick={openAdd}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+          disabled={loading}
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
         >
           <Plus size={16} /> Add Transaction
         </button>
@@ -1130,8 +866,6 @@ export function TransactionManager({
               </>
             )}
 
-            {liveHint}
-
             <label className="block text-xs col-span-2">
               <span className="text-slate-600 font-medium">
                 {isBankTransfer
@@ -1196,8 +930,9 @@ export function TransactionManager({
           <button
             type="submit"
             disabled={loading}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
+            {loading && <Loader2 size={16} className="animate-spin" />}
             {loading ? "Saving..." : editing ? "Update" : "Save Transaction"}
           </button>
         </form>
@@ -1260,13 +995,15 @@ export function TransactionManager({
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button
                         onClick={() => openEdit(t)}
-                        className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+                        disabled={loading}
+                        className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
                       >
                         <Pencil size={15} />
                       </button>
                       <button
                         onClick={() => remove(t.id)}
-                        className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
+                        disabled={loading}
+                        className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40"
                       >
                         <Trash2 size={15} />
                       </button>

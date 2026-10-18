@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ChevronRight, Pencil, Trash2, X, Plus } from "lucide-react";
+import { ChevronRight, Pencil, Trash2, X, Plus, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
 import { LookupSelect } from "@/components/LookupSelect";
+import { useMutate } from "@/components/useMutate";
 
 type Row = {
   id: string;
@@ -20,10 +21,7 @@ type Row = {
   status: string;
   tripInfo: string;
   salesperson: string | null;
-  
-  // NEW — which bank/cash account this client's payments went through
   bankAccount: string | null;
-  // Receivable-side fields (nullable if client has no receivable yet)
   bookingDate: string | null;
   dueDate: string | null;
   tripStart: string | null;
@@ -36,13 +34,11 @@ type Row = {
 };
 
 const emptyForm = {
-  // Client master
   name: "",
   phone: "",
   contact: "",
   email: "",
   notes: "",
-  // Receivable
   totalPackage: "",
   amountPaid: "",
   bankAccount: "Faysal Bank",
@@ -67,6 +63,7 @@ export function ClientsTable({
   periodId: string;
 }) {
   const router = useRouter();
+  const mutate = useMutate();
   const [editing, setEditing] = useState<Row | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -115,7 +112,6 @@ export function ClientsTable({
     if (!editing && !adding) return;
     setLoading(true);
     try {
-      // Common payload for both Client master and Receivable fields
       const common = {
         name: form.name,
         phone: form.phone || null,
@@ -142,29 +138,32 @@ export function ClientsTable({
       };
 
       if (adding) {
-        const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...common, periodId }),
+        await mutate("Creating client…", async () => {
+          const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...common, periodId }),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`${res.status} ${res.statusText}: ${text}`);
+          }
         });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`${res.status} ${res.statusText}: ${text}`);
-        }
         setAdding(false);
       } else if (editing) {
-        const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: editing.id, ...common }),
+        await mutate("Updating client…", async () => {
+          const res = await fetch(`/api/clients/manage?periodId=${periodId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: editing.id, ...common }),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`${res.status} ${res.statusText}: ${text}`);
+          }
         });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`${res.status} ${res.statusText}: ${text}`);
-        }
         setEditing(null);
       }
-      router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       alert("Save failed:\n" + msg);
@@ -178,11 +177,12 @@ export function ClientsTable({
       return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/clients/manage?id=${id}`, {
-        method: "DELETE",
+      await mutate("Deleting client…", async () => {
+        const res = await fetch(`/api/clients/manage?id=${id}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(await res.text());
       });
-      if (!res.ok) throw new Error(await res.text());
-      router.refresh();
     } catch (err) {
       alert("Delete failed: " + err);
     } finally {
@@ -206,7 +206,6 @@ export function ClientsTable({
             </button>
           </div>
 
-          {/* ─── Client master ─── */}
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Client Details
@@ -243,7 +242,6 @@ export function ClientsTable({
             </div>
           </section>
 
-          {/* ─── Sale / package ─── */}
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Package & Payment
@@ -296,7 +294,6 @@ export function ClientsTable({
             </p>
           </section>
 
-          {/* ─── Trip info ─── */}
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Trip Information
@@ -346,7 +343,6 @@ export function ClientsTable({
             </div>
           </section>
 
-          {/* ─── Adjustments ─── */}
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Adjustments
@@ -390,8 +386,9 @@ export function ClientsTable({
             <button
               type="submit"
               disabled={loading}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
             >
+              {loading && <Loader2 size={16} className="animate-spin" />}
               {loading ? "Saving…" : adding ? "Create Client" : "Update"}
             </button>
             <button
@@ -409,7 +406,8 @@ export function ClientsTable({
         <button
           type="button"
           onClick={openAdd}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+          disabled={loading}
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
         >
           <Plus size={16} /> Add Client
         </button>
@@ -516,14 +514,16 @@ export function ClientsTable({
                           <>
                             <button
                               onClick={() => openEdit(r)}
-                              className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+                              disabled={loading}
+                              className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
                               title="Edit"
                             >
                               <Pencil size={15} />
                             </button>
                             <button
                               onClick={() => remove(r.id)}
-                              className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
+                              disabled={loading}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40"
                               title="Delete"
                             >
                               <Trash2 size={15} />
