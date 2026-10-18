@@ -17,7 +17,7 @@ export type FieldDef = {
   money?: boolean;
   showInTable?: boolean;
   transient?: boolean;
-  /** Display in table only - never sent to the form or the API */
+  /** Display in table only - never sent to the API */
   readOnly?: boolean;
   /** Load options dynamically from /api/lookup?key=<lookupKey> */
   lookupKey?: string;
@@ -73,8 +73,9 @@ export function CrudPanel({
   function openEdit(row: Row) {
     setEditing(row);
     const init: Record<string, string> = {};
+    // ⭐ CHANGE: initialize EVERY field (including readOnly) so the form
+    // shows the current value of each column on the row.
     fields.forEach((f) => {
-      if (f.readOnly) return;
       const v = row[f.key];
       if (f.type === "date" && v) {
         try {
@@ -106,6 +107,8 @@ export function CrudPanel({
     try {
       const payload: Record<string, unknown> = { periodId, ...extraPayload };
       fields.forEach((f) => {
+        // ⭐ CHANGE: still skip readOnly fields from the payload (server rejects them),
+        // but the form now displays them.
         if (f.readOnly) return;
         if (f.type === "number") {
           const n = parseFloat(form[f.key]);
@@ -238,12 +241,22 @@ export function CrudPanel({
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {fields.map((f) => {
-              if (f.readOnly) return null;
+              // ⭐ CHANGE: render EVERY field.
+              // - readOnly fields are shown but disabled (so you can see the value)
+              // - all other fields are editable
+              const isReadOnly = f.readOnly === true;
               return (
                 <label key={f.key} className="block text-xs">
-                  <span className="text-slate-600 font-medium">{f.label}</span>
+                  <span className="text-slate-600 font-medium">
+                    {f.label}
+                    {isReadOnly && (
+                      <span className="text-[10px] text-slate-400 ml-1">
+                        (auto)
+                      </span>
+                    )}
+                  </span>
 
-                  {f.lookupKey ? (
+                  {f.lookupKey && !isReadOnly ? (
                     <LookupSelect
                       lookupKey={f.lookupKey}
                       periodId={periodId}
@@ -251,13 +264,20 @@ export function CrudPanel({
                       onChange={(v) => setField(f.key, v)}
                       required={f.required}
                     />
-                  ) : f.type === "select" ? (
+                  ) : f.type === "select" && !isReadOnly ? (
                     <select
                       value={form[f.key] || ""}
                       onChange={(e) => setField(f.key, e.target.value)}
                       required={f.required}
                       className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
+                      {/* Keep current value if not in options */}
+                      {form[f.key] &&
+                        !(f.options || []).includes(form[f.key]) && (
+                          <option value={form[f.key]}>
+                            {form[f.key]} (current)
+                          </option>
+                        )}
                       {(f.options || []).map((o) => (
                         <option key={o} value={o}>
                           {o}
@@ -268,16 +288,26 @@ export function CrudPanel({
                     <textarea
                       value={form[f.key] || ""}
                       onChange={(e) => setField(f.key, e.target.value)}
-                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      disabled={isReadOnly}
                       rows={2}
+                      className={`mt-1 w-full border rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                        isReadOnly
+                          ? "border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed"
+                          : "border-amber-300 bg-white"
+                      }`}
                     />
                   ) : (
                     <input
                       type={f.type || "text"}
                       value={form[f.key] || ""}
                       onChange={(e) => setField(f.key, e.target.value)}
-                      required={f.required}
-                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      required={f.required && !isReadOnly}
+                      disabled={isReadOnly}
+                      className={`mt-1 w-full border rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                        isReadOnly
+                          ? "border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed"
+                          : "border-amber-300 bg-white"
+                      }`}
                     />
                   )}
                 </label>
