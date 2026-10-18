@@ -27,8 +27,14 @@ export async function GET() {
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const [
-    periods, employees, clients, receivables, payables,
-    payroll, bankBalances, assets, vadets,
+    periods,
+    employees,
+    clients,
+    receivables,
+    payables,
+    payroll,
+    bankBalances,
+    assets,
   ] = await Promise.all([
     prisma.period.count(),
     prisma.employee.count(),
@@ -38,12 +44,17 @@ export async function GET() {
     prisma.payrollEntry.count(),
     prisma.bankBalance.count(),
     prisma.asset.count(),
-    prisma.vadet.count(),
   ]);
 
   return NextResponse.json({
-    periods, employees, clients, receivables, payables,
-    payroll, bankBalances, assets, vadets,
+    periods,
+    employees,
+    clients,
+    receivables,
+    payables,
+    payroll,
+    bankBalances,
+    assets,
     isEmpty: periods === 0,
   });
 }

@@ -71,21 +71,7 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Ticketing ──
-    if (category.includes("ticketing")) {
-      const rows = await prisma.ticketing.findMany({
-        where: periodId ? { periodId } : {},
-        orderBy: { createdAt: "desc" },
-      });
-      const options: Option[] = rows.map((t) => ({
-        label: `${t.airline || "Airline"} - ${t.clientName || "-"}`,
-        value: t.airline || t.clientName || "Ticketing",
-        remaining: 0,
-        id: t.id,
-        entityType: "ticketing",
-      }));
-      options.push({ label: "Other...", value: "__other__", remaining: 0 });
-      return NextResponse.json(options);
-    }
+   
 
     // ── Supplier / Payable (generic) ──
     if (category.includes("supplier") || category.includes("payable")) {
@@ -368,27 +354,7 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Supplier Advance — list SUPPLIERS ──
-    if (category.includes("advance") && !category.includes("employee")) {
-      const rows = await prisma.payable.findMany({
-        where: periodId ? { periodId } : {},
-        orderBy: { supplierName: "asc" },
-      });
-      const seen = new Set<string>();
-      const options: Option[] = [];
-      for (const p of rows) {
-        if (seen.has(p.supplierName)) continue;
-        seen.add(p.supplierName);
-        options.push({
-          label: `${p.supplierName} (${p.category || "Supplier"})`,
-          value: p.supplierName,
-          remaining: p.remaining,
-          id: p.id,
-          entityType: "payable",
-        });
-      }
-      options.push({ label: "Other...", value: "__other__", remaining: 0 });
-      return NextResponse.json(options);
-    }
+    
 
     // ── Employee Loan ──
     if (category.includes("employee loan") || category.includes("staff advance")) {

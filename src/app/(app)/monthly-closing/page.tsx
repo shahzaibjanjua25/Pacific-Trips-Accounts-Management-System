@@ -22,7 +22,6 @@ export default async function MonthlyClosingPage({
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
   const data = await getDashboardData(current.id);
 
-  // Safe if BalanceSheetLine table is not migrated yet
   let bsAssets = 0;
   let bsLiab = 0;
   let bsEquity = 0;
@@ -45,7 +44,6 @@ export default async function MonthlyClosingPage({
     bsReady = false;
   }
 
-  // Dashboard exposes ratios.netPosition (not totals.netPosition)
   const netPosition = data.ratios?.netPosition ?? 0;
 
   return (
@@ -54,8 +52,8 @@ export default async function MonthlyClosingPage({
         <div>
           <h1 className="text-2xl font-bold">Monthly Closing — {current.label}</h1>
           <p className="text-sm text-slate-500">
-            Revenue, Direct Costs, Operating Expenses, Profitability, Position &amp; Balance
-            Sheet
+            Revenue, Direct Costs, Operating Expenses, Profitability, Position
+            &amp; Balance Sheet
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
@@ -64,7 +62,7 @@ export default async function MonthlyClosingPage({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border p-5 space-y-2 text-sm">
           <h2 className="font-semibold">Revenue</h2>
-          <Row label="Trip Revenue" value={data.profitability.tripRevenue} />
+          <Row label="Trip Revenue (packages sold)" value={data.profitability.tripRevenue} />
           <Row label="Total Revenue" value={data.profitability.tripRevenue} bold />
           <h2 className="font-semibold pt-3">Direct Trip Costs</h2>
           <Row label="Direct Trip Costs" value={data.profitability.directTripCosts} />
@@ -87,14 +85,19 @@ export default async function MonthlyClosingPage({
         <div className="bg-white rounded-xl border p-5 space-y-2 text-sm">
           <h2 className="font-semibold">Financial Position</h2>
           <Row label="Bank Balance" value={data.cash.totalBank} />
-          <Row label="Cash Balance" value={data.cash.pettyCash} />
           <Row label="Receivables" value={data.receivables.clientOutstanding} />
           <Row label="Payables" value={data.payables.supplierRemaining} />
           <Row label="Assets (at cost)" value={data.oneTime.assets} />
           <Row label="Net Position" value={netPosition} bold danger={netPosition < 0} />
-          <h2 className="font-semibold pt-3">Trip Analysis</h2>
-          <Row label="Gross Trip Profit" value={data.profitability.grossTripProfit} />
-          <Row label="Net Trip Profit" value={data.profitability.netTripProfit} />
+          <h2 className="font-semibold pt-3">Summary</h2>
+          <Row
+            label="Gross Trip Profit"
+            value={data.profitability.grossTripProfit}
+          />
+          <Row
+            label="Net Trip Profit"
+            value={data.profitability.netTripProfit}
+          />
           <p className="text-xs text-slate-500 pt-4">
             Margin: {data.profitability.marginPct.toFixed(1)}% · Free Cash:{" "}
             {formatPKR(data.cash.freeCash)}
@@ -107,7 +110,8 @@ export default async function MonthlyClosingPage({
           <div>
             <h2 className="font-semibold text-slate-800">Balance Sheet</h2>
             <p className="text-xs text-slate-500">
-              Editable statement for this month (add / edit / delete lines on the full page).
+              Editable statement for this month (add / edit / delete lines on the
+              full page).
             </p>
           </div>
           <Link
@@ -120,13 +124,13 @@ export default async function MonthlyClosingPage({
         {!bsReady ? (
           <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             Balance Sheet table is not set up yet. Run{" "}
-            <code className="text-xs bg-white px-1 rounded">npx prisma db push</code> then
-            open the Balance Sheet page.
+            <code className="text-xs bg-white px-1 rounded">npx prisma db push</code>{" "}
+            then open the Balance Sheet page.
           </p>
         ) : bsAssets === 0 && bsLiab === 0 && bsEquity === 0 ? (
           <p className="text-sm text-slate-500">
-            No balance sheet lines yet. Open the Balance Sheet page to auto-seed from bank,
-            receivables, payables and assets.
+            No balance sheet lines yet. Open the Balance Sheet page to auto-seed
+            from bank, receivables, payables and assets.
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">

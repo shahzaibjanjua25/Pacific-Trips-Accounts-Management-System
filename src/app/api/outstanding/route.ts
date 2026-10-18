@@ -201,30 +201,7 @@ export async function GET(req: NextRequest) {
   }
 
   // -- Ticketing --
-  if (category.includes("ticketing")) {
-    const rows = await prisma.payable.findMany({
-      where: { periodId, category: { contains: "Ticketing" } },
-    });
-    if (rows.length === 0) {
-      return NextResponse.json({
-        outstanding: 0,
-        exists: false,
-        reason: "no-ticketing-payables-in-period",
-      });
-    }
-    const p =
-      rows.find((r) => nameMatch(r.supplierName, party)) ??
-      rows.find((r) => lastNameMatch(r.supplierName, party));
-    if (p) {
-      return NextResponse.json({ outstanding: p.remaining, exists: true });
-    }
-    const totalRemaining = rows.reduce((s, r) => s + r.remaining, 0);
-    return NextResponse.json({
-      outstanding: totalRemaining,
-      exists: true,
-      reason: "no-name-match",
-    });
-  }
+  
 
   // -- Supplier / Payable (generic) --
   if (category.includes("supplier") || category.includes("payable")) {

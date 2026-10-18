@@ -282,13 +282,7 @@ async function lookupOutstanding(
     return newJob > 0 ? newJob : null;
   }
 
-  if (category.includes("ticketing")) {
-    const rows = await prisma.payable.findMany({
-      where: { periodId, category: { contains: "Ticketing" } },
-    });
-    const p = find(rows, "supplierName");
-    return p ? p.remaining : null;
-  }
+ 
 
   if (category.includes("supplier") || category.includes("payable")) {
     const rows = await prisma.payable.findMany({ where: { periodId } });
