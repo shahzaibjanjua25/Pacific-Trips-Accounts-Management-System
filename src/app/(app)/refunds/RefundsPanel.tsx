@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Plus, X } from "lucide-react";
+import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
+import { useMutate } from "@/components/useMutate";
 
 type Client = { id: string; name: string };
 type Account = { id: string; name: string; balance: number };
@@ -46,13 +47,13 @@ export function RefundsPanel({
   rows: RefundRow[];
 }) {
   const router = useRouter();
+  const mutate = useMutate();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<RefundRow | null>(null);
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
 
-  // Load bank accounts for the account dropdown
   useEffect(() => {
     let cancelled = false;
     fetch("/api/accounts")
@@ -122,14 +123,18 @@ export function RefundsPanel({
         notes: form.notes || null,
         bankAccount: form.bankAccount,
       };
-      const res = await fetch("/api/refunds", {
-        method: editing ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editing ? { ...payload, id: editing.id } : payload),
-      });
-      if (!res.ok) throw new Error(await res.text());
+      await mutate(
+        editing ? "Updating refund…" : "Saving refund…",
+        async () => {
+          const res = await fetch("/api/refunds", {
+            method: editing ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(editing ? { ...payload, id: editing.id } : payload),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        }
+      );
       setOpen(false);
-      router.refresh();
     } catch (err) {
       alert("Failed: " + err);
     } finally {
@@ -142,9 +147,10 @@ export function RefundsPanel({
       return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/refunds?id=${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
-      router.refresh();
+      await mutate("Deleting refund…", async () => {
+        const res = await fetch(`/api/refunds?id=${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(await res.text());
+      });
     } catch (err) {
       alert("Delete failed: " + err);
     } finally {
@@ -169,7 +175,8 @@ export function RefundsPanel({
         </div>
         <button
           onClick={openAdd}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+          disabled={loading}
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
         >
           <Plus size={16} /> Add Refund
         </button>
@@ -281,8 +288,9 @@ export function RefundsPanel({
           <button
             type="submit"
             disabled={loading || !form.clientName}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
+            {loading && <Loader2 size={16} className="animate-spin" />}
             {loading ? "Saving…" : editing ? "Update" : "Save"}
           </button>
         </form>
@@ -350,14 +358,16 @@ export function RefundsPanel({
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button
                         onClick={() => openEdit(r)}
-                        className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+                        disabled={loading}
+                        className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
                         title="Edit"
                       >
                         <Pencil size={15} />
                       </button>
                       <button
                         onClick={() => remove(r.id)}
-                        className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
+                        disabled={loading}
+                        className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40"
                         title="Delete"
                       >
                         <Trash2 size={15} />

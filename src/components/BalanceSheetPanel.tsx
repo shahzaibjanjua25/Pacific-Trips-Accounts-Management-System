@@ -13,8 +13,10 @@ import {
   TrendingDown,
   AlertCircle,
   CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
+import { useMutate } from "./useMutate";
 
 export type BSLine = {
   id: string;
@@ -40,6 +42,7 @@ export function BalanceSheetPanel({
   initialRows,
 }: Props) {
   const router = useRouter();
+  const mutate = useMutate();
   const [rows, setRows] = useState<BSLine[]>(initialRows);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState({
@@ -74,22 +77,23 @@ export function BalanceSheetPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/balance-sheet", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id,
-          label: draft.label.trim(),
-          amount: parseFloat(draft.amount) || 0,
-          section: draft.section,
-          notes: draft.notes || null,
-        }),
+      await mutate("Updating balance sheet line…", async () => {
+        const res = await fetch("/api/balance-sheet", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id,
+            label: draft.label.trim(),
+            amount: parseFloat(draft.amount) || 0,
+            section: draft.section,
+            notes: draft.notes || null,
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const updated = await res.json();
+        setRows((prev) => prev.map((r) => (r.id === id ? updated : r)));
       });
-      if (!res.ok) throw new Error(await res.text());
-      const updated = await res.json();
-      setRows((prev) => prev.map((r) => (r.id === id ? updated : r)));
       setEditingId(null);
-      router.refresh();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -102,10 +106,11 @@ export function BalanceSheetPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/balance-sheet?id=${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
-      setRows((prev) => prev.filter((r) => r.id !== id));
-      router.refresh();
+      await mutate("Deleting balance sheet line…", async () => {
+        const res = await fetch(`/api/balance-sheet?id=${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(await res.text());
+        setRows((prev) => prev.filter((r) => r.id !== id));
+      });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -121,23 +126,24 @@ export function BalanceSheetPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/balance-sheet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodId,
-          section,
-          label: newRow.label.trim(),
-          amount: parseFloat(newRow.amount) || 0,
-          notes: newRow.notes || null,
-        }),
+      await mutate("Adding balance sheet line…", async () => {
+        const res = await fetch("/api/balance-sheet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            periodId,
+            section,
+            label: newRow.label.trim(),
+            amount: parseFloat(newRow.amount) || 0,
+            notes: newRow.notes || null,
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const created = await res.json();
+        setRows((prev) => [...prev, created]);
       });
-      if (!res.ok) throw new Error(await res.text());
-      const created = await res.json();
-      setRows((prev) => [...prev, created]);
       setNewRow({ label: "", amount: "", notes: "" });
       setAddingSection(null);
-      router.refresh();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -155,20 +161,21 @@ export function BalanceSheetPanel({
     setSyncing(true);
     setError(null);
     try {
-      const res = await fetch("/api/balance-sheet/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ periodId }),
+      await mutate("Syncing from books…", async () => {
+        const res = await fetch("/api/balance-sheet/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ periodId }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const result = await res.json();
+        const reload = await fetch(`/api/balance-sheet?periodId=${periodId}`);
+        if (reload.ok) {
+          const fresh = await reload.json();
+          setRows(fresh);
+        }
+        alert(result.message ?? "Synced.");
       });
-      if (!res.ok) throw new Error(await res.text());
-      const result = await res.json();
-      const reload = await fetch(`/api/balance-sheet?periodId=${periodId}`);
-      if (reload.ok) {
-        const fresh = await reload.json();
-        setRows(fresh);
-      }
-      router.refresh();
-      alert(result.message ?? "Synced.");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -234,7 +241,7 @@ export function BalanceSheetPanel({
             disabled={syncing}
             className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
           >
-            <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             {syncing ? "Syncing…" : "Sync from books"}
           </button>
         </div>
@@ -500,9 +507,9 @@ function SectionCard({
                   type="button"
                   disabled={loading}
                   onClick={() => saveEdit(r.id)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs disabled:opacity-50"
                 >
-                  <Check size={14} /> Save
+                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
                 </button>
                 <button
                   type="button"
@@ -530,7 +537,8 @@ function SectionCard({
                 <button
                   type="button"
                   onClick={() => startEdit(r)}
-                  className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+                  disabled={loading}
+                  className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
                   title="Edit"
                 >
                   <Pencil size={14} />
@@ -538,7 +546,8 @@ function SectionCard({
                 <button
                   type="button"
                   onClick={() => remove(r.id)}
-                  className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                  disabled={loading}
+                  className="p-1.5 text-red-600 hover:bg-red-50 rounded disabled:opacity-40"
                   title="Delete"
                 >
                   <Trash2 size={14} />
@@ -577,7 +586,7 @@ function SectionCard({
                 type="button"
                 disabled={loading}
                 onClick={() => addLine(section)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs disabled:opacity-50"
               >
                 <Plus size={14} /> Add
               </button>

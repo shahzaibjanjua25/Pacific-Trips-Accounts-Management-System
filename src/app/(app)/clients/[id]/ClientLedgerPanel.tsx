@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Plus, X } from "lucide-react";
+import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
+import { useMutate } from "@/components/useMutate";
 
 type LedgerRow = {
   id: string;
@@ -44,6 +45,7 @@ export function ClientLedgerPanel({
   rows: LedgerRow[];
 }) {
   const router = useRouter();
+  const mutate = useMutate();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<LedgerRow | null>(null);
   const [form, setForm] = useState(empty);
@@ -93,16 +95,20 @@ export function ClientLedgerPanel({
         receiptRef: form.receiptRef || null,
         enteredBy: form.enteredBy || null,
         notes: form.notes || null,
-        clientId, // needed for POST only; PUT ignores it
+        clientId,
       };
-      const res = await fetch("/api/client-ledger", {
-        method: editing ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editing ? { ...payload, id: editing.id } : payload),
-      });
-      if (!res.ok) throw new Error(await res.text());
+      await mutate(
+        editing ? "Updating ledger row…" : "Saving ledger row…",
+        async () => {
+          const res = await fetch("/api/client-ledger", {
+            method: editing ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(editing ? { ...payload, id: editing.id } : payload),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        }
+      );
       setOpen(false);
-      router.refresh();
     } catch (err) {
       alert("Failed: " + err);
     } finally {
@@ -114,9 +120,10 @@ export function ClientLedgerPanel({
     if (!confirm("Delete this ledger row?")) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/client-ledger?id=${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
-      router.refresh();
+      await mutate("Deleting ledger row…", async () => {
+        const res = await fetch(`/api/client-ledger?id=${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(await res.text());
+      });
     } catch (err) {
       alert("Delete failed: " + err);
     } finally {
@@ -146,7 +153,8 @@ export function ClientLedgerPanel({
         </div>
         <button
           onClick={openAdd}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+          disabled={loading}
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
         >
           <Plus size={16} /> Add Ledger Row
         </button>
@@ -192,8 +200,9 @@ export function ClientLedgerPanel({
           <button
             type="submit"
             disabled={loading}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
+            {loading && <Loader2 size={16} className="animate-spin" />}
             {loading ? "Saving..." : editing ? "Update" : "Save"}
           </button>
         </form>
@@ -233,10 +242,10 @@ export function ClientLedgerPanel({
                     </td>
                     <td className="px-3 py-2">{r.status || "-"}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <button onClick={() => openEdit(r)} className="p-1.5 text-sky-600 hover:bg-sky-50 rounded">
+                      <button onClick={() => openEdit(r)} disabled={loading} className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40">
                         <Pencil size={15} />
                       </button>
-                      <button onClick={() => remove(r.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1">
+                      <button onClick={() => remove(r.id)} disabled={loading} className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40">
                         <Trash2 size={15} />
                       </button>
                     </td>

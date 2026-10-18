@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Plus, X, Check } from "lucide-react";
+import { Pencil, Trash2, Plus, X, Check, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
+import { useMutate } from "./useMutate";
 
 export type BankRow = {
   id: string;
@@ -19,6 +20,7 @@ type Props = {
 
 export function BankAccountsPanel({ periodId, initialRows }: Props) {
   const router = useRouter();
+  const mutate = useMutate();
   const [rows, setRows] = useState<BankRow[]>(initialRows);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BankRow | null>(null);
@@ -52,32 +54,33 @@ export function BankAccountsPanel({ periodId, initialRows }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const payload = {
-        accountName: form.accountName.trim(),
-        balance: parseFloat(form.balance) || 0,
-        periodId,
-      };
-      const res = await fetch("/api/bank", {
-        method: editing ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          editing ? { ...payload, id: editing.id } : payload
-        ),
+      await mutate(editing ? "Updating account…" : "Creating account…", async () => {
+        const payload = {
+          accountName: form.accountName.trim(),
+          balance: parseFloat(form.balance) || 0,
+          periodId,
+        };
+        const res = await fetch("/api/bank", {
+          method: editing ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            editing ? { ...payload, id: editing.id } : payload
+          ),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || `HTTP ${res.status}`);
+        }
+        const saved = await res.json();
+        if (editing) {
+          setRows((prev) =>
+            prev.map((r) => (r.id === editing.id ? { ...r, ...saved } : r))
+          );
+        } else {
+          setRows((prev) => [...prev, saved]);
+        }
       });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || `HTTP ${res.status}`);
-      }
-      const saved = await res.json();
-      if (editing) {
-        setRows((prev) =>
-          prev.map((r) => (r.id === editing.id ? { ...r, ...saved } : r))
-        );
-      } else {
-        setRows((prev) => [...prev, saved]);
-      }
       setOpen(false);
-      router.refresh();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -90,10 +93,11 @@ export function BankAccountsPanel({ periodId, initialRows }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/bank?id=${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
-      setRows((prev) => prev.filter((r) => r.id !== id));
-      router.refresh();
+      await mutate("Deleting account…", async () => {
+        const res = await fetch(`/api/bank?id=${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(await res.text());
+        setRows((prev) => prev.filter((r) => r.id !== id));
+      });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -115,7 +119,8 @@ export function BankAccountsPanel({ periodId, initialRows }: Props) {
         <button
           type="button"
           onClick={openAdd}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
         >
           <Plus size={16} /> Add Account
         </button>
@@ -171,7 +176,7 @@ export function BankAccountsPanel({ periodId, initialRows }: Props) {
             disabled={loading}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium disabled:opacity-50"
           >
-            <Check size={16} />
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
             {loading ? "Saving…" : editing ? "Update" : "Save"}
           </button>
         </form>
@@ -212,7 +217,8 @@ export function BankAccountsPanel({ periodId, initialRows }: Props) {
                       <button
                         type="button"
                         onClick={() => openEdit(r)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-sky-700 hover:bg-sky-50 rounded text-xs font-medium"
+                        disabled={loading}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-sky-700 hover:bg-sky-50 rounded text-xs font-medium disabled:opacity-40"
                         title="Edit"
                       >
                         <Pencil size={14} /> Edit
@@ -220,7 +226,8 @@ export function BankAccountsPanel({ periodId, initialRows }: Props) {
                       <button
                         type="button"
                         onClick={() => remove(r.id)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-red-700 hover:bg-red-50 rounded text-xs font-medium ml-1"
+                        disabled={loading}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-red-700 hover:bg-red-50 rounded text-xs font-medium ml-1 disabled:opacity-40"
                         title="Delete"
                       >
                         <Trash2 size={14} /> Delete

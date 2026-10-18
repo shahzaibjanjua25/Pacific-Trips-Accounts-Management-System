@@ -2,8 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Plus, X, Trash2, Search, Pencil } from "lucide-react";
+import { Plus, X, Trash2, Search, Pencil, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
+import { useMutate } from "@/components/useMutate";
 
 type Row = {
   id: string;
@@ -90,19 +91,17 @@ export function SalesTeamPanel({
   salesEntries: SaleEntry[];
 }) {
   const router = useRouter();
+  const mutate = useMutate();
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<"team" | "target">("team");
 
-  // Sale entry form
   const [open, setOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<SaleEntry | null>(null);
   const [form, setForm] = useState(emptySaleForm);
 
-  // Row edit form
   const [editingRow, setEditingRow] = useState<Row | null>(null);
   const [rowForm, setRowForm] = useState(emptyRowForm);
 
-  // Target form
   const [targetForm, setTargetForm] = useState({
     targetAmount: String(monthlyTarget),
     commissionBaseAmount: String(commissionBase),
@@ -110,7 +109,6 @@ export function SalesTeamPanel({
   });
   const [savingTarget, setSavingTarget] = useState(false);
 
-  // Filters
   const [filterEmployee, setFilterEmployee] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [searchText, setSearchText] = useState("");
@@ -190,17 +188,21 @@ export function SalesTeamPanel({
         amount,
         notes: form.notes,
       };
-      const res = await fetch("/api/sales-team/entry", {
-        method: editingEntry ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          editingEntry ? { ...payload, id: editingEntry.id } : payload
-        ),
-      });
-      if (!res.ok) throw new Error(await readError(res));
+      await mutate(
+        editingEntry ? "Updating sale…" : "Saving sale…",
+        async () => {
+          const res = await fetch("/api/sales-team/entry", {
+            method: editingEntry ? "PUT" : "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(
+              editingEntry ? { ...payload, id: editingEntry.id } : payload
+            ),
+          });
+          if (!res.ok) throw new Error(await readError(res));
+        }
+      );
       setOpen(false);
       setEditingEntry(null);
-      router.refresh();
     } catch (err) {
       alert("Save failed: " + err);
     } finally {
@@ -212,11 +214,12 @@ export function SalesTeamPanel({
     if (!confirm("Delete this sale entry?")) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/sales-team/entry?id=${id}`, {
-        method: "DELETE",
+      await mutate("Deleting sale…", async () => {
+        const res = await fetch(`/api/sales-team/entry?id=${id}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(await readError(res));
       });
-      if (!res.ok) throw new Error(await readError(res));
-      router.refresh();
     } catch (err) {
       alert("Delete failed: " + err);
     } finally {
@@ -224,7 +227,6 @@ export function SalesTeamPanel({
     }
   }
 
-  // ── Row edit ──
   function openEditRow(r: Row) {
     setEditingRow(r);
     setRowForm({
@@ -247,31 +249,32 @@ export function SalesTeamPanel({
     if (!editingRow) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/sales-team/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodId,
-          employeeName: editingRow.name,
-          role: rowForm.role,
-          basicSalary: parseFloat(rowForm.basicSalary) || 0,
-          individualSales: parseFloat(rowForm.individualSales) || 0,
-          saleBase: parseFloat(rowForm.saleBase) || 0,
-          commissionRate: parseFloat(rowForm.commissionRate) || 0,
-          commissionAmt: parseFloat(rowForm.commissionAmt) || 0,
-          netPayable:
-            rowForm.netPayable === ""
-              ? undefined
-              : parseFloat(rowForm.netPayable) || 0,
-          remaining: parseFloat(rowForm.remaining) || 0,
-          amountPaid: parseFloat(rowForm.amountPaid) || 0,
-          status: rowForm.status,
-          notes: rowForm.notes,
-        }),
+      await mutate("Updating sales row…", async () => {
+        const res = await fetch("/api/sales-team/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            periodId,
+            employeeName: editingRow.name,
+            role: rowForm.role,
+            basicSalary: parseFloat(rowForm.basicSalary) || 0,
+            individualSales: parseFloat(rowForm.individualSales) || 0,
+            saleBase: parseFloat(rowForm.saleBase) || 0,
+            commissionRate: parseFloat(rowForm.commissionRate) || 0,
+            commissionAmt: parseFloat(rowForm.commissionAmt) || 0,
+            netPayable:
+              rowForm.netPayable === ""
+                ? undefined
+                : parseFloat(rowForm.netPayable) || 0,
+            remaining: parseFloat(rowForm.remaining) || 0,
+            amountPaid: parseFloat(rowForm.amountPaid) || 0,
+            status: rowForm.status,
+            notes: rowForm.notes,
+          }),
+        });
+        if (!res.ok) throw new Error(await readError(res));
       });
-      if (!res.ok) throw new Error(await readError(res));
       setEditingRow(null);
-      router.refresh();
     } catch (err) {
       alert("Save failed: " + err);
     } finally {
@@ -288,14 +291,15 @@ export function SalesTeamPanel({
       return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/sales-team/update?periodId=${periodId}&employeeName=${encodeURIComponent(
-          r.name
-        )}`,
-        { method: "DELETE" }
-      );
-      if (!res.ok) throw new Error(await readError(res));
-      router.refresh();
+      await mutate("Deleting sales row…", async () => {
+        const res = await fetch(
+          `/api/sales-team/update?periodId=${periodId}&employeeName=${encodeURIComponent(
+            r.name
+          )}`,
+          { method: "DELETE" }
+        );
+        if (!res.ok) throw new Error(await readError(res));
+      });
     } catch (err) {
       alert("Delete failed: " + err);
     } finally {
@@ -307,18 +311,19 @@ export function SalesTeamPanel({
     e.preventDefault();
     setSavingTarget(true);
     try {
-      const res = await fetch("/api/sales-target", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodId,
-          targetAmount: parseFloat(targetForm.targetAmount) || 0,
-          commissionBaseAmount: parseFloat(targetForm.commissionBaseAmount) || 0,
-          notes: targetForm.notes,
-        }),
+      await mutate("Saving target…", async () => {
+        const res = await fetch("/api/sales-target", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            periodId,
+            targetAmount: parseFloat(targetForm.targetAmount) || 0,
+            commissionBaseAmount: parseFloat(targetForm.commissionBaseAmount) || 0,
+            notes: targetForm.notes,
+          }),
+        });
+        if (!res.ok) throw new Error(await readError(res));
       });
-      if (!res.ok) throw new Error(await readError(res));
-      router.refresh();
     } catch (err) {
       alert("Save failed: " + err);
     } finally {
@@ -342,7 +347,6 @@ export function SalesTeamPanel({
 
   return (
     <div className="space-y-5">
-      {/* Tabs */}
       <div className="flex gap-2 border-b">
         <button
           onClick={() => setTab("team")}
@@ -368,7 +372,6 @@ export function SalesTeamPanel({
 
       {tab === "team" && (
         <>
-          {/* KPI strip */}
           <div className="flex flex-wrap gap-3 text-sm">
             <span className="bg-sky-100 text-sky-900 px-3 py-1.5 rounded-md">
               Team Sales: <strong>{formatPKR(totalTeamSales)}</strong>
@@ -394,7 +397,6 @@ export function SalesTeamPanel({
             </span>
           </div>
 
-          {/* Filter bar */}
           <div className="flex flex-wrap gap-3 items-end justify-between bg-white border rounded-xl p-3">
             <div className="flex flex-wrap gap-3 items-end">
               <label className="block text-xs">
@@ -443,13 +445,13 @@ export function SalesTeamPanel({
             </div>
             <button
               onClick={openAdd}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm font-medium"
+              disabled={loading}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-medium"
             >
               <Plus size={16} /> Add Sale
             </button>
           </div>
 
-          {/* Sale entry form */}
           {open && (
             <form
               onSubmit={saveEntry}
@@ -554,8 +556,9 @@ export function SalesTeamPanel({
               <button
                 type="submit"
                 disabled={loading || !form.employeeName}
-                className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+                className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
               >
+                {loading && <Loader2 size={16} className="animate-spin" />}
                 {loading
                   ? "Saving..."
                   : editingEntry
@@ -565,7 +568,6 @@ export function SalesTeamPanel({
             </form>
           )}
 
-          {/* Full row edit form */}
           {editingRow && (
             <form
               onSubmit={saveRow}
@@ -699,8 +701,9 @@ export function SalesTeamPanel({
                 <button
                   type="submit"
                   disabled={loading}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
                 >
+                  {loading && <Loader2 size={16} className="animate-spin" />}
                   {loading ? "Saving..." : "Save Changes"}
                 </button>
                 <button
@@ -714,7 +717,6 @@ export function SalesTeamPanel({
             </form>
           )}
 
-          {/* Aggregated sales team table */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -816,7 +818,8 @@ export function SalesTeamPanel({
                           <button
                             type="button"
                             onClick={() => openEditRow(r)}
-                            className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+                            disabled={loading}
+                            className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
                             title="Edit full row"
                           >
                             <Pencil size={15} />
@@ -824,7 +827,8 @@ export function SalesTeamPanel({
                           <button
                             type="button"
                             onClick={() => removeRow(r)}
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
+                            disabled={loading}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40"
                             title="Delete commission + payroll row"
                           >
                             <Trash2 size={15} />
@@ -838,7 +842,6 @@ export function SalesTeamPanel({
             </div>
           </div>
 
-          {/* Individual sales entries */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="bg-slate-50 px-4 py-2 border-b flex justify-between items-center">
               <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
@@ -902,7 +905,8 @@ export function SalesTeamPanel({
                           <button
                             type="button"
                             onClick={() => openEditEntry(s)}
-                            className="p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+                            disabled={loading}
+                            className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
                             title="Edit entry"
                           >
                             <Pencil size={15} />
@@ -910,7 +914,8 @@ export function SalesTeamPanel({
                           <button
                             type="button"
                             onClick={() => removeEntry(s.id)}
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
+                            disabled={loading}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40"
                             title="Delete entry"
                           >
                             <Trash2 size={15} />
@@ -1037,8 +1042,9 @@ export function SalesTeamPanel({
             <button
               type="submit"
               disabled={savingTarget}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
             >
+              {savingTarget && <Loader2 size={16} className="animate-spin" />}
               {savingTarget ? "Saving..." : "Save Target & Commission Base"}
             </button>
           </form>

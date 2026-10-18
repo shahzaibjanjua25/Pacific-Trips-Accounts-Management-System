@@ -1,7 +1,9 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
+import { useLoading } from "./LoadingProvider";
+import { useMutate } from "./useMutate";
 
 type Period = {
   id: string;
@@ -16,12 +18,6 @@ const MONTHS = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/**
- * Month switcher used on every page.
- * Creating a NEW month is only allowed when allowCreate is true (Dashboard).
- * Creating a month runs carry-forward once; all other pages then see that month
- * in this same dropdown (periods are global).
- */
 export function PeriodSelector({
   periods,
   currentId,
@@ -34,12 +30,20 @@ export function PeriodSelector({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const mutate = useMutate();
+  const { begin, end } = useLoading();
   const [isPending, startTransition] = useTransition();
   const [showNew, setShowNew] = useState(false);
   const [creating, setCreating] = useState(false);
   const now = new Date();
   const [newYear, setNewYear] = useState(now.getFullYear());
   const [newMonth, setNewMonth] = useState(now.getMonth() + 1);
+
+  // Drive the global overlay while the month is switching
+  useEffect(() => {
+    if (isPending) begin("Loading month…");
+    else end();
+  }, [isPending, begin, end]);
 
   function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const id = e.target.value;
@@ -51,40 +55,44 @@ export function PeriodSelector({
   async function createMonth() {
     setCreating(true);
     try {
-      const res = await fetch("/api/periods", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ year: newYear, month: newMonth }),
+      await mutate("Creating month…", async () => {
+        const res = await fetch("/api/periods", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ year: newYear, month: newMonth }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text);
+        }
+        const p = await res.json();
+        setShowNew(false);
+
+        if (p.carried) {
+          alert(
+            `Month ${p.label} created.\n\n` +
+              `Carried forward from previous month:\n` +
+              `- Open receivables and payables\n` +
+              `- Employee loans: monthly installment deducted from remaining ` +
+              `(e.g. 185,000 - 20,000 = 165,000) until the loan is zero\n` +
+              `- Payroll rows for the new month (editable)\n` +
+              `- Recurring office / marketing templates\n` +
+              `- Pending refunds and advances\n\n` +
+              `This month is now available on every page via the Month dropdown.`
+          );
+        } else {
+          alert(
+            `Month ${p.label} is ready.\n` +
+              `Select it from the Month dropdown on any page.`
+          );
+        }
+
+        startTransition(() => {
+          router.push(`${pathname}?period=${p.id}`);
+        });
       });
-      if (!res.ok) {
-        const text = await res.text();
-        alert("Failed to create period: " + text);
-        return;
-      }
-      const p = await res.json();
-      setShowNew(false);
-      if (p.carried) {
-        alert(
-          `Month ${p.label} created.\n\n` +
-            `Carried forward from previous month:\n` +
-            `- Open receivables and payables\n` +
-            `- Employee loans: monthly installment deducted from remaining ` +
-            `(e.g. 185,000 - 20,000 = 165,000) until the loan is zero\n` +
-            `- Payroll rows for the new month (editable)\n` +
-            `- Recurring office / marketing templates\n` +
-            `- Pending refunds and advances\n\n` +
-            `This month is now available on every page via the Month dropdown.`
-        );
-      } else {
-        alert(
-          `Month ${p.label} is ready.\n` +
-            `Select it from the Month dropdown on any page.`
-        );
-      }
-      startTransition(() => {
-        router.push(`${pathname}?period=${p.id}`);
-        router.refresh();
-      });
+    } catch (e) {
+      alert("Failed to create period: " + e);
     } finally {
       setCreating(false);
     }
@@ -114,14 +122,11 @@ export function PeriodSelector({
         <button
           type="button"
           onClick={() => setShowNew(!showNew)}
-          className="text-xs bg-slate-800 text-white px-2.5 py-2 rounded-md hover:bg-slate-700"
+          disabled={isPending}
+          className="text-xs bg-slate-800 text-white px-2.5 py-2 rounded-md hover:bg-slate-700 disabled:opacity-50"
         >
           + New Month
         </button>
-      )}
-
-      {isPending && (
-        <span className="text-xs text-slate-400">Loading...</span>
       )}
 
       {allowCreate && showNew && (

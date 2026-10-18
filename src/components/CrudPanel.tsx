@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatPKR } from "@/lib/utils";
-import { Pencil, Trash2, Plus, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Pencil, Trash2, Plus, X, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { LinkedTransactions } from "./LinkedTransactions";
 import { LookupSelect } from "./LookupSelect";
+import { useMutate } from "./useMutate";
 
 export type FieldDef = {
   key: string;
@@ -42,6 +43,7 @@ export function CrudPanel({
   linkedEntityType?: string;
 }) {
   const router = useRouter();
+  const mutate = useMutate();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [loading, setLoading] = useState(false);
@@ -76,7 +78,6 @@ export function CrudPanel({
       const v = row[f.key];
       if (f.type === "date" && v) {
         try {
-          // Use local date parts to avoid UTC day-shift for pure dates
           const d = new Date(v as string);
           if (!isNaN(d.getTime())) {
             const y = d.getFullYear();
@@ -110,7 +111,6 @@ export function CrudPanel({
           const n = parseFloat(form[f.key]);
           payload[f.key] = Number.isFinite(n) ? n : 0;
         } else {
-          // Keep empty string as null for optional text; allow "0" for text
           const raw = form[f.key];
           payload[f.key] = raw === undefined || raw === "" ? null : raw;
         }
@@ -118,29 +118,32 @@ export function CrudPanel({
 
       if (editing) {
         payload.id = editing.id;
-        const res = await fetch(apiPath, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+        await mutate("Updating record…", async () => {
+          const res = await fetch(apiPath, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`${res.status} ${res.statusText}: ${text}`);
+          }
         });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`${res.status} ${res.statusText}: ${text}`);
-        }
       } else {
-        const res = await fetch(apiPath, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+        await mutate("Saving record…", async () => {
+          const res = await fetch(apiPath, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`${res.status} ${res.statusText}: ${text}`);
+          }
         });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`${res.status} ${res.statusText}: ${text}`);
-        }
       }
       setOpen(false);
       setEditing(null);
-      router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[CrudPanel save] failed", { apiPath, err });
@@ -154,32 +157,32 @@ export function CrudPanel({
     if (!confirm("Delete this record?")) return;
     setLoading(true);
     try {
-      const res = await fetch(`${apiPath}?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-
-      const contentType = res.headers.get("content-type") || "";
-      const body = contentType.includes("application/json")
-        ? await res.json()
-        : await res.text();
-
-      if (!res.ok) {
-        console.error("[CrudPanel remove] failed", {
-          apiPath,
-          id,
-          status: res.status,
-          statusText: res.statusText,
-          body,
+      await mutate("Deleting record…", async () => {
+        const res = await fetch(`${apiPath}?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
         });
-        const short =
-          typeof body === "string"
-            ? body.slice(0, 200)
-            : (body as { error?: string })?.error ||
-              JSON.stringify(body).slice(0, 200);
-        alert(`Delete failed (${res.status}):\n${short}`);
-        return;
-      }
-      router.refresh();
+
+        const contentType = res.headers.get("content-type") || "";
+        const body = contentType.includes("application/json")
+          ? await res.json()
+          : await res.text();
+
+        if (!res.ok) {
+          console.error("[CrudPanel remove] failed", {
+            apiPath,
+            id,
+            status: res.status,
+            statusText: res.statusText,
+            body,
+          });
+          const short =
+            typeof body === "string"
+              ? body.slice(0, 200)
+              : (body as { error?: string })?.error ||
+                JSON.stringify(body).slice(0, 200);
+          throw new Error(`Delete failed (${res.status}): ${short}`);
+        }
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[CrudPanel remove] threw", { apiPath, id, err });
@@ -205,7 +208,8 @@ export function CrudPanel({
         <button
           type="button"
           onClick={openAdd}
-          className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-sm font-medium"
         >
           <Plus size={16} />
           Add
@@ -283,9 +287,10 @@ export function CrudPanel({
           <button
             type="submit"
             disabled={loading}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
+            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
-            {loading ? "Saving..." : editing ? "Update" : "Save"}
+            {loading && <Loader2 size={16} className="animate-spin" />}
+            {loading ? "Saving…" : editing ? "Update" : "Save"}
           </button>
         </form>
       )}
@@ -344,6 +349,7 @@ export function CrudPanel({
                       onToggle={() => toggleExpand(row.id)}
                       onEdit={() => openEdit(row)}
                       onRemove={() => remove(row.id)}
+                      disabled={loading}
                     />
                   );
                 })}
@@ -366,6 +372,7 @@ function FragmentRow({
   onToggle,
   onEdit,
   onRemove,
+  disabled,
 }: {
   row: Record<string, unknown> & { id: string };
   tableFields: FieldDef[];
@@ -376,6 +383,7 @@ function FragmentRow({
   onToggle: () => void;
   onEdit: () => void;
   onRemove: () => void;
+  disabled?: boolean;
 }) {
   return (
     <>
@@ -415,7 +423,8 @@ function FragmentRow({
           <button
             type="button"
             onClick={onEdit}
-            className="inline-flex p-1.5 text-sky-600 hover:bg-sky-50 rounded"
+            disabled={disabled}
+            className="inline-flex p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
             title="Edit"
           >
             <Pencil size={15} />
@@ -423,7 +432,8 @@ function FragmentRow({
           <button
             type="button"
             onClick={onRemove}
-            className="inline-flex p-1.5 text-red-600 hover:bg-red-50 rounded ml-1"
+            disabled={disabled}
+            className="inline-flex p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40"
             title="Delete"
           >
             <Trash2 size={15} />
