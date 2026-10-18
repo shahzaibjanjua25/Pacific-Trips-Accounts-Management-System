@@ -148,7 +148,7 @@ export function BalanceSheetPanel({
   async function syncFromBooks() {
     if (
       !confirm(
-        "Recompute the standard lines (Bank, Receivables, Payables, Assets, Loans, Liabilities, Equity) from live data?\n\nManually-added lines are kept untouched."
+        "Recompute the standard lines from live data?\n\nManually-added lines are kept untouched."
       )
     )
       return;
@@ -162,7 +162,6 @@ export function BalanceSheetPanel({
       });
       if (!res.ok) throw new Error(await res.text());
       const result = await res.json();
-      // Reload fresh rows
       const reload = await fetch(`/api/balance-sheet?periodId=${periodId}`);
       if (reload.ok) {
         const fresh = await reload.json();
@@ -195,7 +194,6 @@ export function BalanceSheetPanel({
 
   return (
     <div className="space-y-6">
-      {/* ═══ KPI STRIP ═══ */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiTile label="Total Assets" value={assets} tone="sky" />
         <KpiTile label="Total Liabilities" value={liabilities} tone="rose" />
@@ -207,7 +205,6 @@ export function BalanceSheetPanel({
         />
       </div>
 
-      {/* ═══ HEADER + BALANCE PILL + SYNC ═══ */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-800">
@@ -249,7 +246,6 @@ export function BalanceSheetPanel({
         </div>
       )}
 
-      {/* ═══ TWO COLUMNS: Assets | Liabilities + Equity ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectionCard
           section="Asset"
@@ -316,7 +312,6 @@ export function BalanceSheetPanel({
         </div>
       </div>
 
-      {/* ═══ RATIOS ═══ */}
       <div className="bg-white rounded-xl border p-5">
         <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-3">
           Financial Ratios
@@ -351,8 +346,6 @@ export function BalanceSheetPanel({
     </div>
   );
 }
-
-/* ── helpers ───────────────────────────────────────────────────────── */
 
 function KpiTile({
   label,

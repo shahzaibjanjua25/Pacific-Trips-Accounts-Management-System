@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { BalanceSheetPanel, type BSLine } from "@/components/BalanceSheetPanel";
+import { syncBalanceSheet } from "@/lib/balance-sheet-sync";
 
 export default async function BalanceSheetPage({
   searchParams,
@@ -19,13 +20,10 @@ export default async function BalanceSheetPage({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  let rows: Awaited<ReturnType<typeof prisma.balanceSheetLine.findMany>> = [];
   let tableMissing = false;
   try {
-    rows = await prisma.balanceSheetLine.findMany({
-      where: { periodId: current.id },
-      orderBy: [{ section: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
-    });
+    // ─── AUTO-SYNC ON PAGE LOAD ───
+    await syncBalanceSheet(current.id);
   } catch {
     tableMissing = true;
   }
@@ -49,14 +47,19 @@ export default async function BalanceSheetPage({
     );
   }
 
+  // Now fetch the freshly synced rows
+  const rows = await prisma.balanceSheetLine.findMany({
+    where: { periodId: current.id },
+    orderBy: [{ section: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Balance Sheet</h1>
           <p className="text-sm text-slate-500">
-            Assets = Liabilities + Equity. Every line is editable. Use{" "}
-            <strong>Sync from books</strong> to recompute standard lines from live data.
+            Assets = Liabilities + Equity. Standard lines auto-sync with live data on page load.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
