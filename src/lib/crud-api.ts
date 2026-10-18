@@ -1,7 +1,11 @@
+// pacific-trips-app/src/lib/crud-api.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "./prisma";
 import { getSessionUserId } from "./auth";
 import { calcOverdue } from "./utils";
+import { attributeSaleToSalesperson } from "./sales-attribution";
+import { computeSalesPayroll } from "./payroll-service";
+import { syncPayrollForEmployee, propagatePayableToOperational } from "./links-service";
 
 type ModelName =
   | "receivable"
@@ -55,7 +59,6 @@ function getModel(name: ModelName): any {
   };
   return map[name];
 }
-// Add this near the top of crud-api.ts, after `getModel`
 
 const ALLOWED_FIELDS: Record<ModelName, string[]> = {
   receivable: [
@@ -154,6 +157,31 @@ function pickAllowed(model: ModelName, data: Record<string, unknown>) {
   }
   return out;
 }
+
+/** Bank adjustment helper for receivable/payable direct edits */
+async function adjustBank(accountName: string | null | undefined, delta: number) {
+  if (!accountName || delta === 0) return;
+  const trimmed = String(accountName).trim();
+  if (!trimmed) return;
+
+  const normalized = trimmed.toLowerCase();
+  const all = await prisma.bankBalance.findMany();
+  const existing = all.find(
+    (b) => b.accountName.trim().toLowerCase() === normalized
+  );
+
+  if (existing) {
+    await prisma.bankBalance.update({
+      where: { id: existing.id },
+      data: { balance: existing.balance + delta },
+    });
+  } else {
+    await prisma.bankBalance.create({
+      data: { accountName: trimmed, balance: Math.max(0, delta) },
+    });
+  }
+}
+
 function enrich(model: ModelName, data: Record<string, unknown>) {
   const d = { ...data };
 
@@ -186,10 +214,8 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     else d.status = d.status || "Open";
   }
 
-  // HotelBooking has no money fields - those live on Payable.
-  // Do NOT inject agreedCost / amountPaid / remaining here (Prisma will reject them).
   if (model === "hotelBooking") {
-    // status only; leave as client provided
+    // status only
   }
 
   if (model === "trip") {
@@ -222,8 +248,6 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     const loan = Number(d.loanInstallment) || 0;
     const other = Number(d.otherDeductions) || 0;
     const paid = Number(d.amountPaid) || 0;
-    // Keep client-supplied netPayable when present (includes commission from page).
-    // Only recompute from components when netPayable was omitted.
     if (d.netPayable == null || d.netPayable === "") {
       d.netPayable = Math.max(0, basic + bonus - tax - loan - other);
     } else {
@@ -242,7 +266,6 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     if (d.outstanding === 0) d.status = "Paid";
   }
 
-  // TransportJob has no remaining/agreedCost - money lives on Payable.
   if (model === "transportJob") {
     // status only
   }
@@ -291,7 +314,6 @@ export function makeCrudHandlers(
     if (modelName !== "pettyCashTxn") return data;
     const amountOut = Number(data.amountOut) || 0;
     const amountIn = Number(data.amountIn) || 0;
-    // Latest prior balance in this period (exclude self on update)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = periodId ? { periodId } : {};
     if (excludeId) where.id = { not: excludeId };
@@ -324,6 +346,99 @@ export function makeCrudHandlers(
     return data;
   }
 
+  /** Handle bank balance sync for receivable changes */
+  async function handleReceivableBankChange(
+    oldReceived: number,
+    newReceived: number,
+    salesperson: string | null | undefined,
+    periodId: string,
+    clientName: string,
+    newTotalPackage: number,
+    oldTotalPackage: number
+  ) {
+    // 1. Bank balance adjustment: if amountReceived changed, adjust the bank
+    //    The bank account is looked up from the client's most recent transaction
+    //    with a bankAccount. If none, we can't know the account.
+    const delta = newReceived - oldReceived;
+    if (delta !== 0) {
+      // Find the most recent transaction for this client with a bank account
+      const lastTxn = await prisma.transaction.findFirst({
+        where: {
+          periodId,
+          OR: [
+            { party: clientName },
+            { subCategory: clientName },
+          ],
+          bankAccount: { not: null },
+        },
+        orderBy: { date: "desc" },
+      });
+      const account = lastTxn?.bankAccount;
+      if (account) {
+        await adjustBank(account, delta);
+      }
+    }
+
+    // 2. Sales attribution: if salesperson + totalPackage changed
+    const prevPackage = oldTotalPackage;
+    const nextPackage = newTotalPackage;
+
+    if (salesperson && nextPackage > 0) {
+      // Check if there's already a SalesPerformance row for this client in this period
+      const existingSale = await prisma.salesPerformance.findFirst({
+        where: {
+          periodId,
+          clientName,
+          employeeName: salesperson,
+        },
+      });
+
+      if (!existingSale) {
+        // No existing entry — create one for the full package
+        await attributeSaleToSalesperson({
+          periodId,
+          salesperson,
+          clientName,
+          amount: nextPackage,
+          description: `Sale to ${clientName} (from Receivables)`,
+        });
+      } else {
+        // Existing entry — update the delta
+        const deltaPackage = Math.max(0, nextPackage - prevPackage);
+        if (deltaPackage > 0) {
+          await attributeSaleToSalesperson({
+            periodId,
+            salesperson,
+            clientName,
+            amount: deltaPackage,
+            description: `Package increase: ${clientName}`,
+          });
+        } else if (nextPackage < prevPackage) {
+          // Package decreased — remove the difference from SalesPerformance
+          const reduction = prevPackage - nextPackage;
+          const currentTotal = existingSale.debit || 0;
+          const newTotal = Math.max(0, currentTotal - reduction);
+          await prisma.salesPerformance.update({
+            where: { id: existingSale.id },
+            data: { debit: newTotal },
+          });
+          await computeSalesPayroll(periodId);
+          await syncPayrollForEmployee(periodId, salesperson);
+        }
+      }
+    } else if (!salesperson) {
+      // Salesperson was cleared — remove SalesPerformance rows for this client
+      const existingSales = await prisma.salesPerformance.findMany({
+        where: { periodId, clientName },
+      });
+      for (const s of existingSales) {
+        await prisma.salesPerformance.delete({ where: { id: s.id } });
+        await computeSalesPayroll(periodId);
+        await syncPayrollForEmployee(periodId, s.employeeName);
+      }
+    }
+  }
+
   async function POST(req: NextRequest) {
     const uid = await getSessionUserId();
     if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -341,6 +456,25 @@ export function makeCrudHandlers(
       data = await applyPettyCashBalance(data, pid);
       data = await applyOwnerRunningBalance(data, pid);
       const row = await model.create({ data });
+
+      // After creating a receivable, check sales attribution
+      if (modelName === "receivable" && pid) {
+        const r = row as {
+          clientName: string;
+          salesperson: string | null;
+          totalPackage: number;
+        };
+        if (r.salesperson && r.totalPackage > 0) {
+          await attributeSaleToSalesperson({
+            periodId: pid,
+            salesperson: r.salesperson,
+            clientName: r.clientName,
+            amount: r.totalPackage,
+            description: `Sale to ${r.clientName} (from Receivables)`,
+          });
+        }
+      }
+
       return NextResponse.json(row);
     } catch (e) {
       console.error(`[crud:${modelName}:POST]`, e);
@@ -355,9 +489,17 @@ export function makeCrudHandlers(
       const model = getModel(modelName);
       const body = await req.json();
       if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
+      const id = body.id as string;
+
+      // Fetch old record for comparison
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const oldRecord: any = await model.findUnique({ where: { id } });
+      if (!oldRecord) {
+        return NextResponse.json({ error: "Record not found" }, { status: 404 });
+      }
+
       const cleaned = pickAllowed(modelName, body);
       let data = enrich(modelName, cleaned);
-      const id = (data.id as string) || body.id;
       delete data.id;
       delete data.team;
       delete data.createdAt;
@@ -367,6 +509,86 @@ export function makeCrudHandlers(
       data = await applyPettyCashBalance(data, pid, id);
       data = await applyOwnerRunningBalance(data, pid, id);
       const row = await model.update({ where: { id }, data });
+
+      // Handle special logic after update
+      if (modelName === "receivable" && oldRecord.periodId) {
+        const oldReceived = oldRecord.amountReceived || 0;
+        const newReceived = (row as { amountReceived: number }).amountReceived || 0;
+        const oldPackage = oldRecord.totalPackage || 0;
+        const newPackage = (row as { totalPackage: number }).totalPackage || 0;
+        const oldSalesperson = oldRecord.salesperson || null;
+        const newSalesperson = (row as { salesperson: string | null }).salesperson || null;
+        const clientName = (row as { clientName: string }).clientName;
+
+        // Bank balance change
+        await handleReceivableBankChange(
+          oldReceived,
+          newReceived,
+          newSalesperson,
+          oldRecord.periodId,
+          clientName,
+          newPackage,
+          oldPackage
+        );
+
+        // Salesperson change: remove old attribution, add new
+        if (oldSalesperson && oldSalesperson !== newSalesperson) {
+          // Remove old sales rows for this client + old salesperson
+          const oldSales = await prisma.salesPerformance.findMany({
+            where: {
+              periodId: oldRecord.periodId,
+              clientName,
+              employeeName: oldSalesperson,
+            },
+          });
+          for (const s of oldSales) {
+            await prisma.salesPerformance.delete({ where: { id: s.id } });
+          }
+          await computeSalesPayroll(oldRecord.periodId);
+          await syncPayrollForEmployee(oldRecord.periodId, oldSalesperson);
+        }
+
+        // If new salesperson, attribute the full new package (not delta)
+        if (newSalesperson && newSalesperson !== oldSalesperson) {
+          if (newPackage > 0) {
+            await attributeSaleToSalesperson({
+              periodId: oldRecord.periodId,
+              salesperson: newSalesperson,
+              clientName,
+              amount: newPackage,
+              description: `Reassigned sale: ${clientName}`,
+            });
+          }
+        }
+      }
+
+      // Handle payable changes (bank balance)
+      if (modelName === "payable" && oldRecord.periodId) {
+        const oldPaid = oldRecord.amountPaid || 0;
+        const newPaid = (row as { amountPaid: number }).amountPaid || 0;
+        const delta = newPaid - oldPaid;
+        if (delta !== 0) {
+          // Find the most recent transaction for this party with a bank account
+          const supplierName = (row as { supplierName: string }).supplierName;
+          const lastTxn = await prisma.transaction.findFirst({
+            where: {
+              periodId: oldRecord.periodId,
+              OR: [
+                { party: supplierName },
+                { subCategory: supplierName },
+              ],
+              bankAccount: { not: null },
+            },
+            orderBy: { date: "desc" },
+          });
+          if (lastTxn?.bankAccount) {
+            await adjustBank(lastTxn.bankAccount, -delta); // outflow is negative delta (more paid = less bank)
+          }
+        }
+        // Sync operational
+        await propagatePayableToOperational(id);
+      }
+
       return NextResponse.json(row);
     } catch (e) {
       console.error(`[crud:${modelName}:PUT]`, e);
@@ -382,7 +604,6 @@ export function makeCrudHandlers(
       const id = req.nextUrl.searchParams.get("id");
       if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-      // Cascade delete transaction links for payroll entries
       if (modelName === "payrollEntry") {
         await prisma.transactionLink.deleteMany({
           where: { entityType: "payroll", entityId: id },

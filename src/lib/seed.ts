@@ -14,23 +14,56 @@ export async function runSeed(force: boolean = false) {
   }
 
   // ── Wipe all tables ──
-  const tables = [
-    "transactionLink",
-    "clientLedger", "salesPerformance", "vadet", "ownerTxn", "liability", "asset",
-    "bankTxn", "bankBalance", "pettyCashTxn", "marketingExpense", "officeExpense",
-    "commission", "payrollEntry", "employeeLoan", "refund", "supplierAdvance",
-    "ticketing", "transportJob", "hotelBooking", "payable", "trip", "receivable",
-    "transaction", "client", "employee", "period",
-  ] as const;
-  for (const t of tables) {
-    // @ts-expect-error dynamic
-    await prisma[t].deleteMany();
-  }
+// ── Wipe (children first, then parents) ────────────────────────────
+const tables = [
+  // leaves (no FK out to anything in the period chain)
+  "transactionLink",
+  "clientLedger",
+  "salesPerformance",
+  "vadet",
+  "ownerTxn",
+  "liability",
+  "asset",
+  "bankTxn",
+  "bankBalance",
+  "pettyCashTxn",
+  "marketingExpense",
+  "officeExpense",
+  "commission",
+  "payrollEntry",
+  "employeeLoan",
+  "refund",
+  "supplierAdvance",
+  "ticketing",
+  "transportJob",
+  "hotelBooking",
+  "payable",
+  "trip",
+  "receivable",
+  "transaction",
+  // child singletons that RESTRICT Period
+  "salesTarget",          // <-- ADD
+  "balanceSheetLine",     // <-- ADD
+  "monthlyClosing",       // <-- ADD
+  "cashFlowSnapshot",     // <-- ADD
+  "bankAccount",          // <-- ADD (not period-scoped, but safe)
+  // masters
+  "client",
+  "employee",
+  "period",
+] as const;
+
+for (const t of tables) {
+  // @ts-expect-error dynamic
+  await prisma[t].deleteMany();
+}
 
   // ── Period ──
-  const period = await prisma.period.create({
-    data: { year: 2026, month: 10, label: "Oct-2026" },
-  });
+ const period = await prisma.period.upsert({
+  where: { year_month: { year: 2026, month: 10 } },
+  update: { label: "Oct-2026" },
+  create: { year: 2026, month: 10, label: "Oct-2026" },
+});
 
   // ── Employees ──
   const empData = [
