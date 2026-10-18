@@ -5,16 +5,43 @@ import { CrudPanel, type FieldDef } from "@/components/CrudPanel";
 
 const fields: FieldDef[] = [
   { key: "supplierName", label: "Supplier Name", required: true },
-  { key: "category", label: "Category", type: "select", options: ["Hotel", "Transport", "Ticketing", "Other"] },
+  {
+    key: "category",
+    label: "Category",
+    type: "select",
+    options: ["Hotel", "Transport", "Other"],
+  },
   { key: "description", label: "Description" },
   { key: "invoiceRef", label: "Invoice / Doc Ref" },
-  { key: "originalAmount", label: "Original Amount", type: "number", required: true, money: true },
+  {
+    key: "originalAmount",
+    label: "Original Amount",
+    type: "number",
+    required: true,
+    money: true,
+  },
   { key: "amountPaid", label: "Amount Paid", type: "number", money: true },
-  { key: "remaining", label: "Remaining", type: "number", money: true, readOnly: true },
+  {
+    key: "remaining",
+    label: "Remaining",
+    type: "number",
+    money: true,
+    readOnly: true,
+  },
   { key: "dueDate", label: "Due Date", type: "date" },
-  { key: "daysOverdue", label: "Days Overdue", type: "number", readOnly: true },
+  {
+    key: "daysOverdue",
+    label: "Days Overdue",
+    type: "number",
+    readOnly: true,
+  },
   { key: "relatedTrip", label: "Trip / Booking Ref" },
-  { key: "status", label: "Status", type: "select", options: ["Open", "Partial", "Paid", "Overdue"] },
+  {
+    key: "status",
+    label: "Status",
+    type: "select",
+    options: ["Open", "Partial", "Paid", "Overdue"],
+  },
   { key: "notes", label: "Notes", type: "textarea", showInTable: false },
 ];
 
@@ -45,7 +72,8 @@ export default async function Page({
         <div>
           <h1 className="text-2xl font-bold">Supplier Payables</h1>
           <p className="text-sm text-slate-500">
-            Financial master for money we owe. Hotels & Transport pages read from here.
+            Financial master for money we owe. Hotels &amp; Transport pages read
+            from here.
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />
@@ -62,4 +90,3 @@ export default async function Page({
     </div>
   );
 }
-

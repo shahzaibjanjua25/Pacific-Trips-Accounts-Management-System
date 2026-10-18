@@ -3,10 +3,25 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, ArrowLeftRight, Users, FileText, Plane, CreditCard,
-  Building2, Truck, Ticket, Wallet, RotateCcw, UserCheck, Megaphone,
-  Banknote, Landmark, TrendingUp, Package, Scale, User,
-  CalendarCheck, Settings, Menu, X, ShieldCheck, BookOpen,
+  LayoutDashboard,
+  ArrowLeftRight,
+  Users,
+  FileText,
+  CreditCard,
+  Building2,
+  Truck,
+  RotateCcw,
+  UserCheck,
+  Megaphone,
+  Landmark,
+  Package,
+  Scale,
+  CalendarCheck,
+  Settings,
+  Menu,
+  X,
+  ShieldCheck,
+  BookOpen,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -16,21 +31,15 @@ const nav = [
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/receivables", label: "Receivables", icon: FileText },
-  { href: "/trips", label: "Trip PnL", icon: Plane },
   { href: "/payables", label: "Payables", icon: CreditCard },
   { href: "/hotels", label: "Hotels", icon: Building2 },
   { href: "/transport", label: "Transport", icon: Truck },
-  { href: "/ticketing", label: "Ticketing", icon: Ticket },
-  { href: "/advances", label: "Supplier Advances", icon: Wallet },
   { href: "/refunds", label: "Refunds", icon: RotateCcw },
   { href: "/payroll", label: "Payroll & Commissions", icon: UserCheck },
   { href: "/expenses", label: "Office & Marketing", icon: Megaphone },
-  { href: "/petty-cash", label: "Petty Cash", icon: Banknote },
   { href: "/bank", label: "Bank Accounts", icon: Landmark },
-  { href: "/cashflow", label: "Cash Flow", icon: TrendingUp },
   { href: "/assets", label: "Assets", icon: Package },
   { href: "/liabilities", label: "Liabilities", icon: Scale },
-  { href: "/owner", label: "Owner Account", icon: User },
   { href: "/monthly-closing", label: "Monthly Closing", icon: CalendarCheck },
   { href: "/balance-sheet", label: "Balance Sheet", icon: BookOpen },
   { href: "/sales-team", label: "Sales Team", icon: Users },
@@ -73,6 +82,7 @@ export function Sidebar() {
       >
         <div className="p-4 border-b border-slate-700 flex items-center gap-3">
           <div className="w-12 h-12 rounded-full bg-white overflow-hidden shrink-0 flex items-center justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="logo.jpg"
               alt="Pacific Trips"
@@ -119,7 +129,7 @@ export function Sidebar() {
           disabled={signingOut}
           className="mx-2 mb-2 text-left text-sm text-red-400 hover:bg-red-500/10 rounded-lg px-3 py-2 disabled:opacity-50"
         >
-          {signingOut ? "Signing outâ€¦" : "Sign out"}
+          {signingOut ? "Signing out…" : "Sign out"}
         </button>
 
         <div className="p-3 border-t border-slate-700 text-[10px] text-slate-500">

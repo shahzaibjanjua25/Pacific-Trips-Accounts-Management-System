@@ -331,12 +331,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-  if (cat.includes("ticketing")) {
-    return applyGenericPayablePayment(periodId, party, "Ticketing", signedPayAmount, {
-      description: input.description,
-      tripRef: input.tripRef ?? undefined,
-    });
-  }
+
 
   if (cat.includes("supplier") || cat.includes("payable")) {
     return applyGenericPayablePayment(periodId, party, "Other", signedPayAmount, {
@@ -366,26 +361,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-  if (
-    cat.includes("advance") &&
-    !cat.includes("employee") &&
-    !cat.includes("staff")
-  ) {
-    if (signedPayAmount > 0 && party) {
-      const adv = await prisma.supplierAdvance.create({
-        data: {
-          periodId,
-          supplierName: party,
-          amount: signedPayAmount,
-          adjustedAmount: 0,
-          remaining: signedPayAmount,
-          dateGiven: new Date(input.date),
-          notes: input.description,
-        },
-      });
-      return [{ entityType: "advance", entityId: adv.id, appliedAmount: signedPayAmount }];
-    }
-  }
+  
 
   // Employee Loan / Staff Advance:
   //   Credit = company gives money to employee -> increase loan remaining
@@ -591,20 +567,7 @@ export async function postTransaction(input: TxnInput) {
     });
   }
 
-  if (cat.includes("owner")) {
-    const isIn = (input.debit || 0) > 0;
-    await prisma.ownerTxn.create({
-      data: {
-        periodId: input.periodId,
-        date: new Date(input.date),
-        type: isIn ? "Capital Introduced" : "Withdrawal",
-        description: input.description,
-        amountIn: isIn ? amount : 0,
-        amountOut: isIn ? 0 : amount,
-        mode: input.paymentMethod || null,
-      },
-    });
-  }
+  
 
   const isClientSide =
     cat.includes("receipt") ||

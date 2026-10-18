@@ -35,7 +35,6 @@ export default async function DashboardPage({
   const netPosition = d.ratios.netPosition;
   const margin = d.profitability.marginPct;
 
-  // Simple health score for non-tech readers
   let health: "good" | "ok" | "tight" = "good";
   let healthTitle = "Business looks healthy";
   let healthBlurb =
@@ -82,7 +81,11 @@ export default async function DashboardPage({
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-          <PeriodSelector periods={periods} currentId={currentPeriod.id} allowCreate />
+          <PeriodSelector
+            periods={periods}
+            currentId={currentPeriod.id}
+            allowCreate
+          />
           <ExportMonthButton
             periodId={currentPeriod.id}
             periodLabel={currentPeriod.label}
@@ -91,9 +94,7 @@ export default async function DashboardPage({
       </div>
 
       {/* Health banner */}
-      <div
-        className={`rounded-2xl border p-5 sm:p-6 ${healthStyles[health]}`}
-      >
+      <div className={`rounded-2xl border p-5 sm:p-6 ${healthStyles[health]}`}>
         <div className="flex items-start gap-3">
           <span
             className={`mt-1.5 h-3 w-3 rounded-full shrink-0 ${healthDot[health]}`}
@@ -119,7 +120,7 @@ export default async function DashboardPage({
           <BigStat
             title="Money in banks & cash"
             value={moneyInBanks}
-            hint="All bank accounts + petty cash right now"
+            hint="All bank accounts right now"
             tone="emerald"
             href="/bank"
           />
@@ -142,11 +143,11 @@ export default async function DashboardPage({
             value={profit}
             hint={
               margin != null
-                ? `About ${margin.toFixed(0)}% of trip revenue`
-                : "Revenue minus trip costs and expenses"
+                ? `About ${margin.toFixed(0)}% of revenue`
+                : "Revenue minus direct costs and expenses"
             }
             tone={profit >= 0 ? "emerald" : "red"}
-            href="/trips"
+            href="/monthly-closing"
           />
         </div>
       </div>
@@ -171,7 +172,7 @@ export default async function DashboardPage({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Panel
           title="Where is our money?"
-          subtitle="Bank accounts and petty cash"
+          subtitle="Bank accounts"
           color="emerald"
           link={{ href: "/bank", label: "Open Bank" }}
         >
@@ -183,10 +184,10 @@ export default async function DashboardPage({
           <Row label="JazzCash" value={d.cash.jazzcash} />
           <Divider />
           <Row label="Total in banks" value={d.cash.totalBank} bold />
-          <Row label="Petty cash" value={d.cash.pettyCash} />
-          <Divider />
-          <Row label="Total available cash" value={d.cash.totalAvailable} bold />
-          <Row label="Expected collections (7 days)" value={d.cash.expectedCollections7d} />
+          <Row
+            label="Expected collections (7 days)"
+            value={d.cash.expectedCollections7d}
+          />
           <Row label="Committed (short term)" value={d.cash.committed} />
           <Row
             label="Free cash"
@@ -206,15 +207,25 @@ export default async function DashboardPage({
           color="sky"
           link={{ href: "/receivables", label: "Open Receivables" }}
         >
-          <Row label="Clients still to pay" value={d.receivables.clientOutstanding} bold />
+          <Row
+            label="Clients still to pay"
+            value={d.receivables.clientOutstanding}
+            bold
+          />
           <Row
             label="Of which overdue"
             value={d.receivables.overdue}
             tone={d.receivables.overdue > 0 ? "bad" : undefined}
           />
           <Row label="Open client files" value={d.receivables.openClients} isCount />
-          <Row label="Total package value (month)" value={d.receivables.totalPackageValue} />
-          <Row label="Already received from clients" value={d.receivables.totalReceived} />
+          <Row
+            label="Total package value (month)"
+            value={d.receivables.totalPackageValue}
+          />
+          <Row
+            label="Already received from clients"
+            value={d.receivables.totalReceived}
+          />
           <Divider />
           <Row label="Staff loans still open" value={d.receivables.leftoverLoans} />
           <Row
@@ -242,11 +253,19 @@ export default async function DashboardPage({
             tone={d.payables.overdue > 0 ? "bad" : undefined}
           />
           <Row label="Salaries still payable" value={d.payables.salaryPayable} />
-          <Row label="Commissions still to pay" value={d.payables.commissionsRemaining} />
+          <Row
+            label="Commissions still to pay"
+            value={d.payables.commissionsRemaining}
+          />
           <Row label="Client refunds pending" value={d.payables.refundsPending} />
           <Row label="Other liabilities" value={d.payables.otherLiabilities} />
           <Divider />
-          <Row label="Total we still owe" value={d.payables.totalWeOwe} bold tone="bad" />
+          <Row
+            label="Total we still owe"
+            value={d.payables.totalWeOwe}
+            bold
+            tone="bad"
+          />
           <Tip>
             Pay overdue hotel and transport bills first so trips stay smooth.
             Salaries and refunds affect trust with staff and clients.
@@ -255,19 +274,32 @@ export default async function DashboardPage({
 
         <Panel
           title="This month's profit"
-          subtitle="Sales, trip costs, and expenses"
+          subtitle="Sales, direct costs, and expenses"
           color="violet"
-          link={{ href: "/trips", label: "Open Trips" }}
+          link={{ href: "/monthly-closing", label: "Monthly Closing" }}
         >
-          <Row label="Trip revenue (packages sold)" value={d.profitability.tripRevenue} bold />
+          <Row
+            label="Total revenue (packages sold)"
+            value={d.profitability.tripRevenue}
+            bold
+          />
           <Row label="Direct trip costs" value={d.profitability.directTripCosts} />
-          <Row label="Gross trip profit" value={d.profitability.grossTripProfit} />
+          <Row
+            label="Gross trip profit"
+            value={d.profitability.grossTripProfit}
+          />
           <Divider />
           <Row label="Office expenses" value={d.monthlyExpenses.office} />
           <Row label="Marketing" value={d.monthlyExpenses.marketing} />
           <Row label="Salaries (this month)" value={d.monthlyExpenses.salaries} />
-          <Row label="Loan installments" value={d.monthlyExpenses.loanInstallments} />
-          <Row label="Commissions accrued" value={d.monthlyExpenses.commissionsAccrued} />
+          <Row
+            label="Loan installments"
+            value={d.monthlyExpenses.loanInstallments}
+          />
+          <Row
+            label="Commissions accrued"
+            value={d.monthlyExpenses.commissionsAccrued}
+          />
           <Row label="Total monthly expenses" value={d.monthlyExpenses.total} />
           <Divider />
           <Row
@@ -282,7 +314,7 @@ export default async function DashboardPage({
             isText
           />
           <Tip>
-            Gross profit is sales minus direct trip costs. Net profit is after
+            Gross profit is revenue minus direct trip costs. Net profit is after
             office, marketing, salaries, and commissions. Margin is profit as a
             percent of revenue.
           </Tip>
@@ -296,20 +328,17 @@ export default async function DashboardPage({
           <Row label="Hotel still unpaid" value={d.operations.hotelsRemaining} />
           <Row label="Transport agreed" value={d.operations.transportAgreed} />
           <Row label="Transport settlement" value={d.operations.transportSettlement} />
-          <Row label="Ticketing paid" value={d.operations.ticketingPaid} />
-          <Row label="Ticketing charged to client" value={d.operations.ticketingCharged} />
-          <Row
-            label="Ticketing profit"
-            value={d.operations.ticketingProfit}
-            tone={d.operations.ticketingProfit >= 0 ? "good" : "bad"}
-          />
+          <Row label="Transport still unpaid" value={d.operations.transportRemaining} />
         </Panel>
 
         <Panel title="Monthly running costs" subtitle="Repeat every month" color="slate">
           <Row label="Office" value={d.monthlyExpenses.office} />
           <Row label="Marketing" value={d.monthlyExpenses.marketing} />
           <Row label="Salaries" value={d.monthlyExpenses.salaries} />
-          <Row label="Loan installments" value={d.monthlyExpenses.loanInstallments} />
+          <Row
+            label="Loan installments"
+            value={d.monthlyExpenses.loanInstallments}
+          />
           <Row label="Commissions" value={d.monthlyExpenses.commissionsAccrued} />
           <Divider />
           <Row label="Total" value={d.monthlyExpenses.total} bold />
@@ -320,15 +349,12 @@ export default async function DashboardPage({
           />
         </Panel>
 
-        <Panel title="One-time & ownership" subtitle="Not every month" color="slate">
-          <Row label="Supplier advances left" value={d.oneTime.supplierAdvances} />
+        <Panel title="One-time & assets" subtitle="Not every month" color="slate">
           <Row label="Employee loans open" value={d.oneTime.employeeLoans} />
           <Row label="Company assets value" value={d.oneTime.assets} />
-          <Row label="Owner capital in" value={d.oneTime.ownerCapital} />
-          <Row label="Owner withdrawals" value={d.oneTime.ownerWithdrawals} />
           <Tip>
-            Owner capital is money put into the business. Withdrawals are money
-            taken out by owners.
+            Company assets are recorded at purchase cost. Employee loans are
+            money staff still owe the company.
           </Tip>
         </Panel>
       </div>
@@ -342,15 +368,15 @@ export default async function DashboardPage({
             Amber or red means follow up collections or big bills.
           </li>
           <li>
-            <strong>Money in banks</strong> is what you can spend today.
-            <strong> Clients still owe us</strong> is future cash if they pay.
+            <strong>Money in banks</strong> is what you can spend today.{" "}
+            <strong>Clients still owe us</strong> is future cash if they pay.
           </li>
           <li>
             <strong>We still owe others</strong> must be paid to hotels, drivers,
             staff, and clients (refunds).
           </li>
           <li>
-            <strong>Profit this month</strong> is after trip costs and running
+            <strong>Profit this month</strong> is after direct costs and running
             expenses. Negative means the month lost money.
           </li>
           <li>
@@ -426,9 +452,7 @@ function InsightCard({
   return (
     <div
       className={`rounded-2xl border p-5 ${
-        good
-          ? "border-emerald-200 bg-white"
-          : "border-red-200 bg-red-50/40"
+        good ? "border-emerald-200 bg-white" : "border-red-200 bg-red-50/40"
       }`}
     >
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">

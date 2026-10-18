@@ -10,16 +10,14 @@ async function guard() {
 
 const SECTIONS = new Set(["Asset", "Liability", "Equity"]);
 
-/** Seed sensible defaults from live books when a period has no lines yet. */
 async function seedDefaults(periodId: string) {
-  const [banks, receivables, payables, assets, liabilities, advances, loans] =
+  const [banks, receivables, payables, assets, liabilities, loans] =
     await Promise.all([
       prisma.bankBalance.findMany(),
       prisma.receivable.findMany({ where: { periodId } }),
       prisma.payable.findMany({ where: { periodId } }),
       prisma.asset.findMany(),
       prisma.liability.findMany({ where: { periodId } }),
-      prisma.supplierAdvance.findMany({ where: { periodId } }),
       prisma.employeeLoan.findMany({ where: { remainingAmount: { gt: 0 } } }),
     ]);
 
@@ -28,7 +26,6 @@ async function seedDefaults(periodId: string) {
   const payTotal = payables.reduce((s, p) => s + p.remaining, 0);
   const assetTotal = assets.reduce((s, a) => s + a.purchaseCost, 0);
   const liabTotal = liabilities.reduce((s, l) => s + l.outstanding, 0);
-  const advTotal = advances.reduce((s, a) => s + a.remaining, 0);
   const loanTotal = loans.reduce((s, l) => s + l.remainingAmount, 0);
 
   const defaults: {
@@ -46,21 +43,15 @@ async function seedDefaults(periodId: string) {
     },
     {
       section: "Asset",
-      label: "Supplier Advances",
-      amount: advTotal,
-      sortOrder: 30,
-    },
-    {
-      section: "Asset",
       label: "Employee Loans Receivable",
       amount: loanTotal,
-      sortOrder: 40,
+      sortOrder: 30,
     },
     {
       section: "Asset",
       label: "Fixed Assets (at cost)",
       amount: assetTotal,
-      sortOrder: 50,
+      sortOrder: 40,
     },
     {
       section: "Liability",
@@ -79,7 +70,7 @@ async function seedDefaults(periodId: string) {
       label: "Owner Equity / Capital",
       amount: Math.max(
         0,
-        bankTotal + recvTotal + advTotal + loanTotal + assetTotal - payTotal - liabTotal
+        bankTotal + recvTotal + loanTotal + assetTotal - payTotal - liabTotal
       ),
       sortOrder: 10,
     },

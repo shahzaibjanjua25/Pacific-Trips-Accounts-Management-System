@@ -10,26 +10,21 @@ import { syncPayrollForEmployee, propagatePayableToOperational } from "./links-s
 type ModelName =
   | "receivable"
   | "payable"
-  | "trip"
   | "payrollEntry"
   | "commission"
   | "officeExpense"
   | "marketingExpense"
   | "hotelBooking"
   | "transportJob"
-  | "ticketing"
-  | "supplierAdvance"
   | "refund"
   | "asset"
   | "liability"
-  | "ownerTxn"
-  | "pettyCashTxn"
   | "bankTxn"
   | "client"
   | "employee"
-  | "vadet"
   | "salesPerformance"
   | "bankBalance";
+
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getModel(name: ModelName): any {
@@ -72,12 +67,7 @@ const ALLOWED_FIELDS: Record<ModelName, string[]> = {
     "originalAmount", "amountPaid", "remaining", "dueDate", "daysOverdue",
     "status", "relatedTrip", "notes",
   ],
-  trip: [
-    "periodId", "clientId", "clientName", "tripRef", "destination", "startDate",
-    "endDate", "packageRevenue", "hotelCost", "transportCost", "ticketingCost",
-    "otherDirectCost", "totalDirectCost", "grossProfit", "overheadAlloc",
-    "netProfit", "status", "salesperson", "notes",
-  ],
+  
   payrollEntry: [
     "periodId", "employeeId", "employeeName", "basicSalary", "bonus",
     "taxDeducted", "loanInstallment", "otherDeductions", "netPayable",
@@ -103,14 +93,8 @@ const ALLOWED_FIELDS: Record<ModelName, string[]> = {
     "periodId", "driverName", "vehicle", "clientName", "tripRef", "fuelCost",
     "status", "notes",
   ],
-  ticketing: [
-    "periodId", "airline", "clientName", "tripRef", "ticketCost",
-    "chargedToClient", "profit", "status", "notes",
-  ],
-  supplierAdvance: [
-    "periodId", "supplierName", "amount", "adjustedAmount", "remaining",
-    "relatedTrip", "dateGiven", "notes",
-  ],
+ 
+ 
   refund: [
     "periodId", "clientId", "clientName", "amount", "reason", "status",
     "paidDate", "tripRef", "notes",
@@ -125,14 +109,8 @@ const ALLOWED_FIELDS: Record<ModelName, string[]> = {
     "amountPaid", "outstanding", "dueDate", "interest", "relatedRef",
     "startDate", "status", "notes",
   ],
-  ownerTxn: [
-    "periodId", "date", "type", "description", "amountIn", "amountOut",
-    "runningBalance", "mode", "recordedBy", "supportingDoc", "notes",
-  ],
-  pettyCashTxn: [
-    "periodId", "date", "description", "personReceiving", "amountOut",
-    "amountIn", "purpose", "receiptRef", "balanceAfter", "approvedBy", "notes",
-  ],
+ 
+
   bankTxn: [
     "periodId", "accountId", "accountName", "date", "description", "deposit",
     "withdrawal", "transferIn", "transferOut", "bankCharges", "balance",
@@ -140,7 +118,7 @@ const ALLOWED_FIELDS: Record<ModelName, string[]> = {
   ],
   client: ["name", "contact", "phone", "email", "notes"],
   employee: ["name", "role", "basicSalary", "phone", "isActive"],
-  vadet: ["periodId", "name", "amount", "notes"],
+  
   salesPerformance: [
     "periodId", "employeeId", "employeeName", "tourDate", "description",
     "category", "subCategory", "clientName", "debit", "credit", "status",
@@ -218,28 +196,6 @@ function enrich(model: ModelName, data: Record<string, unknown>) {
     // status only
   }
 
-  if (model === "trip") {
-    const rev = Number(d.packageRevenue) || 0;
-    const hotel = Number(d.hotelCost) || 0;
-    const transport = Number(d.transportCost) || 0;
-    const ticket = Number(d.ticketingCost) || 0;
-    const other = Number(d.otherDirectCost) || 0;
-    d.totalDirectCost = hotel + transport + ticket + other;
-    d.grossProfit = rev - (d.totalDirectCost as number);
-    d.netProfit = (d.grossProfit as number) - (Number(d.overheadAlloc) || 0);
-  }
-
-  if (model === "ticketing") {
-    const cost = Number(d.ticketCost) || 0;
-    const charged = Number(d.chargedToClient) || 0;
-    d.profit = charged - cost;
-  }
-
-  if (model === "supplierAdvance") {
-    const amt = Number(d.amount) || 0;
-    const adj = Number(d.adjustedAmount) || 0;
-    d.remaining = Math.max(0, amt - adj);
-  }
 
   if (model === "payrollEntry") {
     const basic = Number(d.basicSalary) || 0;
@@ -306,45 +262,7 @@ export function makeCrudHandlers(
     return NextResponse.json(rows);
   }
 
-  async function applyPettyCashBalance(
-    data: Record<string, unknown>,
-    periodId: string | null | undefined,
-    excludeId?: string
-  ) {
-    if (modelName !== "pettyCashTxn") return data;
-    const amountOut = Number(data.amountOut) || 0;
-    const amountIn = Number(data.amountIn) || 0;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = periodId ? { periodId } : {};
-    if (excludeId) where.id = { not: excludeId };
-    const prev = await prisma.pettyCashTxn.findFirst({
-      where,
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-    });
-    const prevBal = prev?.balanceAfter ?? 0;
-    data.balanceAfter = prevBal + amountIn - amountOut;
-    return data;
-  }
-
-  async function applyOwnerRunningBalance(
-    data: Record<string, unknown>,
-    periodId: string | null | undefined,
-    excludeId?: string
-  ) {
-    if (modelName !== "ownerTxn") return data;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = periodId ? { periodId } : {};
-    if (excludeId) where.id = { not: excludeId };
-    const prev = await prisma.ownerTxn.findFirst({
-      where,
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-    });
-    const prevBal = prev?.runningBalance ?? 0;
-    const amountIn = Number(data.amountIn) || 0;
-    const amountOut = Number(data.amountOut) || 0;
-    data.runningBalance = prevBal + amountIn - amountOut;
-    return data;
-  }
+  
 
   /** Handle bank balance sync for receivable changes */
   async function handleReceivableBankChange(
@@ -453,8 +371,8 @@ export function makeCrudHandlers(
         delete data.periodId;
       }
       const pid = (data.periodId as string) || body.periodId || null;
-      data = await applyPettyCashBalance(data, pid);
-      data = await applyOwnerRunningBalance(data, pid);
+      
+      
       const row = await model.create({ data });
 
       // After creating a receivable, check sales attribution
@@ -506,8 +424,7 @@ export function makeCrudHandlers(
       delete data.updatedAt;
       const pid = body.periodId || null;
       delete data.periodId;
-      data = await applyPettyCashBalance(data, pid, id);
-      data = await applyOwnerRunningBalance(data, pid, id);
+      
       const row = await model.update({ where: { id }, data });
 
       // Handle special logic after update

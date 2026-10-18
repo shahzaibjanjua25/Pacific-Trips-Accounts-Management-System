@@ -30,13 +30,12 @@ export default async function ClientDetailPage({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [ledgerRows, receivables, trips] = await Promise.all([
+  const [ledgerRows, receivables] = await Promise.all([
     prisma.clientLedger.findMany({
       where: { clientId: id },
       orderBy: { tourDate: "asc" },
     }),
     prisma.receivable.findMany({ where: { periodId: current.id, clientId: id } }),
-    prisma.trip.findMany({ where: { periodId: current.id, clientId: id } }),
   ]);
 
   const totalPaid = receivables.reduce((s, r) => s + r.amountReceived, 0);
@@ -87,38 +86,6 @@ export default async function ClientDetailPage({
         />
       </div>
 
-      {trips.length > 0 && (
-        <div className="bg-white rounded-xl border p-5">
-          <h2 className="font-semibold text-slate-800 mb-3">Trips ({trips.length})</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-500 uppercase border-b">
-                <th className="py-1.5">Trip Ref</th>
-                <th className="py-1.5">Destination</th>
-                <th className="py-1.5">Start</th>
-                <th className="py-1.5">End</th>
-                <th className="py-1.5 text-right">Revenue</th>
-                <th className="py-1.5 text-right">Net Profit</th>
-                <th className="py-1.5">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trips.map((t) => (
-                <tr key={t.id} className="border-t">
-                  <td className="py-1.5">{t.tripRef || "—"}</td>
-                  <td className="py-1.5">{t.destination || "—"}</td>
-                  <td className="py-1.5">{t.startDate ? new Date(t.startDate).toLocaleDateString("en-GB") : "—"}</td>
-                  <td className="py-1.5">{t.endDate ? new Date(t.endDate).toLocaleDateString("en-GB") : "—"}</td>
-                  <td className="py-1.5 text-right tabular-nums">{formatPKR(t.packageRevenue)}</td>
-                  <td className="py-1.5 text-right tabular-nums">{formatPKR(t.netProfit)}</td>
-                  <td className="py-1.5">{t.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       <ClientLedgerPanel
         clientId={client.id}
         clientName={client.name}
@@ -142,9 +109,13 @@ export default async function ClientDetailPage({
 }
 
 function Stat({
-  title, value, tone,
+  title,
+  value,
+  tone,
 }: {
-  title: string; value: number; tone: "slate" | "emerald" | "red" | "sky";
+  title: string;
+  value: number;
+  tone: "slate" | "emerald" | "red" | "sky";
 }) {
   const map = {
     slate: "border-slate-200 bg-white text-slate-900",
@@ -154,7 +125,9 @@ function Stat({
   };
   return (
     <div className={`rounded-lg border p-4 ${map[tone]}`}>
-      <p className="text-xs font-medium uppercase tracking-wide opacity-70">{title}</p>
+      <p className="text-xs font-medium uppercase tracking-wide opacity-70">
+        {title}
+      </p>
       <p className="text-xl font-bold mt-1 tabular-nums">{formatPKR(value)}</p>
     </div>
   );

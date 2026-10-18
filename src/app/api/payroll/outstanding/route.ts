@@ -74,16 +74,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Ticketing ──
-  else if (category.includes("ticketing")) {
-    const rows = await prisma.payable.findMany({
-      where: { periodId, category: { contains: "Ticketing" } },
-    });
-    const p = rows.find((r) => nameMatch(r.supplierName, party));
-    if (p) {
-      exists = true;
-      outstanding = p.remaining;
-    }
-  }
+ 
 
   // ── Supplier / Payable (generic) ──
   else if (category.includes("supplier") || category.includes("payable")) {
