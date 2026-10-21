@@ -2,13 +2,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
-import { calcOverdue } from "@/lib/utils";
 
 const ALLOWED_FIELDS = [
-  "periodId", "employeeId", "employeeName", "basicSalary", "bonus",
-  "taxDeducted", "loanInstallment", "otherDeductions", "netPayable",
-  "amountPaid", "remaining", "status", "paidDate", "notes",
+  "periodId",
+  "employeeId",
+  "employeeName",
+  "basicSalary",
+  "bonus",
+  "taxDeducted",
+  "loanInstallment",
+  "otherDeductions",
+  "netPayable",
+  "amountPaid",
+  "remaining",
+  "status",
+  "paidDate",
+  "notes",
 ];
+
+function canonicalizeRole(raw: unknown): string | null {
+  if (raw == null) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  const lower = t.toLowerCase();
+  if (lower === "sales" || lower === "sale") return "Sales";
+  if (
+    lower === "team lead-sales" ||
+    lower === "team lead sales" ||
+    lower === "teamlead-sales" ||
+    lower === "team-lead-sales"
+  ) {
+    return "Team Lead-Sales";
+  }
+  return t;
+}
 
 function pickAllowed(data: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
@@ -37,13 +64,78 @@ function enrich(data: Record<string, unknown>) {
   else d.status = d.status || "Pending";
 
   for (const key of Object.keys(d)) {
-    if (key.toLowerCase().includes("date") && typeof d[key] === "string" && d[key]) {
+    if (
+      key.toLowerCase().includes("date") &&
+      typeof d[key] === "string" &&
+      d[key]
+    ) {
       d[key] = new Date(d[key] as string);
     } else if (typeof d[key] === "string" && d[key] === "") {
       d[key] = null;
     }
   }
   return d;
+}
+
+/**
+ * Find or create an Employee from the payroll form's name + Team field.
+ * THIS is what drives Sales vs Other Staff on the payroll page —
+ * PayrollEntry itself has no role column.
+ */
+async function ensureEmployeeFromTeam(opts: {
+  employeeName: string;
+  team?: string | null;
+  basicSalary?: number | null;
+}): Promise<{ id: string; name: string; role: string | null } | null> {
+  const name = (opts.employeeName || "").trim();
+  if (!name) return null;
+
+  const role = canonicalizeRole(opts.team);
+  const basic =
+    opts.basicSalary != null && Number.isFinite(Number(opts.basicSalary))
+      ? Number(opts.basicSalary)
+      : undefined;
+
+  let emp = await prisma.employee.findFirst({
+    where: { name: { equals: name, mode: "insensitive" } },
+  });
+
+  if (!emp) {
+    emp = await prisma.employee.create({
+      data: {
+        name,
+        role: role ?? "Staff",
+        basicSalary: basic ?? 0,
+        isActive: true,
+      },
+    });
+    console.log("[payroll] created Employee", {
+      id: emp.id,
+      name: emp.name,
+      role: emp.role,
+    });
+    return emp;
+  }
+
+  // Update role when the form explicitly sent Team / Designation
+  if (role) {
+    const data: { role: string; basicSalary?: number; isActive?: boolean } = {
+      role,
+      isActive: true,
+    };
+    if (basic != null && basic > 0) data.basicSalary = basic;
+    emp = await prisma.employee.update({
+      where: { id: emp.id },
+      data,
+    });
+    console.log("[payroll] updated Employee.role", {
+      id: emp.id,
+      name: emp.name,
+      role: emp.role,
+    });
+  }
+
+  return emp;
 }
 
 /** Sync loan fields (loanOriginal, loanBalance) to EmployeeLoan */
@@ -59,7 +151,7 @@ async function syncLoanFromEdit(
   }
 
   const emp = await prisma.employee.findFirst({
-    where: { name: employeeName, isActive: true },
+    where: { name: { equals: employeeName, mode: "insensitive" } },
   });
   if (!emp) return;
 
@@ -71,8 +163,10 @@ async function syncLoanFromEdit(
   if (existing) {
     const update: Record<string, number> = {};
     if (loanOriginal != null) update.originalAmount = Number(loanOriginal);
-    if (loanBalance != null) update.remainingAmount = Math.max(0, Number(loanBalance));
-    if (loanInstallment != null) update.monthlyInstallment = Math.max(0, Number(loanInstallment));
+    if (loanBalance != null)
+      update.remainingAmount = Math.max(0, Number(loanBalance));
+    if (loanInstallment != null)
+      update.monthlyInstallment = Math.max(0, Number(loanInstallment));
     if (Object.keys(update).length > 0) {
       await prisma.employeeLoan.update({
         where: { id: existing.id },
@@ -113,13 +207,31 @@ export async function POST(req: NextRequest) {
     const data = enrich(cleaned);
     delete data.id;
 
-    // Extract loan fields (not stored on PayrollEntry)
-    const loanOriginal = body.loanOriginal != null ? Number(body.loanOriginal) : null;
-    const loanBalance = body.loanBalance != null ? Number(body.loanBalance) : null;
+    if (!data.employeeName || String(data.employeeName).trim() === "") {
+      return NextResponse.json(
+        { error: "employeeName required" },
+        { status: 400 }
+      );
+    }
+
+    // Sync Employee.role from the form's Team / Designation field
+    const emp = await ensureEmployeeFromTeam({
+      employeeName: String(data.employeeName),
+      team: body.team as string | null | undefined,
+      basicSalary: data.basicSalary as number | undefined,
+    });
+    if (emp) {
+      data.employeeId = emp.id;
+      data.employeeName = emp.name; // canonical casing from Employee row
+    }
+
+    const loanOriginal =
+      body.loanOriginal != null ? Number(body.loanOriginal) : null;
+    const loanBalance =
+      body.loanBalance != null ? Number(body.loanBalance) : null;
 
     const row = await prisma.payrollEntry.create({ data: data as never });
 
-    // Sync loan to EmployeeLoan
     if (row.periodId && row.employeeName) {
       await syncLoanFromEdit(
         row.periodId,
@@ -130,7 +242,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json(row);
+    return NextResponse.json({
+      ...row,
+      team: emp?.role ?? body.team ?? null,
+    });
   } catch (e) {
     console.error("[payroll:POST]", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
@@ -142,7 +257,8 @@ export async function PUT(req: NextRequest) {
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await req.json();
-    if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
+    if (!body.id)
+      return NextResponse.json({ error: "id required" }, { status: 400 });
     const id = body.id as string;
 
     const old = await prisma.payrollEntry.findUnique({ where: { id } });
@@ -155,11 +271,27 @@ export async function PUT(req: NextRequest) {
     delete data.updatedAt;
     delete data.periodId;
 
+    const nameForEmp = String(
+      data.employeeName || old.employeeName || ""
+    ).trim();
+
+    // Always honour Team field on edit so moving someone Sales ↔ Staff works
+    const emp = await ensureEmployeeFromTeam({
+      employeeName: nameForEmp,
+      team: body.team as string | null | undefined,
+      basicSalary: data.basicSalary as number | undefined,
+    });
+    if (emp) {
+      data.employeeId = emp.id;
+      if (data.employeeName) data.employeeName = emp.name;
+    }
+
     const row = await prisma.payrollEntry.update({ where: { id }, data });
 
-    // Extract loan fields
-    const loanOriginal = body.loanOriginal != null ? Number(body.loanOriginal) : null;
-    const loanBalance = body.loanBalance != null ? Number(body.loanBalance) : null;
+    const loanOriginal =
+      body.loanOriginal != null ? Number(body.loanOriginal) : null;
+    const loanBalance =
+      body.loanBalance != null ? Number(body.loanBalance) : null;
 
     if (row.periodId && row.employeeName) {
       await syncLoanFromEdit(
@@ -171,7 +303,10 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    return NextResponse.json(row);
+    return NextResponse.json({
+      ...row,
+      team: emp?.role ?? body.team ?? null,
+    });
   } catch (e) {
     console.error("[payroll:PUT]", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
