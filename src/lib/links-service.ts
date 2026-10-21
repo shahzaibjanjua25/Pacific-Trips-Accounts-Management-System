@@ -65,17 +65,19 @@ export async function syncPayrollForEmployee(
     where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
   });
   // Cap installment at remaining loan so payroll never deducts more than owed
-  let installment = loan?.monthlyInstallment ?? 0;
-  if (loan && installment > loan.remainingAmount) {
-    installment = loan.remainingAmount;
-  }
+  // AFTER (safe — payroll reflects the schedule, loan is untouched here)
+  let scheduled = loan?.monthlyInstallment ?? 0;
+  // A scheduled installment larger than remaining means the loan is
+  // effectively finished: don't schedule anything beyond what's owed.
+  let installment = loan ? Math.min(scheduled, loan.remainingAmount) : 0;
+
   if (loan && installment <= 0) {
-    // Fallback fixed schedules when monthlyInstallment was never set
     const n = employeeName.toLowerCase();
-    if (n.includes("ahsaan")) installment = Math.min(30000, loan.remainingAmount);
-    else if (n.includes("amjad") || n.includes("amad") || n.includes("ammar"))
-      installment = Math.min(20000, loan.remainingAmount);
-    else if (n.includes("awais")) installment = Math.min(20000, loan.remainingAmount);
+    const fixed =
+      n.includes("ahsaan") ? 30000 :
+        n.includes("amjad") || n.includes("amad") || n.includes("ammar") ? 20000 :
+          n.includes("awais") ? 20000 : 0;
+    installment = Math.min(fixed, loan.remainingAmount);
   }
 
   const netPayable = Math.max(0, basic + commissionAmt - tax - installment - other);
@@ -286,7 +288,7 @@ export async function updateAssetFromTransaction(
 
 /** Delete an Asset row that came from a transaction. */
 export async function deleteAssetFromTransaction(assetId: string) {
-  await prisma.asset.delete({ where: { id: assetId } }).catch(() => {});
+  await prisma.asset.delete({ where: { id: assetId } }).catch(() => { });
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -295,16 +297,16 @@ export async function deleteAssetFromTransaction(assetId: string) {
 
 export type AppliedLink = {
   entityType:
-    | "payable"
-    | "hotel"
-    | "transport"
-    | "receivable"
-    | "payroll"
-    | "commission"
-    | "refund"
-    | "advance"
-    | "employee_loan"
-    | "asset";
+  | "payable"
+  | "hotel"
+  | "transport"
+  | "receivable"
+  | "payroll"
+  | "commission"
+  | "refund"
+  | "advance"
+  | "employee_loan"
+  | "asset";
   entityId: string;
   appliedAmount: number;
 };
@@ -505,8 +507,8 @@ export async function applyPayrollPayment(
     if (!entry) {
       const loan = emp
         ? await prisma.employeeLoan.findFirst({
-            where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
-          })
+          where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
+        })
         : null;
       const isLead =
         canonicalName.toLowerCase().includes("ahmad") ||
@@ -538,7 +540,7 @@ export async function applyPayrollPayment(
   if (amount > outstanding && outstanding > 0) {
     console.warn(
       `[applyPayrollPayment] OVERPAYMENT reached service layer: ${entry.employeeName} ` +
-        `outstanding ${outstanding}, paying ${amount}, capping to ${outstanding}`
+      `outstanding ${outstanding}, paying ${amount}, capping to ${outstanding}`
     );
   }
 

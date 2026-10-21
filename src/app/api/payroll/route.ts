@@ -138,15 +138,55 @@ async function ensureEmployeeFromTeam(opts: {
   return emp;
 }
 
-/** Sync loan fields (loanOriginal, loanBalance) to EmployeeLoan */
-async function syncLoanFromEdit(
-  periodId: string,
-  employeeName: string,
-  loanOriginal?: number | null,
-  loanBalance?: number | null,
-  loanInstallment?: number | null
-) {
-  if (loanOriginal == null && loanBalance == null && loanInstallment == null) {
+/**
+ * Sync loan fields from the payroll edit form.
+ *
+ * CRITICAL RULES (this is the bug fix):
+ *   1. The payroll form may change:
+ *        - loanOriginal   (the total amount originally borrowed)
+ *        - loanBalance    (the CURRENT total owed) — BUT only if it is
+ *                          explicitly allowed to be edited
+ *        - loanInstallment (the scheduled monthly amount for THIS month)
+ *   2. The payroll form may NEVER silently move remainingAmount during
+ *      a routine save (change status, change amountPaid, etc.). Doing so
+ *      is what caused the 601,000 vs 631,000 drift for Mr Ahsaan.
+ *   3. The ONLY sanctioned path for actually reducing remainingAmount is
+ *      when the payroll row transitions to fully Paid (handled by
+ *      applyPayrollPayment in links-service.ts and by the helper below).
+ *
+ * So this function now:
+ *   - Reads the loan row
+ *   - Applies an explicit, user-edited originalAmount (if changed)
+ *   - Applies an explicit, user-edited monthlyInstallment (if changed)
+ *   - Applies an explicit remainingAmount override (if the user typed a
+ *     different number AND the loan is not currently being auto-deducted
+ *     by a Paid transition in the same request)
+ *   - Caps monthlyInstallment at remainingAmount
+ *   - NEVER touches remainingAmount as a side effect of saving the row
+ */
+async function syncLoanFromEdit(opts: {
+  periodId: string;
+  employeeName: string;
+  loanOriginal?: number | null;
+  loanBalance?: number | null;
+  loanInstallment?: number | null;
+  /** True when this save is being used to mark the payroll fully paid. */
+  markingPaid?: boolean;
+}) {
+  const {
+    periodId,
+    employeeName,
+    loanOriginal,
+    loanBalance,
+    loanInstallment,
+    markingPaid,
+  } = opts;
+
+  if (
+    loanOriginal == null &&
+    loanBalance == null &&
+    loanInstallment == null
+  ) {
     return;
   }
 
@@ -160,30 +200,128 @@ async function syncLoanFromEdit(
     orderBy: { createdAt: "desc" },
   });
 
-  if (existing) {
-    const update: Record<string, number> = {};
-    if (loanOriginal != null) update.originalAmount = Number(loanOriginal);
-    if (loanBalance != null)
-      update.remainingAmount = Math.max(0, Number(loanBalance));
-    if (loanInstallment != null)
-      update.monthlyInstallment = Math.max(0, Number(loanInstallment));
-    if (Object.keys(update).length > 0) {
-      await prisma.employeeLoan.update({
-        where: { id: existing.id },
-        data: update,
+  if (!existing) {
+    // Create a new loan row only if user is entering a real balance
+    if ((loanOriginal || 0) > 0 || (loanBalance || 0) > 0) {
+      const orig = Number(loanOriginal) || Number(loanBalance) || 0;
+      const rem = Math.min(orig, Number(loanBalance) || 0);
+      const inst = Math.max(0, Number(loanInstallment) || 0);
+      await prisma.employeeLoan.create({
+        data: {
+          employeeId: emp.id,
+          originalAmount: orig,
+          remainingAmount: rem,
+          monthlyInstallment: Math.min(inst, rem),
+          notes: "Created from payroll edit",
+        },
       });
     }
-  } else if ((loanOriginal || 0) > 0 || (loanBalance || 0) > 0) {
-    await prisma.employeeLoan.create({
-      data: {
-        employeeId: emp.id,
-        originalAmount: Number(loanOriginal) || Number(loanBalance) || 0,
-        remainingAmount: Number(loanBalance) || 0,
-        monthlyInstallment: Number(loanInstallment) || 0,
-        notes: "Created from payroll edit",
-      },
+    return;
+  }
+
+  // Build update object conservatively
+  const update: {
+    originalAmount?: number;
+    remainingAmount?: number;
+    monthlyInstallment?: number;
+  } = {};
+
+  // 1. Original amount: only change if the user typed a different, valid number
+  if (loanOriginal != null && Number.isFinite(Number(loanOriginal))) {
+    const nextOrig = Math.max(0, Number(loanOriginal));
+    if (nextOrig !== existing.originalAmount) {
+      update.originalAmount = nextOrig;
+    }
+  }
+
+  // 2. Monthly installment: respect user's typed value, cap at remaining
+  if (loanInstallment != null && Number.isFinite(Number(loanInstallment))) {
+    const nextInst = Math.max(0, Number(loanInstallment));
+    const remainingAfter = existing.remainingAmount;
+    const capped = Math.min(nextInst, Math.max(0, remainingAfter));
+    if (capped !== existing.monthlyInstallment) {
+      update.monthlyInstallment = capped;
+    }
+  }
+
+  // 3. Remaining amount: ONLY allow an explicit override when:
+  //      - the user typed a different number, AND
+  //      - we are not simultaneously marking the row Paid (that path
+  //        already applied the installment in applyPayrollPayment).
+  if (
+    loanBalance != null &&
+    Number.isFinite(Number(loanBalance)) &&
+    !markingPaid
+  ) {
+    const nextBal = Math.max(0, Number(loanBalance));
+    if (Math.abs(nextBal - existing.remainingAmount) > 0.5) {
+      // Safety: don't let remaining exceed original
+      const orig =
+        update.originalAmount ?? existing.originalAmount ?? nextBal;
+      update.remainingAmount = Math.min(orig, nextBal);
+    }
+  }
+
+  if (Object.keys(update).length > 0) {
+    await prisma.employeeLoan.update({
+      where: { id: existing.id },
+      data: update,
     });
   }
+}
+
+/**
+ * Apply the loan deduction exactly once when a payroll row transitions
+ * from not-Paid to Paid. This centralizes the ONLY sanctioned
+ * remainingAmount decrement during the payroll lifecycle.
+ *
+ * Returns the new remaining balance (or null if no loan exists).
+ */
+async function applyLoanDeductionIfNowPaid(opts: {
+  employeeId: string | null;
+  employeeName: string;
+  loanInstallment: number;
+  previouslyPaid: boolean;
+  nowPaid: boolean;
+}): Promise<number | null> {
+  const { employeeId, employeeName, loanInstallment, previouslyPaid, nowPaid } =
+    opts;
+
+  if (!nowPaid || previouslyPaid) return null; // only on the transition
+  if (!employeeId && !employeeName) return null;
+  if (loanInstallment <= 0) return null;
+
+  const emp = employeeId
+    ? await prisma.employee.findUnique({ where: { id: employeeId } })
+    : await prisma.employee.findFirst({
+        where: { name: { equals: employeeName, mode: "insensitive" } },
+      });
+  if (!emp) return null;
+
+  const loan = await prisma.employeeLoan.findFirst({
+    where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!loan) return null;
+
+  const deduction = Math.min(loanInstallment, loan.remainingAmount);
+  const newRemaining = Math.max(0, loan.remainingAmount - deduction);
+
+  // Next scheduled installment is capped at what's left
+  const nextInstallment =
+    newRemaining <= 0
+      ? 0
+      : Math.min(loan.monthlyInstallment || deduction, newRemaining);
+
+  await prisma.employeeLoan.update({
+    where: { id: loan.id },
+    data: {
+      remainingAmount: newRemaining,
+      monthlyInstallment: nextInstallment,
+    },
+  });
+
+  return newRemaining;
 }
 
 export async function GET(req: NextRequest) {
@@ -225,21 +363,39 @@ export async function POST(req: NextRequest) {
       data.employeeName = emp.name; // canonical casing from Employee row
     }
 
+    // NEW rows: never touch remainingAmount of an existing loan. Only
+    // set originalAmount / monthlyInstallment if user typed them.
     const loanOriginal =
       body.loanOriginal != null ? Number(body.loanOriginal) : null;
     const loanBalance =
       body.loanBalance != null ? Number(body.loanBalance) : null;
+    const loanInstallment =
+      data.loanInstallment != null ? Number(data.loanInstallment) : null;
 
     const row = await prisma.payrollEntry.create({ data: data as never });
 
     if (row.periodId && row.employeeName) {
-      await syncLoanFromEdit(
-        row.periodId,
-        row.employeeName,
+      // Do NOT reduce remainingAmount on create. Only apply original +
+      // monthly installment + explicit override.
+      await syncLoanFromEdit({
+        periodId: row.periodId,
+        employeeName: row.employeeName,
         loanOriginal,
         loanBalance,
-        row.loanInstallment
-      );
+        loanInstallment,
+        markingPaid: row.status === "Paid",
+      });
+
+      // If created as Paid (rare but possible), apply the installment once
+      if (row.status === "Paid") {
+        await applyLoanDeductionIfNowPaid({
+          employeeId: row.employeeId,
+          employeeName: row.employeeName,
+          loanInstallment: row.loanInstallment ?? 0,
+          previouslyPaid: false,
+          nowPaid: true,
+        });
+      }
     }
 
     return NextResponse.json({
@@ -296,7 +452,10 @@ export async function PUT(req: NextRequest) {
       console.error("[payroll:PUT] employee sync failed (continuing)", syncErr);
     }
 
-    const row = await prisma.payrollEntry.update({ where: { id }, data: data as never });
+    const row = await prisma.payrollEntry.update({
+      where: { id },
+      data: data as never,
+    });
 
     const loanOriginal =
       body.loanOriginal != null ? Number(body.loanOriginal) : null;
@@ -305,13 +464,66 @@ export async function PUT(req: NextRequest) {
 
     if (row.periodId && row.employeeName) {
       try {
-        await syncLoanFromEdit(
-          row.periodId,
-          row.employeeName,
+        // CRITICAL: if the row just transitioned to Paid, deduct the loan
+        // exactly ONCE via the dedicated helper. Only after that do we
+        // sync any remaining fields from the form.
+        const previouslyPaid = old.status === "Paid";
+        const nowPaid = row.status === "Paid";
+
+        if (!previouslyPaid && nowPaid) {
+          await applyLoanDeductionIfNowPaid({
+            employeeId: row.employeeId,
+            employeeName: row.employeeName,
+            loanInstallment: row.loanInstallment ?? old.loanInstallment ?? 0,
+            previouslyPaid: false,
+            nowPaid: true,
+          });
+        } else if (previouslyPaid && !nowPaid) {
+          // Reverting a Paid row: add the installment back so numbers
+          // stay consistent with what the user sees.
+          const emp = row.employeeId
+            ? await prisma.employee.findUnique({
+                where: { id: row.employeeId },
+              })
+            : await prisma.employee.findFirst({
+                where: { name: { equals: row.employeeName, mode: "insensitive" } },
+              });
+          if (emp) {
+            const loan = await prisma.employeeLoan.findFirst({
+              where: { employeeId: emp.id },
+              orderBy: { createdAt: "desc" },
+            });
+            if (loan) {
+              const addBack = Math.min(
+                old.loanInstallment ?? 0,
+                loan.originalAmount - loan.remainingAmount
+              );
+              if (addBack > 0) {
+                await prisma.employeeLoan.update({
+                  where: { id: loan.id },
+                  data: {
+                    remainingAmount: loan.remainingAmount + addBack,
+                    monthlyInstallment: Math.min(
+                      old.loanInstallment ?? loan.monthlyInstallment,
+                      loan.remainingAmount + addBack
+                    ),
+                  },
+                });
+              }
+            }
+          }
+        }
+
+        // Now sync explicit form fields. Pass markingPaid so we don't
+        // clobber remainingAmount that we just adjusted.
+        await syncLoanFromEdit({
+          periodId: row.periodId,
+          employeeName: row.employeeName,
           loanOriginal,
           loanBalance,
-          row.loanInstallment
-        );
+          loanInstallment: data.loanInstallment as number | undefined,
+          markingPaid: nowPaid,
+        });
       } catch (loanErr) {
         console.error("[payroll:PUT] loan sync failed", loanErr);
       }
