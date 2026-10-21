@@ -18,22 +18,39 @@ const DESIGNATION: Record<string, string> = {
   "Naimal": "Sales",
   "Ashir": "Sales",
   "Izza": "Sales",
-  "Ahmed": "Grapich Designer",
-  "Faysal": "meta marketing",
+  "Ahmed": "Graphic Designer",
+  "Faysal": "Meta Marketing",
   "Abdullah": "CEO",
-  "Kamran": "Acoountant",
+  "Kamran": "Accountant",
   "WAseem Akram": "Legal Team",
   "Nadeem": "Office Boy",
 };
 
+/**
+ * Normalize a role string.
+ * Returns the canonical role, treating any case variant of "sales" or
+ * "team lead-sales" as the correct bucket.
+ */
+function normalizeRole(role: string | null | undefined): string {
+  if (!role) return "Staff";
+  const r = role.trim();
+  const lower = r.toLowerCase();
+  if (lower === "sales") return "Sales";
+  if (
+    lower === "team lead-sales" ||
+    lower === "team lead sales" ||
+    lower === "teamlead-sales" ||
+    lower === "team-lead-sales"
+  ) {
+    return "Team Lead-Sales";
+  }
+  return r;
+}
+
 function teamLabel(name: string, role?: string | null): string {
   if (DESIGNATION[name]) return DESIGNATION[name];
-  if (role === "Sales") {
-    if (name.toLowerCase().includes("amad") || name.toLowerCase().includes("ammar")) {
-      return "Team Lead-Sales";
-    }
-    return "Sales";
-  }
+  const norm = normalizeRole(role);
+  if (norm === "Sales" || norm === "Team Lead-Sales") return norm;
   return role || "Staff";
 }
 
@@ -46,10 +63,10 @@ const fields: FieldDef[] = [
     options: [
       "Sales",
       "Team Lead-Sales",
-      "Grapich Designer",
-      "meta marketing",
+      "Graphic Designer",
+      "Meta Marketing",
       "CEO",
-      "Acoountant",
+      "Accountant",
       "Legal Team",
       "Office Boy",
       "Staff",
@@ -87,36 +104,28 @@ export default async function Page({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [rows, commissions, salesStaff, otherStaff, allEmployees] = await Promise.all([
+  // Fetch ALL active employees — not just Sales. We partition below using
+  // normalizeRole so any case variant lands in the right bucket.
+  const [rows, commissions, allEmployees] = await Promise.all([
     prisma.payrollEntry.findMany({
       where: { periodId: current.id },
       orderBy: { employeeName: "asc" },
     }),
     prisma.commission.findMany({ where: { periodId: current.id } }),
     prisma.employee.findMany({
-      where: { isActive: true, role: "Sales" },
+      where: { isActive: true },
       orderBy: { name: "asc" },
       include: { loans: true },
     }),
-    prisma.employee.findMany({
-      where: { isActive: true, role: { not: "Sales" } },
-      orderBy: { name: "asc" },
-    }),
-    prisma.employee.findMany({ where: { isActive: true } }),
   ]);
 
   const roleByName: Record<string, string> = {};
-  for (const e of allEmployees) roleByName[e.name] = e.role ?? "Staff";
-  const loansByEmp: Record<string, number> = {};
-  for (const e of salesStaff) {
-    const loan = e.loans?.[0];
-    if (loan) loansByEmp[e.name] = loan.remainingAmount;
+  for (const e of allEmployees) {
+    roleByName[e.name] = normalizeRole(e.role);
   }
 
-  // Build a lookup of loans by employee name
-  // Build a lookup of loans by employee name
   const loanByEmp: Record<string, { originalAmount: number; remainingAmount: number }> = {};
-  for (const e of salesStaff) {
+  for (const e of allEmployees) {
     const loan = e.loans?.[0];
     if (loan) {
       loanByEmp[e.name] = {
@@ -126,29 +135,10 @@ export default async function Page({
     }
   }
 
-  // Non-Sales staff loans
-  const otherStaffIds = otherStaff.map((e) => e.id);
-  const otherLoans = otherStaffIds.length
-    ? await prisma.employeeLoan.findMany({
-      where: { employeeId: { in: otherStaffIds } },
-    })
-    : [];
-  for (const l of otherLoans) {
-    const emp = otherStaff.find((e) => e.id === l.employeeId);
-    if (emp && !loanByEmp[emp.name]) {
-      loanByEmp[emp.name] = {
-        originalAmount: l.originalAmount,
-        remainingAmount: l.remainingAmount,
-      };
-    }
-  }
-
-  // Commission lookup - ONLY for Sales role
-  // Commission lookup — only for Sales role
   const commissionByEmp: Record<string, number> = {};
   for (const c of commissions) {
     const empRole = roleByName[c.employeeName];
-    if (empRole === "Sales") {
+    if (empRole === "Sales" || empRole === "Team Lead-Sales") {
       commissionByEmp[c.employeeName] =
         (commissionByEmp[c.employeeName] || 0) + c.commissionAmt;
     }
@@ -162,7 +152,17 @@ export default async function Page({
     loanBalance: loanByEmp[r.employeeName]?.remainingAmount ?? 0,
   }));
 
-  const salesNames = new Set(salesStaff.map((e) => e.name));
+  // Partition: any employee whose normalized role is Sales OR Team Lead-Sales
+  // belongs in the Sales Team payroll block. Everything else is Other Staff.
+  const salesNames = new Set(
+    allEmployees
+      .filter((e) => {
+        const r = normalizeRole(e.role);
+        return r === "Sales" || r === "Team Lead-Sales";
+      })
+      .map((e) => e.name)
+  );
+
   const salesPayroll = enriched.filter((r) => salesNames.has(r.employeeName));
   const otherPayroll = enriched.filter((r) => !salesNames.has(r.employeeName));
 
@@ -173,12 +173,18 @@ export default async function Page({
   const totalOutstandingSalary =
     enriched.reduce((s, r) => s + Math.max(0, r.netPayable - (r.amountPaid ?? 0)), 0);
 
+  // Roster chips at the top of the page
+  const salesRoster = allEmployees.filter((e) => {
+    const r = normalizeRole(e.role);
+    return r === "Sales" || r === "Team Lead-Sales";
+  });
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Payroll & Commissions</h1>
-                    <p className="text-sm text-slate-500">
+          <h1 className="text-2xl font-bold">Payroll &amp; Commissions</h1>
+          <p className="text-sm text-slate-500">
             Commission only for Sales / Team Lead-Sales. Team Lead: 55,000 flat under 70 lacs, 1% from 70 lacs to target, 2.5% at/above target (no basic).
           </p>
         </div>
@@ -187,12 +193,12 @@ export default async function Page({
 
       <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
         <h2 className="font-semibold text-emerald-900 mb-2">
-          Sales Team ({salesStaff.length}) - 2.5% commission
+          Sales Team ({salesRoster.length}) - 2.5% commission (Team Lead tiered)
         </h2>
         <div className="flex flex-wrap gap-2">
-          {salesStaff.map((e) => {
+          {salesRoster.map((e) => {
             const des = teamLabel(e.name, e.role);
-            const isLead = des === "Team Lead-Sales";
+            const isLead = normalizeRole(e.role) === "Team Lead-Sales";
             const loan = e.loans?.[0];
             const payRow = rows.find((r) => r.employeeName === e.name);
             const comm = commissions.find((c) => c.employeeName === e.name);
@@ -215,6 +221,11 @@ export default async function Page({
               </span>
             );
           })}
+          {salesRoster.length === 0 && (
+            <span className="text-xs text-emerald-800">
+              No Sales / Team Lead-Sales employees yet. Add one in Settings.
+            </span>
+          )}
         </div>
       </div>
 
@@ -242,8 +253,9 @@ export default async function Page({
         </h2>
         {salesPayroll.length === 0 ? (
           <div className="bg-white border rounded-xl p-6 text-sm text-slate-600">
-            Click <strong>Load team into payroll</strong> or run{" "}
-            <code className="text-xs bg-slate-100 px-1 rounded">npx tsx scripts/seed.ts</code>
+            No Sales payroll rows yet. Add a Sales / Team Lead-Sales employee
+            in Settings, then click <strong>Load team into payroll</strong> or{" "}
+            <strong>Sync Payroll (all Sales)</strong>.
           </div>
         ) : (
           <CrudPanel
@@ -256,47 +268,13 @@ export default async function Page({
         )}
       </div>
 
-      {/* {commissions.length > 0 && (
-        <div className="bg-white rounded-xl border p-4">
-          <h3 className="font-semibold mb-2">Commissions (Sales only)</h3>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-500 uppercase border-b">
-                <th className="py-1">Employee</th>
-                <th className="py-1">Team</th>
-                <th className="py-1 text-right">Sale Base</th>
-                <th className="py-1 text-right">Rate</th>
-                <th className="py-1 text-right">Commission</th>
-                <th className="py-1">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {commissions.map((c) => (
-                <tr key={c.id} className="border-t">
-                  <td className="py-1.5">{c.employeeName}</td>
-                  <td className="py-1.5 text-xs">
-                    {teamLabel(c.employeeName, "Sales")}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums">{formatPKR(c.saleAmount)}</td>
-                  <td className="py-1.5 text-right">{c.commissionRate}%</td>
-                  <td className="py-1.5 text-right tabular-nums font-medium">
-                    {formatPKR(c.commissionAmt)}
-                  </td>
-                  <td className="py-1.5">{c.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )} */}
-
       <div>
         <h2 className="text-lg font-semibold mb-2 text-slate-700">
           Other Staff - no commission ({otherPayroll.length})
         </h2>
         {otherPayroll.length === 0 ? (
           <div className="bg-white border rounded-xl p-6 text-sm text-slate-500">
-            Click Load team into payroll.
+            No other-staff payroll rows in this period.
           </div>
         ) : (
           <CrudPanel
@@ -311,4 +289,3 @@ export default async function Page({
     </div>
   );
 }
-

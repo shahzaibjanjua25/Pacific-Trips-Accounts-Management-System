@@ -1,7 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
 import { getSessionUserId } from "@/lib/auth";
+
+/**
+ * Normalize a role string so any case variant of "sales" or
+ * "team lead-sales" is treated as the canonical form.
+ */
+function normalizeRole(role: string | null | undefined): string {
+  if (!role) return "Staff";
+  const r = role.trim();
+  const lower = r.toLowerCase();
+  if (lower === "sales") return "Sales";
+  if (
+    lower === "team lead-sales" ||
+    lower === "team lead sales" ||
+    lower === "teamlead-sales" ||
+    lower === "team-lead-sales"
+  ) {
+    return "Team Lead-Sales";
+  }
+  return r;
+}
+
+function isLeadName(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.includes("ahmad") || n.includes("amad") || n.includes("ammar");
+}
 
 export async function POST(req: NextRequest) {
   const uid = await getSessionUserId();
@@ -37,8 +61,15 @@ export async function POST(req: NextRequest) {
       });
       if (loan && installment === 0) installment = loan.monthlyInstallment;
 
-      const isLead = nameL.includes("amad") || nameL.includes("ammar");
-      const basic = isLead ? 0 : emp.basicSalary || (emp.role === "Sales" ? 40000 : 0);
+      const roleNorm = normalizeRole(emp.role);
+      const isSales = roleNorm === "Sales" || roleNorm === "Team Lead-Sales";
+      const isLead = roleNorm === "Team Lead-Sales" || isLeadName(emp.name);
+
+      // Sales person (not lead) gets 40k default if salary wasn't set.
+      // Team Lead gets 0 basic (their pay comes from commission).
+      const basic = isLead
+        ? 0
+        : emp.basicSalary || (isSales ? 40000 : 0);
       const net = Math.max(0, basic - installment);
 
       await prisma.payrollEntry.create({
@@ -51,7 +82,7 @@ export async function POST(req: NextRequest) {
           netPayable: net,
           status: "Pending",
           notes:
-            emp.role === "Sales"
+            isSales
               ? isLead
                 ? "Team Lead — commission via Compute button"
                 : "Sales — commission via Compute button"
