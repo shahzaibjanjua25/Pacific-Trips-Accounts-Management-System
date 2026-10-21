@@ -251,27 +251,39 @@ export function SalesTeamPanel({
     setLoading(true);
     try {
       await mutate("Updating sales row…", async () => {
+        const isLead = rowForm.role === "Team Lead-Sales";
+        const individual = parseFloat(rowForm.individualSales);
+        const base = parseFloat(rowForm.saleBase);
+        const payload = {
+          periodId,
+          employeeName: editingRow.name,
+          role: rowForm.role,
+          basicSalary: parseFloat(rowForm.basicSalary) || 0,
+          // Non-lead: individual sales is the source of truth.
+          // Lead: saleBase (team sales) is the source of truth.
+          individualSales: Number.isFinite(individual) ? individual : 0,
+          saleBase: Number.isFinite(base)
+            ? base
+            : isLead
+              ? 0
+              : Number.isFinite(individual)
+                ? individual
+                : 0,
+          commissionRate: parseFloat(rowForm.commissionRate) || 0,
+          commissionAmt: parseFloat(rowForm.commissionAmt) || 0,
+          netPayable:
+            rowForm.netPayable === ""
+              ? undefined
+              : parseFloat(rowForm.netPayable) || 0,
+          remaining: parseFloat(rowForm.remaining) || 0,
+          amountPaid: parseFloat(rowForm.amountPaid) || 0,
+          status: rowForm.status,
+          notes: rowForm.notes || null,
+        };
         const res = await fetch("/api/sales-team/update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            periodId,
-            employeeName: editingRow.name,
-            role: rowForm.role,
-            basicSalary: parseFloat(rowForm.basicSalary) || 0,
-            individualSales: parseFloat(rowForm.individualSales) || 0,
-            saleBase: parseFloat(rowForm.saleBase) || 0,
-            commissionRate: parseFloat(rowForm.commissionRate) || 0,
-            commissionAmt: parseFloat(rowForm.commissionAmt) || 0,
-            netPayable:
-              rowForm.netPayable === ""
-                ? undefined
-                : parseFloat(rowForm.netPayable) || 0,
-            remaining: parseFloat(rowForm.remaining) || 0,
-            amountPaid: parseFloat(rowForm.amountPaid) || 0,
-            status: rowForm.status,
-            notes: rowForm.notes,
-          }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await readError(res));
       });
