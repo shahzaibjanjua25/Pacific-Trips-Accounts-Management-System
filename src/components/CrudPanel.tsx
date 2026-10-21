@@ -116,7 +116,7 @@ export function CrudPanel({
 
       if (editing) {
         payload.id = editing.id;
-        await mutate("Updating recordâ€¦", async () => {
+        await mutate("Updating record...", async () => {
           const res = await fetch(apiPath, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -128,7 +128,7 @@ export function CrudPanel({
           }
         });
       } else {
-        await mutate("Saving recordâ€¦", async () => {
+        await mutate("Saving record...", async () => {
           const res = await fetch(apiPath, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -155,7 +155,7 @@ export function CrudPanel({
     if (!confirm("Delete this record?")) return;
     setLoading(true);
     try {
-      await mutate("Deleting recordâ€¦", async () => {
+      await mutate("Deleting record...", async () => {
         const res = await fetch(`${apiPath}?id=${encodeURIComponent(id)}`, {
           method: "DELETE",
         });
@@ -305,7 +305,7 @@ export function CrudPanel({
             className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
             {loading && <Loader2 size={16} className="animate-spin" />}
-            {loading ? "Savingâ€¦" : editing ? "Update" : "Save"}
+            {loading ? "Saving..." : editing ? "Update" : "Save"}
           </button>
         </form>
       )}
