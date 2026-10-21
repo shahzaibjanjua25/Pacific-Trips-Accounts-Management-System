@@ -19,6 +19,23 @@ function normName(s: string): string {
 }
 
 /**
+ * Accept any role that should be able to earn sales commission:
+ * "Sales", "sale", "Team Lead-Sales", and case/spacing variants.
+ */
+function isSalesLikeRole(role: string | null | undefined): boolean {
+  if (!role) return false;
+  const r = role.trim().toLowerCase();
+  return (
+    r === "sales" ||
+    r === "sale" ||
+    r === "team lead-sales" ||
+    r === "team lead sales" ||
+    r === "teamlead-sales" ||
+    r === "team-lead-sales"
+  );
+}
+
+/**
  * Set this salesperson's sale for `clientName` in `periodId` to exactly
  * `amount`. Creates the row if missing, updates it if present, deletes it
  * if `amount <= 0`. Then recomputes commission + payroll.
@@ -39,15 +56,15 @@ export async function setSaleForClient(opts: {
     return { salespersonChanged: false };
   }
 
-  // Only Sales-role employees get commission rows
+  // Only Sales-role (or Team Lead-Sales) employees get commission rows
   const emp = await prisma.employee.findFirst({
     where: { name: salesperson, isActive: true },
   });
-  if (!emp || emp.role !== "Sales") {
+  if (!emp || !isSalesLikeRole(emp.role)) {
     return { salespersonChanged: false };
   }
 
-  // Find every sales row this employee has for this client (defensive —
+  // Find every sales row this employee has for this client (defensive â€”
   // older data may have duplicates from previous bugs). Keep ONE, delete
   // the rest so we converge on a single truth.
   const rows = await prisma.salesPerformance.findMany({

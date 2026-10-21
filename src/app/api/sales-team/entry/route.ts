@@ -241,7 +241,7 @@ export async function POST(req: NextRequest) {
         });
       }
     } else {
-      // No client name — still create a standalone sale row (no receivable link)
+      // No client name â€” still create a standalone sale row (no receivable link)
       await prisma.salesPerformance.create({
         data: {
           periodId,
@@ -303,8 +303,8 @@ export async function PUT(req: NextRequest) {
     const existing = await prisma.salesPerformance.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    const newEmployee = employeeName ?? existing.employeeName;
-    const newClient = clientName ?? existing.clientName ?? "";
+    const newEmployee = (employeeName ?? existing.employeeName).trim();
+    const newClient = (clientName ?? existing.clientName ?? "").trim();
     const newAmount =
       amount != null ? Number(amount) || 0 : existing.debit || 0;
 
@@ -314,22 +314,58 @@ export async function PUT(req: NextRequest) {
     const clientChanged =
       (existing.clientName || "").toLowerCase() !== newClient.toLowerCase();
 
-    if (employeeChanged || clientChanged) {
-      // Remove the old attribution
-      if (existing.clientName) {
-        await clearSaleForClient({
+    // â”€â”€ FAST PATH: same employee + same client = simple in-place update â”€â”€
+    // This is the common "edit the amount / notes / date" case. We avoid the
+    // setSaleForClient round-trip (which was deleting the old row before
+    // re-creating one with a new id, causing subsequent edits/deletes to fail
+    // with "Not found" when the employee role wasn't exactly "Sales").
+    if (!employeeChanged && !clientChanged) {
+      await prisma.salesPerformance.update({
+        where: { id },
+        data: {
+          debit: newAmount,
+          tourDate: tourDate ? new Date(tourDate) : existing.tourDate,
+          description: description ?? existing.description,
+          notes: notes ?? existing.notes,
+        },
+      });
+
+      // If a client exists, keep the receivable's amount + salesperson aligned
+      if (newClient) {
+        await upsertClientFromSale({
           periodId: existing.periodId,
-          salesperson: existing.employeeName,
-          clientName: existing.clientName,
+          clientName: newClient,
+          clientPhone: clientPhone || null,
+          clientContact: clientContact || null,
+          clientEmail: clientEmail || null,
+          clientNotes: clientNotes || null,
+          totalPackage: Number(clientTotalPackage) || newAmount,
+          amountPaid: Number(clientAmountPaid) || 0,
+          tourDate:
+            tourDate ||
+            (existing.tourDate ? existing.tourDate.toISOString() : null),
+          description: description ?? existing.description,
+          salesperson: newEmployee,
+          bankAccount: bankAccount || null,
         });
-      } else {
-        // No client name — just delete the raw row
-        await prisma.salesPerformance.delete({ where: { id } });
       }
+
+      await computeSalesPayroll(existing.periodId);
+      return NextResponse.json({ ok: true });
+    }
+
+    // â”€â”€ STRUCTURAL CHANGE: salesperson and/or client changed â”€â”€
+    if (existing.clientName) {
+      await clearSaleForClient({
+        periodId: existing.periodId,
+        salesperson: existing.employeeName,
+        clientName: existing.clientName,
+      });
+    } else {
+      await prisma.salesPerformance.delete({ where: { id } });
     }
 
     if (newClient) {
-      // Upsert receivable + bank for the new owner
       await upsertClientFromSale({
         periodId: existing.periodId,
         clientName: newClient,
@@ -339,31 +375,38 @@ export async function PUT(req: NextRequest) {
         clientNotes: clientNotes || null,
         totalPackage: Number(clientTotalPackage) || newAmount,
         amountPaid: Number(clientAmountPaid) || 0,
-        tourDate: tourDate || (existing.tourDate ? existing.tourDate.toISOString() : null),
+        tourDate:
+          tourDate ||
+          (existing.tourDate ? existing.tourDate.toISOString() : null),
         description: description ?? existing.description,
         salesperson: newEmployee,
         bankAccount: bankAccount || null,
       });
 
-      // One canonical row for the new owner
       await setSaleForClient({
         periodId: existing.periodId,
         salesperson: newEmployee,
         clientName: newClient,
         amount: Number(clientTotalPackage) || newAmount,
-        tourDate: tourDate || (existing.tourDate ? existing.tourDate.toISOString() : null),
+        tourDate:
+          tourDate ||
+          (existing.tourDate ? existing.tourDate.toISOString() : null),
         description: description ?? existing.description,
         notes: notes ?? existing.notes,
       });
     } else {
-      // Standalone sale (no client) — update in place
-      await prisma.salesPerformance.update({
-        where: { id },
+      // Standalone sale (no client) â€” create a fresh row
+      await prisma.salesPerformance.create({
         data: {
+          periodId: existing.periodId,
           employeeName: newEmployee,
           tourDate: tourDate ? new Date(tourDate) : existing.tourDate,
           description: description ?? existing.description,
+          clientName: null,
+          category: "Sale",
           debit: newAmount,
+          credit: 0,
+          status: "Completed",
           notes: notes ?? existing.notes,
         },
       });
@@ -388,16 +431,11 @@ export async function DELETE(req: NextRequest) {
     const row = await prisma.salesPerformance.findUnique({ where: { id } });
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    if (row.clientName) {
-      await clearSaleForClient({
-        periodId: row.periodId,
-        salesperson: row.employeeName,
-        clientName: row.clientName,
-      });
-    } else {
-      await prisma.salesPerformance.delete({ where: { id } });
-      await computeSalesPayroll(row.periodId);
-    }
+    // Single-row delete: remove BY ID (not by client) so we never wipe
+    // unrelated rows that happen to share the same client name, and so the
+    // ids shown in the Sales Team table remain stable.
+    await prisma.salesPerformance.delete({ where: { id } });
+    await computeSalesPayroll(row.periodId);
 
     return NextResponse.json({ ok: true });
   } catch (e) {

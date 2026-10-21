@@ -31,14 +31,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const cleanName = String(employeeName).trim();
+
     const emp = await prisma.employee.findFirst({
-      where: { name: employeeName, isActive: true },
+      where: { name: cleanName, isActive: true },
     });
     if (!emp) {
       return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
 
-    // Preserve the role exactly — never coerce "Team Lead-Sales" to "Sales".
+    // Preserve the role exactly â€” never coerce "Team Lead-Sales" to "Sales".
     const nextRole = role ?? emp.role ?? "Sales";
 
     if (basicSalary != null || role != null) {
@@ -67,7 +69,7 @@ export async function POST(req: NextRequest) {
         : saleAmt * (rate / 100);
 
     const existingComm = await prisma.commission.findFirst({
-      where: { periodId, employeeName },
+      where: { periodId, employeeName: cleanName },
     });
     if (existingComm) {
       await prisma.commission.update({
@@ -85,7 +87,7 @@ export async function POST(req: NextRequest) {
         data: {
           periodId,
           employeeId: emp.id,
-          employeeName,
+          employeeName: cleanName,
           saleAmount: saleAmt,
           commissionRate: rate,
           commissionAmt: commAmt,
@@ -96,7 +98,7 @@ export async function POST(req: NextRequest) {
     }
 
     const existingPay = await prisma.payrollEntry.findFirst({
-      where: { periodId, employeeName },
+      where: { periodId, employeeName: cleanName },
     });
 
     const basic =
@@ -142,7 +144,7 @@ export async function POST(req: NextRequest) {
         data: {
           periodId,
           employeeId: emp.id,
-          employeeName,
+          employeeName: cleanName,
           basicSalary: basic,
           loanInstallment: loan,
           taxDeducted: tax,
@@ -169,13 +171,14 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const periodId = req.nextUrl.searchParams.get("periodId");
-    const employeeName = req.nextUrl.searchParams.get("employeeName");
-    if (!periodId || !employeeName) {
+    const employeeNameRaw = req.nextUrl.searchParams.get("employeeName");
+    if (!periodId || !employeeNameRaw) {
       return NextResponse.json(
         { error: "periodId and employeeName required" },
         { status: 400 }
       );
     }
+    const employeeName = employeeNameRaw.trim();
 
     const pay = await prisma.payrollEntry.findFirst({
       where: { periodId, employeeName },
