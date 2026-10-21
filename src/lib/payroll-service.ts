@@ -1,12 +1,11 @@
 /**
  * Sales team payroll rules (Pacific Trips policy):
  * - Each sales member: Basic 40,000 PKR + 2.5% commission on THEIR individual sales
- * - Team Lead "Ahmad/Amad/Ammar Amjad":
+ * - Team Lead "Ahmad/Amad/Ammar Amjad" OR any employee with role "Team Lead-Sales":
  *     team sales < commission base        -> fixed 55,000 only
  *     commission base <= sales < target   -> 1.0% of team sales
  *     sales >= monthly target             -> 2.5% of team sales
- *   Both commission base and monthly target are per period in SalesTarget
- *   (editable; defaults: base 70 lacs, target 1.2 crore).
+ *   Both commission base and monthly target are per period in SalesTarget.
  *
  * Individual / team sales use SalesPerformance only (single source of truth)
  * so edits/deletes fully update Individual Sales and Sale Base (including to 0).
@@ -16,14 +15,23 @@ import { prisma } from "./prisma";
 import { syncPayrollForEmployee } from "./links-service";
 
 const COMMISSION_RATE = 0.025;
-const LEAD_MID_RATE = 0.010; // 1.0%
-const LEAD_FLOOR = 7_000_000; // 70 lacs fallback
+const LEAD_MID_RATE = 0.010;
+const LEAD_FLOOR = 7_000_000;
 const LEAD_MIN_SALARY = 55_000;
-const DEFAULT_LEAD_TARGET = 12_000_000; // 1.2 crore fallback
+const DEFAULT_LEAD_TARGET = 12_000_000;
 
 export function isTeamLeadName(name: string): boolean {
   const n = name.toLowerCase();
   return n.includes("ahmad") || n.includes("amad") || n.includes("ammar");
+}
+
+/** Combined check: name keywords OR explicit "Team Lead-Sales" role. */
+export function isTeamLeadEmployee(emp: {
+  name: string;
+  role: string | null;
+}): boolean {
+  if (emp.role === "Team Lead-Sales") return true;
+  return isTeamLeadName(emp.name);
 }
 
 /** Team-lead pay from total non-lead sales team revenue */
@@ -78,14 +86,16 @@ export async function computeSalesPayroll(periodId: string) {
   const commissionBase = targetRow?.commissionBaseAmount ?? LEAD_FLOOR;
 
   const employees = await prisma.employee.findMany({
-    where: { isActive: true, role: "Sales" },
+    where: {
+      isActive: true,
+      role: { in: ["Sales", "Team Lead-Sales"] },
+    },
   });
 
   const salesEntries = await prisma.salesPerformance.findMany({
     where: { periodId },
   });
 
-  // Single source of truth: SalesPerformance only
   const salesByPerson: Record<string, number> = {};
   for (const e of salesEntries) {
     salesByPerson[e.employeeName] =
@@ -93,13 +103,13 @@ export async function computeSalesPayroll(periodId: string) {
   }
 
   const teamTotal = employees
-    .filter((e) => !isTeamLeadName(e.name))
+    .filter((e) => !isTeamLeadEmployee(e))
     .reduce((s, e) => s + (salesByPerson[e.name] || 0), 0);
 
   const results = [];
 
   for (const emp of employees) {
-    const isLead = isTeamLeadName(emp.name);
+    const isLead = isTeamLeadEmployee(emp);
     const individualSales = salesByPerson[emp.name] || 0;
 
     let saleBase: number;
@@ -123,7 +133,6 @@ export async function computeSalesPayroll(periodId: string) {
       where: { periodId, employeeName: emp.name },
     });
 
-    // Always upsert commission so zero sales clear prior amounts
     if (existingComm) {
       await prisma.commission.update({
         where: { id: existingComm.id },

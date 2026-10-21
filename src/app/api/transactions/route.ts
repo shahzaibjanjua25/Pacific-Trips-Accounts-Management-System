@@ -16,6 +16,20 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(txns);
 }
 
+function isDrawingCategory(category: string): boolean {
+  const c = (category || "").toLowerCase().trim();
+  return (
+    c.includes("owner drawing") ||
+    c.includes("personal expense") ||
+    c === "drawing" ||
+    c.includes("owner personal")
+  );
+}
+
+function isAssetCategory(category: string): boolean {
+  return (category || "").toLowerCase().includes("asset");
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -32,20 +46,22 @@ export async function POST(req: NextRequest) {
       cat.includes("client receipt");
     const isEmployeeLoan =
       cat.includes("employee loan") || cat.includes("staff advance");
-    // Client receipt: check debit. Employee loan: only check debit (repayment).
-    // Giving a loan is credit - no outstanding limit.
+    const skipCeiling =
+      isDrawingCategory(cat) || isAssetCategory(cat);
+
     const amountMoving = isClientReceipt
       ? debit
       : isEmployeeLoan
         ? debit
         : credit;
 
-    // Server-side overpayment guard (skip when giving employee loan via credit)
+    // Server-side overpayment guard (skip for drawing/asset — no ceiling)
     if (
       party &&
       amountMoving > 0 &&
       body.periodId &&
       !isNewClient &&
+      !skipCeiling &&
       !(isEmployeeLoan && credit > 0 && debit <= 0)
     ) {
       const outstanding = await lookupOutstanding(body.periodId, cat, party, {
@@ -97,6 +113,7 @@ export async function POST(req: NextRequest) {
       clientNotes: body.clientNotes || null,
       isNewClient,
       salesperson: body.salesperson || null,
+      assetCategory: body.assetCategory || null,
     });
     return NextResponse.json(txn);
   } catch (e) {
@@ -121,6 +138,8 @@ export async function PUT(req: NextRequest) {
       cat.includes("client receipt");
     const isEmployeeLoan =
       cat.includes("employee loan") || cat.includes("staff advance");
+    const skipCeiling =
+      isDrawingCategory(cat) || isAssetCategory(cat);
     const amountMoving = isClientReceipt
       ? debit
       : isEmployeeLoan
@@ -131,6 +150,7 @@ export async function PUT(req: NextRequest) {
       party &&
       amountMoving > 0 &&
       !body.isNewClient &&
+      !skipCeiling &&
       !(isEmployeeLoan && credit > 0 && debit <= 0)
     ) {
       const existing = await prisma.transaction.findUnique({
@@ -180,6 +200,7 @@ export async function PUT(req: NextRequest) {
           ? Number(body.transportAgreedCost)
           : undefined,
       salesperson: body.salesperson || null,
+      assetCategory: body.assetCategory || null,
     });
     return NextResponse.json(txn);
   } catch (e) {
@@ -261,10 +282,8 @@ async function lookupOutstanding(
     const p = find(rows, "supplierName");
     const newBooking = Number(opts?.hotelAgreedCost) || 0;
     if (p) {
-      // A new booking cost raises the ceiling — you're allowed to pay it.
       return p.remaining + newBooking;
     }
-    // No existing payable — new booking's cost is the ceiling.
     return newBooking > 0 ? newBooking : null;
   }
 
@@ -275,14 +294,10 @@ async function lookupOutstanding(
     const p = find(rows, "supplierName");
     const newJob = Number(opts?.transportAgreedCost) || 0;
     if (p) {
-      // A new job cost raises the ceiling — you're allowed to pay it.
       return p.remaining + newJob;
     }
-    // No existing payable — new job's cost is the ceiling.
     return newJob > 0 ? newJob : null;
   }
-
- 
 
   if (category.includes("supplier") || category.includes("payable")) {
     const rows = await prisma.payable.findMany({ where: { periodId } });

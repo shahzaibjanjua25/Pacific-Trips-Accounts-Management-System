@@ -10,6 +10,9 @@ import {
   applyGenericPayablePayment,
   syncRefundToClientLedger,
   removeRefundFromClientLedger,
+  createAssetFromTransaction,
+  updateAssetFromTransaction,
+  deleteAssetFromTransaction,
   type AppliedLink,
 } from "./links-service";
 
@@ -46,7 +49,24 @@ export type TxnInput = {
   clientNotes?: string | null;
   isNewClient?: boolean;
   salesperson?: string | null;
+  assetCategory?: string | null;
 };
+
+/* ------ CATEGORY HELPERS ------ */
+
+function isDrawingCategory(category?: string | null): boolean {
+  const c = (category || "").toLowerCase().trim();
+  return (
+    c.includes("owner drawing") ||
+    c.includes("personal expense") ||
+    c === "drawing" ||
+    c.includes("owner personal")
+  );
+}
+
+function isAssetCategory(category?: string | null): boolean {
+  return (category || "").toLowerCase().includes("asset");
+}
 
 /* ------ BANK ------ */
 
@@ -98,9 +118,6 @@ async function recordBankTxn(opts: {
   const name = opts.accountName.trim();
   if (!name) return;
 
-  // Balance lives on BankBalance (not BankAccount).
-  // accountId FK points at BankAccount — only set it if a real BankAccount row exists.
-  // Never use BankBalance.id here (that caused BankTxn_accountId_fkey violations).
   const bal = await prisma.bankBalance.findFirst({
     where: { accountName: { equals: name, mode: "insensitive" } },
   });
@@ -127,9 +144,6 @@ async function recordBankTxn(opts: {
 
 /**
  * Apply bank effect for a transaction.
- * - Bank Transfer: bankAccount = FROM, party = TO; amount = credit or debit
- * - Normal: debit increases balance, credit decreases (cashDelta)
- * No-op when status is Pending / Cancelled.
  */
 async function applyBankEffect(input: {
   periodId: string;
@@ -215,7 +229,6 @@ async function createRefundFromTransaction(opts: {
   const { periodId, clientName, amount } = opts;
   if (!clientName || amount <= 0) return [];
 
-  // 1. Find or create the client master
   let client = await prisma.client.findFirst({
     where: { name: clientName },
   });
@@ -223,7 +236,6 @@ async function createRefundFromTransaction(opts: {
     client = await prisma.client.create({ data: { name: clientName } });
   }
 
-  // 2. Find the receivable for this client (open OR settled) in this period
   const recv =
     (await prisma.receivable.findFirst({
       where: {
@@ -235,13 +247,11 @@ async function createRefundFromTransaction(opts: {
 
   const paidBefore = recv ? Math.max(0, recv.amountReceived || 0) : 0;
 
-  // Cap the refund at what the client actually paid us.
   const cappedRefund = Math.min(amount, paidBefore);
   if (cappedRefund <= 0) {
     return [];
   }
 
-  // 3. Create the Refund row
   const refund = await prisma.refund.create({
     data: {
       periodId,
@@ -256,7 +266,6 @@ async function createRefundFromTransaction(opts: {
     },
   });
 
-  // 4. Reduce the receivable
   if (recv) {
     const newReceived = Math.max(0, paidBefore - cappedRefund);
     const newRemaining = Math.max(0, recv.totalPackage - newReceived);
@@ -275,7 +284,6 @@ async function createRefundFromTransaction(opts: {
     });
   }
 
-  // 5. ClientLedger row (credit - money out to client)
   await syncRefundToClientLedger(refund.id);
 
   return [
@@ -288,6 +296,11 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const cat = (input.category || "").toLowerCase();
   const party = input.party || input.subCategory || "";
   const periodId = input.periodId;
+
+  // Pure cash-out categories — no operational linkage, no ceiling.
+  if (isDrawingCategory(input.category) || isAssetCategory(input.category)) {
+    return [];
+  }
 
   if (input.relatedPayableId) {
     const signedPayAmount = (input.credit || 0) - (input.debit || 0);
@@ -331,8 +344,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-
-
   if (cat.includes("supplier") || cat.includes("payable")) {
     return applyGenericPayablePayment(periodId, party, "Other", signedPayAmount, {
       description: input.description,
@@ -361,11 +372,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
   }
 
-  
-
-  // Employee Loan / Staff Advance:
-  //   Credit = company gives money to employee -> increase loan remaining
-  //   Debit  = employee repays -> decrease loan remaining (capped at remaining)
   if (
     (cat.includes("employee loan") || cat.includes("staff advance")) &&
     party
@@ -394,7 +400,6 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     });
 
     if (creditAmt > 0) {
-      // Giving / increasing loan
       if (loan) {
         await prisma.employeeLoan.update({
           where: { id: loan.id },
@@ -419,13 +424,12 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
         {
           entityType: "employee_loan",
           entityId: loan.id,
-          appliedAmount: creditAmt, // positive = increased loan
+          appliedAmount: creditAmt,
         },
       ];
     }
 
     if (debitAmt > 0) {
-      // Repayment
       if (!loan || loan.remainingAmount <= 0) {
         throw new Error(
           `No open loan for ${emp.name}. Cannot record repayment of ${debitAmt}.`
@@ -445,7 +449,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
         {
           entityType: "employee_loan",
           entityId: loan.id,
-          appliedAmount: -debitAmt, // negative = decreased loan
+          appliedAmount: -debitAmt,
         },
       ];
     }
@@ -475,7 +479,6 @@ export async function postTransaction(input: TxnInput) {
     },
   });
 
-  // Pending / Cancelled do not move bank balances
   try {
     await applyBankEffect({
       periodId: input.periodId,
@@ -498,14 +501,38 @@ export async function postTransaction(input: TxnInput) {
 
   let links: AppliedLink[] = [];
   try {
-    // Bank Transfer has no operational links
     if (isBankTransferCategory(input.category)) {
+      links = [];
+    } else if (isAssetCategory(input.category)) {
+      // Asset purchase: create an Asset row and link it for later reversal.
+      const amount =
+        Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
+      if (amount > 0) {
+        const assetId = await createAssetFromTransaction({
+          periodId: input.periodId,
+          date: new Date(input.date),
+          description: input.description,
+          category: input.assetCategory || input.subCategory || "Other",
+          cost: amount,
+          notes: input.notes || null,
+        });
+        if (assetId) {
+          links = [
+            {
+              entityType: "asset",
+              entityId: assetId,
+              appliedAmount: amount,
+            },
+          ];
+        }
+      }
+    } else if (isDrawingCategory(input.category)) {
+      // Drawing / personal: cash moves, no other record anywhere.
       links = [];
     } else {
       links = await resolveLinks(input);
     }
   } catch (err) {
-    // Roll back txn + bank so a failed loan/payable link does not leave orphans
     await applyBankEffect({
       periodId: input.periodId,
       date: input.date,
@@ -566,8 +593,6 @@ export async function postTransaction(input: TxnInput) {
       },
     });
   }
-
-  
 
   const isClientSide =
     cat.includes("receipt") ||
@@ -699,7 +724,6 @@ export async function postTransaction(input: TxnInput) {
                 : "Open",
           clientId: client.id,
           clientName: client.name,
-          // Tag the salesperson if we got one and it isn't already set
           ...(input.salesperson && !recv.salesperson
             ? { salesperson: input.salesperson }
             : {}),
@@ -738,16 +762,12 @@ export async function postTransaction(input: TxnInput) {
       isNewReceivable = true;
     }
 
-    // -- Sales attribution --
-    // Attribute to the salesperson when:
-    //   (a) a new Receivable was just created with a total package, OR
-    //   (b) the package was raised on an existing receivable (delta > 0)
     if (input.salesperson && (explicitPackage > 0 || paidNow > 0)) {
       const attributeAmount = isNewReceivable
         ? explicitPackage > 0
           ? explicitPackage
           : paidNow
-        : 0; // For existing receivables we attribute the delta elsewhere
+        : 0;
       if (attributeAmount > 0) {
         const { attributeSaleToSalesperson } = await import("./sales-attribution");
         await attributeSaleToSalesperson({
@@ -950,8 +970,6 @@ async function reverseLink(link: {
       where: { id: link.entityId },
     });
     if (!loan) return;
-    // appliedAmount > 0 was a credit (loan increase); reverse by decreasing
-    // appliedAmount < 0 was a debit repayment; reverse by increasing remaining
     const delta = -link.appliedAmount;
     const newRemaining = Math.max(0, loan.remainingAmount + delta);
     const newOriginal =
@@ -965,6 +983,10 @@ async function reverseLink(link: {
         originalAmount: newOriginal,
       },
     });
+  }
+
+  if (link.entityType === "asset") {
+    await deleteAssetFromTransaction(link.entityId);
   }
 
   if (link.entityType === "refund") {
@@ -1076,9 +1098,36 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
     sign: 1,
   });
 
-  const newLinks = isBankTransferCategory(updated.category)
-    ? []
-    : await resolveLinks({
+  let newLinks: AppliedLink[] = [];
+
+  if (isBankTransferCategory(updated.category)) {
+    newLinks = [];
+  } else if (isAssetCategory(updated.category)) {
+    const amount =
+      Math.abs(updated.credit || 0) || Math.abs(updated.debit || 0);
+    if (amount > 0) {
+      const assetId = await createAssetFromTransaction({
+        periodId: updated.periodId,
+        date: new Date(updated.date),
+        description: updated.description,
+        category: input.assetCategory || updated.subCategory || "Other",
+        cost: amount,
+        notes: updated.notes || null,
+      });
+      if (assetId) {
+        newLinks = [
+          {
+            entityType: "asset",
+            entityId: assetId,
+            appliedAmount: amount,
+          },
+        ];
+      }
+    }
+  } else if (isDrawingCategory(updated.category)) {
+    newLinks = [];
+  } else {
+    newLinks = await resolveLinks({
       periodId: updated.periodId,
       date: updated.date.toISOString(),
       description: updated.description,
@@ -1091,6 +1140,7 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
       hotelAgreedCost: input.hotelAgreedCost,
       transportAgreedCost: input.transportAgreedCost,
     });
+  }
 
   for (const link of newLinks) {
     await prisma.transactionLink.create({

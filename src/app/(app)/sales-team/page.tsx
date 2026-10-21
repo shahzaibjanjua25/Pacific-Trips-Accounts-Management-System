@@ -22,7 +22,7 @@ export default async function SalesTeamPage({
   const [employees, commissions, payroll, salesEntries, targetRow] =
     await Promise.all([
       prisma.employee.findMany({
-        where: { isActive: true, role: "Sales" },
+        where: { isActive: true, role: { in: ["Sales", "Team Lead-Sales"] } },
         orderBy: { name: "asc" },
       }),
       prisma.commission.findMany({ where: { periodId: current.id } }),
@@ -39,17 +39,16 @@ export default async function SalesTeamPage({
   const targetNotes = targetRow?.notes ?? "";
 
   const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
-  const isTeamLead = (name: string) =>
+  const isTeamLead = (name: string, role: string | null) =>
+    role === "Team Lead-Sales" ||
     TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
 
-  // 3-tier lead pay: < commissionBase = 55k flat, < target = 1.0%, >= target = 2.5%
   function leadPay(teamTotal: number, target: number, base: number) {
     if (teamTotal < base) return { amount: 55_000, rate: 0 };
     if (teamTotal < target) return { amount: teamTotal * 0.01, rate: 1.0 };
     return { amount: teamTotal * 0.025, rate: 2.5 };
   }
 
-  // Single source of truth: SalesPerformance only
   const entriesByPerson: Record<string, number> = {};
   for (const e of salesEntries) {
     entriesByPerson[e.employeeName] =
@@ -57,11 +56,11 @@ export default async function SalesTeamPage({
   }
 
   const totalTeamSales = employees
-    .filter((e) => !isTeamLead(e.name))
+    .filter((e) => !isTeamLead(e.name, e.role))
     .reduce((s, e) => s + (entriesByPerson[e.name] || 0), 0);
 
   const rows = employees.map((e) => {
-    const lead = isTeamLead(e.name);
+    const lead = isTeamLead(e.name, e.role);
     const individual = entriesByPerson[e.name] || 0;
     const comm = commissions.find((c) => c.employeeName === e.name);
     const pay = payroll.find((p) => p.employeeName === e.name);
@@ -70,7 +69,6 @@ export default async function SalesTeamPage({
       ? leadPay(totalTeamSales, monthlyTarget, commissionBase)
       : null;
 
-    // Prefer live calc for display so UI matches current entries (including zero)
     const commissionAmt = lead ? leadCalc!.amount : individual * 0.025;
     const commissionRate = lead ? leadCalc!.rate : 2.5;
 
@@ -126,7 +124,7 @@ export default async function SalesTeamPage({
         employees={employees.map((e) => ({
           id: e.id,
           name: e.name,
-          isLead: isTeamLead(e.name),
+          isLead: isTeamLead(e.name, e.role),
         }))}
         salesEntries={salesEntries.map((s) => ({
           id: s.id,
