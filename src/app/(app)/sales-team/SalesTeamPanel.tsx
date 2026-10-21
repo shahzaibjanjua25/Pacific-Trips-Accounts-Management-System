@@ -11,6 +11,7 @@ type Row = {
   id: string;
   name: string;
   isLead: boolean;
+  role?: string;
   basicSalary: number;
   individualSales: number;
   saleBase: number;
@@ -44,7 +45,7 @@ const emptySaleForm = {
 };
 
 const emptyRowForm = {
-  role: "Sales" as "Sales" | "Team Lead-Sales",
+  role: "Sales" as "Sales" | "Team Lead-Sales" | "Staff",
   basicSalary: "",
   individualSales: "",
   saleBase: "",
@@ -230,8 +231,15 @@ export function SalesTeamPanel({
 
   function openEditRow(r: Row) {
     setEditingRow(r);
+    // Prefer stored role; fall back to isLead only if role missing
+    const stored =
+      r.role === "Team Lead-Sales" || r.role === "Sales"
+        ? r.role
+        : r.isLead
+          ? "Team Lead-Sales"
+          : "Sales";
     setRowForm({
-      role: r.isLead ? "Team Lead-Sales" : "Sales",
+      role: stored,
       basicSalary: String(r.basicSalary || 0),
       individualSales: String(r.individualSales || 0),
       saleBase: String(r.saleBase || 0),
@@ -610,13 +618,17 @@ export function SalesTeamPanel({
                     onChange={(e) =>
                       setRowForm({
                         ...rowForm,
-                        role: e.target.value as "Sales" | "Team Lead-Sales",
+                        role: e.target.value as
+                          | "Sales"
+                          | "Team Lead-Sales"
+                          | "Staff",
                       })
                     }
                     className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                   >
                     <option value="Sales">Sales</option>
                     <option value="Team Lead-Sales">Team Lead-Sales</option>
+                    <option value="Staff">Staff (leave sales team)</option>
                   </select>
                 </label>
 

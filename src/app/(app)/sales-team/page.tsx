@@ -54,18 +54,17 @@ export default async function SalesTeamPage({
   const commissionBase = targetRow?.commissionBaseAmount ?? 7_000_000;
   const targetNotes = targetRow?.notes ?? "";
 
-  const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
-  const isTeamLead = (name: string, role: string | null) => {
+  /** Team Lead is determined ONLY by Employee.role — never by name keywords.
+   *  Name heuristics were forcing "Ahmad/Amad/Ammar" back to Team Lead after
+   *  the user saved Role = Sales, so role edits looked broken. */
+  const isTeamLead = (_name: string, role: string | null) => {
     const r = (role || "").trim().toLowerCase();
-    if (
+    return (
       r === "team lead-sales" ||
       r === "team lead sales" ||
       r === "teamlead-sales" ||
       r === "team-lead-sales"
-    ) {
-      return true;
-    }
-    return TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
+    );
   };
 
   function leadPay(teamTotal: number, target: number, base: number) {
@@ -153,6 +152,7 @@ export default async function SalesTeamPage({
       id: e.id,
       name: e.name,
       isLead: lead,
+      role: e.role || (lead ? "Team Lead-Sales" : "Sales"),
       basicSalary: basic,
       individualSales: individual,
       saleBase,
