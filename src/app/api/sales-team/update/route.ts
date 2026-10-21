@@ -2,6 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
 
+/**
+ * Canonicalize role so "sales", "Sales", "TEAM LEAD-SALES", etc. all land
+ * on one of the two accepted strings.
+ */
+function canonicalRole(raw: unknown): string | null {
+  if (raw == null) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  const lower = t.toLowerCase();
+  if (lower === "sales" || lower === "sale") return "Sales";
+  if (
+    lower === "team lead-sales" ||
+    lower === "team lead sales" ||
+    lower === "teamlead-sales" ||
+    lower === "team-lead-sales"
+  ) {
+    return "Team Lead-Sales";
+  }
+  // Pass through anything else as-is (e.g. "Graphic Designer")
+  return t;
+}
+
 export async function POST(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -33,26 +55,30 @@ export async function POST(req: NextRequest) {
 
     const cleanName = String(employeeName).trim();
 
+    // Look up employee case-insensitively and trimmed, so a stray space or a
+    // different casing in the row never blocks the save.
     const emp = await prisma.employee.findFirst({
-      where: { name: cleanName, isActive: true },
+      where: { name: { equals: cleanName, mode: "insensitive" } },
     });
     if (!emp) {
-      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: `Employee "${cleanName}" not found in Employees` },
+        { status: 404 }
+      );
     }
 
-    // Preserve the role exactly â€” never coerce "Team Lead-Sales" to "Sales".
-    const nextRole = role ?? emp.role ?? "Sales";
-
-    if (basicSalary != null || role != null) {
-      await prisma.employee.update({
-        where: { id: emp.id },
-        data: {
-          ...(basicSalary != null ? { basicSalary: Number(basicSalary) || 0 } : {}),
-          ...(role != null ? { role: nextRole } : {}),
-        },
-      });
+    // â”€â”€ Update the Employee master (role + basic salary) â”€â”€
+    const nextRole = canonicalRole(role) ?? emp.role ?? "Sales";
+    const employeeUpdate: Record<string, unknown> = { role: nextRole };
+    if (basicSalary != null && !Number.isNaN(Number(basicSalary))) {
+      employeeUpdate.basicSalary = Number(basicSalary) || 0;
     }
+    await prisma.employee.update({
+      where: { id: emp.id },
+      data: employeeUpdate as never,
+    });
 
+    // â”€â”€ Commission row â”€â”€
     const saleAmt =
       saleBase != null
         ? Number(saleBase) || 0
@@ -69,7 +95,7 @@ export async function POST(req: NextRequest) {
         : saleAmt * (rate / 100);
 
     const existingComm = await prisma.commission.findFirst({
-      where: { periodId, employeeName: cleanName },
+      where: { periodId, employeeName: emp.name },
     });
     if (existingComm) {
       await prisma.commission.update({
@@ -87,7 +113,7 @@ export async function POST(req: NextRequest) {
         data: {
           periodId,
           employeeId: emp.id,
-          employeeName: cleanName,
+          employeeName: emp.name,
           saleAmount: saleAmt,
           commissionRate: rate,
           commissionAmt: commAmt,
@@ -97,8 +123,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // â”€â”€ Payroll row â”€â”€
     const existingPay = await prisma.payrollEntry.findFirst({
-      where: { periodId, employeeName: cleanName },
+      where: { periodId, employeeName: emp.name },
     });
 
     const basic =
@@ -115,7 +142,8 @@ export async function POST(req: NextRequest) {
         ? Number(netPayable)
         : computedNet;
 
-    const paid = amountPaid != null ? Number(amountPaid) || 0 : existingPay?.amountPaid ?? 0;
+    const paid =
+      amountPaid != null ? Number(amountPaid) || 0 : existingPay?.amountPaid ?? 0;
     const rem =
       remaining != null && !Number.isNaN(Number(remaining))
         ? Math.max(0, Number(remaining))
@@ -144,7 +172,7 @@ export async function POST(req: NextRequest) {
         data: {
           periodId,
           employeeId: emp.id,
-          employeeName: cleanName,
+          employeeName: emp.name,
           basicSalary: basic,
           loanInstallment: loan,
           taxDeducted: tax,
@@ -180,8 +208,15 @@ export async function DELETE(req: NextRequest) {
     }
     const employeeName = employeeNameRaw.trim();
 
+    // Find the employee case-insensitively so a stray space / case mismatch
+    // in the row never blocks deletion.
+    const emp = await prisma.employee.findFirst({
+      where: { name: { equals: employeeName, mode: "insensitive" } },
+    });
+
+    // Delete the payroll row (and any transaction links pointing at it)
     const pay = await prisma.payrollEntry.findFirst({
-      where: { periodId, employeeName },
+      where: { periodId, employeeName: emp?.name ?? employeeName },
     });
     if (pay) {
       await prisma.transactionLink.deleteMany({
@@ -189,8 +224,20 @@ export async function DELETE(req: NextRequest) {
       });
     }
 
-    await prisma.commission.deleteMany({ where: { periodId, employeeName } });
-    await prisma.payrollEntry.deleteMany({ where: { periodId, employeeName } });
+    await prisma.commission.deleteMany({
+      where: { periodId, employeeName: emp?.name ?? employeeName },
+    });
+    await prisma.payrollEntry.deleteMany({
+      where: { periodId, employeeName: emp?.name ?? employeeName },
+    });
+
+    // Optional: also remove this month's sales entries for that employee so
+    // the row actually disappears from the aggregated table.
+    if (emp) {
+      await prisma.salesPerformance.deleteMany({
+        where: { periodId, employeeName: emp.name },
+      });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e) {
