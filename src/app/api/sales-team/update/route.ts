@@ -38,8 +38,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
 
-    // Role stays Sales in DB; Team Lead is inferred from name for commission rules
-    const nextRole = role === "Team Lead-Sales" ? "Sales" : role || emp.role || "Sales";
+    // Preserve the role exactly — never coerce "Team Lead-Sales" to "Sales".
+    const nextRole = role ?? emp.role ?? "Sales";
 
     if (basicSalary != null || role != null) {
       await prisma.employee.update({
@@ -51,7 +51,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Commission row
     const saleAmt =
       saleBase != null
         ? Number(saleBase) || 0
@@ -96,7 +95,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Payroll row
     const existingPay = await prisma.payrollEntry.findFirst({
       where: { periodId, employeeName },
     });

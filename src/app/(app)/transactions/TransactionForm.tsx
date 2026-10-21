@@ -56,6 +56,9 @@ const CATEGORIES = [
   "Office Expense",
   "Marketing Expense",
   "Bank Transfer",
+  "Asset Purchase",
+  "Owner Drawing",
+  "Personal Expense",
   "Other",
 ];
 
@@ -69,6 +72,9 @@ const OUTBOUND_CHECK_CATEGORIES = [
   "Refund to Client",
   "Supplier Advance",
   "Employee Loan",
+  "Asset Purchase",
+  "Owner Drawing",
+  "Personal Expense",
 ];
 
 const INBOUND_CATEGORIES = ["Client Receipt", "Revenue"];
@@ -79,6 +85,15 @@ const FALLBACK_ACCOUNTS: Account[] = [
   { id: "fallback-meezan", name: "Meezan Bank", balance: 0 },
   { id: "fallback-easypaisa", name: "Easypaisa", balance: 0 },
   { id: "fallback-jazzcash", name: "Jazzcash", balance: 0 },
+];
+
+const ASSET_CATEGORY_OPTIONS = [
+  "Camera",
+  "Laptop",
+  "Phone",
+  "Furniture",
+  "Vehicle",
+  "Other",
 ];
 
 const empty = {
@@ -107,6 +122,7 @@ const empty = {
   clientEmail: "",
   clientNotes: "",
   salesperson: "",
+  assetCategory: "Other",
 };
 
 export function TransactionManager({
@@ -132,6 +148,9 @@ export function TransactionManager({
   const isHotelCategory = form.category === "Hotel Payment";
   const isTransportCategory = form.category === "Transport Payment";
   const isRefundCategory = form.category === "Refund to Client";
+  const isAssetCategory = form.category === "Asset Purchase";
+  const isDrawingCategory =
+    form.category === "Owner Drawing" || form.category === "Personal Expense";
   const isEmployeeLoan =
     form.category === "Employee Loan" ||
     form.category.toLowerCase().includes("employee loan") ||
@@ -140,6 +159,8 @@ export function TransactionManager({
   const isBankTransfer = form.category === "Bank Transfer";
   const shouldCheckOutstanding =
     !isBankTransfer &&
+    !isAssetCategory &&
+    !isDrawingCategory &&
     (isClientCategory ||
       (isOutboundCategory && !isEmployeeLoan) ||
       (isEmployeeLoan && (parseFloat(form.debit) || 0) > 0));
@@ -187,6 +208,11 @@ export function TransactionManager({
 
   useEffect(() => {
     if (!open) return;
+    // Asset Purchase, Owner Drawing, Personal Expense, Bank Transfer: no party lookup
+    if (isAssetCategory || isDrawingCategory || isBankTransfer) {
+      setOptions([]);
+      return;
+    }
     let cancelled = false;
     async function load() {
       try {
@@ -204,7 +230,7 @@ export function TransactionManager({
     return () => {
       cancelled = true;
     };
-  }, [form.category, periodId, open]);
+  }, [form.category, periodId, open, isAssetCategory, isDrawingCategory, isBankTransfer]);
 
   useEffect(() => {
     if (!open || !shouldCheckOutstanding) {
@@ -335,9 +361,18 @@ export function TransactionManager({
     const debitAmount = parseFloat(form.debit) || 0;
     const creditAmount = parseFloat(form.credit) || 0;
 
-    const party = showOther && form.otherName ? form.otherName : form.party;
-    const subCategory =
-      showOther && form.otherName ? form.otherName : form.subCategory || party;
+    // For Owner Drawing / Personal Expense / Asset Purchase, there is no
+    // party concept — the description itself is the "party" for display.
+    const party = isDrawingCategory || isAssetCategory
+      ? (form.description || form.category)
+      : showOther && form.otherName
+        ? form.otherName
+        : form.party;
+    const subCategory = isDrawingCategory || isAssetCategory
+      ? (isAssetCategory ? form.assetCategory : form.category)
+      : showOther && form.otherName
+        ? form.otherName
+        : form.subCategory || party;
 
     const resolvedAccount =
       form.accountMode === "__other__"
@@ -358,7 +393,7 @@ export function TransactionManager({
         return;
       }
     } else {
-      if (!party) {
+      if (!isDrawingCategory && !isAssetCategory && !party) {
         alert("Please choose or type a party.");
         return;
       }
@@ -366,11 +401,27 @@ export function TransactionManager({
         alert("Please choose or type an account.");
         return;
       }
+      if (isDrawingCategory || isAssetCategory) {
+        if (creditAmount === 0 && debitAmount === 0) {
+          alert(`${form.category}: enter the amount in Credit.`);
+          return;
+        }
+        if (debitAmount > 0 && creditAmount === 0) {
+          const ok = confirm(
+            `Wrong direction\n\n` +
+              `"${form.category}" is money OUT, so the amount belongs in Credit, not Debit.\n\n` +
+              `Move ${formatPKR(debitAmount)} to Credit automatically?`
+          );
+          if (!ok) return;
+          setForm((f) => ({ ...f, credit: String(debitAmount), debit: "" }));
+          return save(new Event("submit") as unknown as React.FormEvent);
+        }
+      }
     }
 
-    if (!isBankTransfer && isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
+    if (!isBankTransfer && !isDrawingCategory && !isAssetCategory && isOutboundCategory && debitAmount > 0 && creditAmount === 0) {
       const ok = confirm(
-        ` Wrong direction\n\n` +
+        `Wrong direction\n\n` +
           `"${form.category}" is a payment OUT of the company, so the amount ` +
           `belongs in the Credit column, not Debit.\n\n` +
           `You entered ${formatPKR(debitAmount)} in Debit.\n\n` +
@@ -383,7 +434,7 @@ export function TransactionManager({
 
     if (isClientCategory && creditAmount > 0 && debitAmount === 0) {
       const ok = confirm(
-        ` Wrong direction\n\n` +
+        `Wrong direction\n\n` +
           `"${form.category}" is money IN from a client, so the amount ` +
           `belongs in the Debit column, not Credit.\n\n` +
           `You entered ${formatPKR(creditAmount)} in Credit.\n\n` +
@@ -464,7 +515,7 @@ export function TransactionManager({
       if (isRefundCategory && clientRefundable != null) {
         if (movingAmount > clientRefundable) {
           alert(
-            ` Cannot refund more than the client paid us\n\n` +
+            `Cannot refund more than the client paid us\n\n` +
               `Client: ${party}\n` +
               `Refundable: ${formatPKR(clientRefundable)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
@@ -480,7 +531,7 @@ export function TransactionManager({
         const over = movingAmount - liveOutstanding;
         if (isClientReceipt) {
           alert(
-            ` Cannot add transaction - amount exceeds what the client owes\n\n` +
+            `Cannot add transaction - amount exceeds what the client owes\n\n` +
               `Client: ${party}\n` +
               `Client owes (remaining): ${formatPKR(liveOutstanding)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
@@ -490,7 +541,7 @@ export function TransactionManager({
           );
         } else if (isRefundCategory) {
           alert(
-            ` Cannot refund more than the client paid us\n\n` +
+            `Cannot refund more than the client paid us\n\n` +
               `Client: ${party}\n` +
               `Refundable: ${formatPKR(liveOutstanding)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
@@ -498,7 +549,7 @@ export function TransactionManager({
           );
         } else {
           alert(
-            ` Cannot add transaction - amount exceeds what we owe\n\n` +
+            `Cannot add transaction - amount exceeds what we owe\n\n` +
               `Party: ${party} (${form.category})\n` +
               `Net payable (remaining): ${formatPKR(liveOutstanding)}\n` +
               `You entered: ${formatPKR(movingAmount)}\n` +
@@ -511,7 +562,7 @@ export function TransactionManager({
 
       if (!treatAsNew && liveExists && liveReason === "no-name-match") {
         const ok = confirm(
-          ` Warning\n\n` +
+          `Warning\n\n` +
             `No exact match found for "${party}" in ${form.category} for this month, ` +
             `but similar records exist.\n\n` +
             `You are about to save ${formatPKR(movingAmount)}.\n\n` +
@@ -526,7 +577,7 @@ export function TransactionManager({
       const pkg = parseFloat(form.clientTotalPackage) || 0;
       if (pkg > 0 && receivedIn > pkg) {
         alert(
-          ` Client package is ${formatPKR(pkg)}, but receipt is ${formatPKR(
+          `Client package is ${formatPKR(pkg)}, but receipt is ${formatPKR(
             receivedIn
           )}.\n\nEither lower the receipt or raise the Total Package.`
         );
@@ -555,6 +606,7 @@ export function TransactionManager({
         clientNotes: form.clientNotes || null,
         salesperson: form.salesperson || null,
         isNewClient: isTypedNew,
+        assetCategory: form.assetCategory,
       };
 
       await mutate(
@@ -580,7 +632,7 @@ export function TransactionManager({
       );
       setOpen(false);
     } catch (err) {
-      alert(" Cannot add transaction\n\n" + err);
+      alert("Cannot add transaction\n\n" + err);
     } finally {
       setLoading(false);
     }
@@ -647,9 +699,12 @@ export function TransactionManager({
             </button>
           </div>
           <p className="text-xs text-slate-600">
-            Choose <strong>Category</strong> first - Sub-Category / Party lists hotels, suppliers,
+            Choose <strong>Category</strong> first — Sub-Category / Party lists hotels, suppliers,
             clients or staff you owe / who owe you. Pick <strong>Other...</strong> to type a new name.
             {" "}<strong>Debit = money IN  ·  Credit = money OUT.</strong>
+            {" "}<strong>Asset Purchase</strong> adds to Company Assets;{" "}
+            <strong>Owner Drawing</strong> and <strong>Personal Expense</strong> only move cash —
+            they do not appear in any other ledger.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field
@@ -660,7 +715,7 @@ export function TransactionManager({
               required
             />
             <Field
-              label="Description"
+              label={isDrawingCategory ? "Description (what was it for)" : "Description"}
               value={form.description}
               onChange={(v) => setForm({ ...form, description: v })}
               required
@@ -724,6 +779,27 @@ export function TransactionManager({
                   <option value="__other__">Other…</option>
                 </select>
               </label>
+            ) : isAssetCategory ? (
+              <label className="block text-xs">
+                <span className="text-slate-600 font-medium">Asset Category</span>
+                <select
+                  value={form.assetCategory}
+                  onChange={(e) =>
+                    setForm({ ...form, assetCategory: e.target.value })
+                  }
+                  className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  {ASSET_CATEGORY_OPTIONS.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : isDrawingCategory ? (
+              <div className="text-xs text-slate-500 flex items-end pb-2">
+                No party needed — this only moves cash out of the business.
+              </div>
             ) : (
               <label className="block text-xs">
                 <span className="text-slate-600 font-medium">
@@ -744,7 +820,7 @@ export function TransactionManager({
               </label>
             )}
 
-            {showOther && (
+            {showOther && !isDrawingCategory && !isAssetCategory && (
               <Field
                 label="Name of Other (will be saved)"
                 value={form.otherName}
@@ -755,11 +831,13 @@ export function TransactionManager({
               />
             )}
 
-            <Field
-              label="Trip / Booking Ref"
-              value={form.tripRef}
-              onChange={(v) => setForm({ ...form, tripRef: v })}
-            />
+            {!isDrawingCategory && !isAssetCategory && (
+              <Field
+                label="Trip / Booking Ref"
+                value={form.tripRef}
+                onChange={(v) => setForm({ ...form, tripRef: v })}
+              />
+            )}
             <Field
               label="Debit - money IN (PKR)"
               type="number"
@@ -864,6 +942,23 @@ export function TransactionManager({
                   Leave blank to just pay down the existing balance.
                 </p>
               </>
+            )}
+
+            {isAssetCategory && (
+              <p className="text-xs text-emerald-800 col-span-2 md:col-span-4 -mt-1">
+                This will create a new Asset row (Company Assets page) with cost
+                equal to the Credit amount, on the transaction date. The chosen
+                bank account will decrease by the same amount.
+              </p>
+            )}
+
+            {isDrawingCategory && (
+              <p className="text-xs text-emerald-800 col-span-2 md:col-span-4 -mt-1">
+                <strong>{form.category}</strong> moves money out of the business
+                and appears ONLY in Transactions and the bank balance. No
+                receivables, payables, expenses, assets or payroll records are
+                touched. Perfect for owner withdrawals and personal spend.
+              </p>
             )}
 
             <label className="block text-xs col-span-2">
