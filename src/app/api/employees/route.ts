@@ -4,6 +4,8 @@ import { getSessionUserId } from "@/lib/auth";
 
 const ALLOWED = ["name", "role", "basicSalary", "phone", "isActive"] as const;
 
+const KNOWN_SALES_ROLES = new Set(["Sales", "Team Lead-Sales"]);
+
 function pickEmployee(body: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
   for (const k of ALLOWED) {
@@ -26,8 +28,7 @@ function pickEmployee(body: Record<string, unknown>) {
 }
 
 /**
- * Upsert the EmployeeLoan row for the given employee when any of the three
- * loan fields is present in the request body.
+ * Sync the EmployeeLoan row when loan fields are present in the body.
  */
 async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   const hasAny =
@@ -91,8 +92,22 @@ export async function GET(req: NextRequest) {
 
   const rows = await prisma.employee.findMany({
     orderBy: { name: "asc" },
+    include: { loans: { orderBy: { createdAt: "desc" }, take: 1 } },
   });
-  return NextResponse.json(rows);
+
+  return NextResponse.json(
+    rows.map((e) => ({
+      id: e.id,
+      name: e.name,
+      role: e.role,
+      basicSalary: e.basicSalary,
+      phone: e.phone,
+      isActive: e.isActive,
+      loanOriginal: e.loans[0]?.originalAmount ?? 0,
+      loanRemaining: e.loans[0]?.remainingAmount ?? 0,
+      loanInstallment: e.loans[0]?.monthlyInstallment ?? 0,
+    }))
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -104,6 +119,8 @@ export async function POST(req: NextRequest) {
     if (!data.name) {
       return NextResponse.json({ error: "name required" }, { status: 400 });
     }
+    // Only default when caller sent nothing at all. Never override an
+    // explicitly submitted role, including "Team Lead-Sales".
     if (data.role == null) data.role = "Sales";
     if (data.isActive == null) data.isActive = true;
 
@@ -131,18 +148,15 @@ export async function PUT(req: NextRequest) {
 
     const data = pickEmployee(body);
     delete (data as Record<string, unknown>).id;
+    // Only change role when the caller actually supplied a "role" key
     if (!("role" in body)) delete (data as Record<string, unknown>).role;
 
-    // ─── Safety guard ─────────────────────────────────────────────────────
-    // If the request is trying to change an employee's role to "Staff" or
-    // empty, but that employee has ANY commission history, they must have
-    // been a real Sales / Team Lead. Refuse the downgrade and tell the user.
-    const nextRole = typeof data.role === "string" ? data.role.trim() : null;
+    // Safety: never quietly downgrade a sales role to "Staff"/empty if
+    // they have commission history.
+    const nextRole =
+      typeof data.role === "string" ? (data.role as string).trim() : null;
     const isDowngradeToStaff =
-      nextRole === null ||
-      nextRole === "" ||
-      nextRole.toLowerCase() === "staff";
-
+      nextRole === null || nextRole === "" || nextRole.toLowerCase() === "staff";
     if (isDowngradeToStaff) {
       const hasCommission = await prisma.commission.findFirst({
         where: {
@@ -168,7 +182,6 @@ export async function PUT(req: NextRequest) {
     });
 
     await syncLoan(id, body);
-
     return NextResponse.json(row);
   } catch (e) {
     console.error("[employees:PUT]", e);
