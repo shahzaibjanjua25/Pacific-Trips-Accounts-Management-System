@@ -170,7 +170,7 @@ export function EmployeesPanel({
     setError(null);
     try {
       await mutate(
-        editing ? "Updating employeeâ€¦" : "Creating employeeâ€¦",
+        editing ? "Updating employee..." : "Creating employee...",
         async () => {
           const role = canonicalizeRole(form.role);
           const payload = {
@@ -260,7 +260,7 @@ export function EmployeesPanel({
     setLoading(true);
     setError(null);
     try {
-      await mutate("Deleting employeeâ€¦", async () => {
+      await mutate("Deleting employee...", async () => {
         const res = await fetch(`/api/employees?id=${emp.id}`, {
           method: "DELETE",
         });
@@ -466,7 +466,7 @@ export function EmployeesPanel({
             >
               {loading && <Loader2 size={16} className="animate-spin" />}
               {loading
-                ? "Savingâ€¦"
+                ? "Saving..."
                 : editing
                   ? "Save Changes"
                   : "Create Employee"}
