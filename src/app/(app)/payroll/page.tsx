@@ -184,7 +184,7 @@ export default async function Page({
     }),
   ]);
 
-  // Case-insensitive name → role map (source of truth for bucketing)
+  // Case-insensitive name â†’ role map (source of truth for bucketing)
   const roleByName: Record<string, string> = {};
   const roleByNameLower: Record<string, string> = {};
   for (const e of allEmployees) {
@@ -279,7 +279,7 @@ export default async function Page({
 
       <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
         <h2 className="font-semibold text-emerald-900 mb-2">
-          Sales Team ({salesRoster.length}) — 2.5% commission (Team Lead
+          Sales Team ({salesRoster.length}) â€” 2.5% commission (Team Lead
           tiered)
         </h2>
         <div className="flex flex-wrap gap-2">
@@ -346,7 +346,7 @@ export default async function Page({
 
       <div>
         <h2 className="text-lg font-semibold mb-2 text-slate-700">
-          Other Staff — no commission ({otherPayroll.length})
+          Other Staff â€” no commission ({otherPayroll.length})
         </h2>
         <p className="text-xs text-slate-500 mb-2">
           To move someone into Sales, edit their row and change Team to{" "}

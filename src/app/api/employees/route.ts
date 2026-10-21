@@ -52,12 +52,19 @@ function pickEmployee(body: Record<string, unknown>) {
 
 /**
  * Sync the EmployeeLoan row when loan fields are present in the body.
+ *
+ * Loan Remaining (balance) is AUTO-CALCULATED — never trusted from the client:
+ *   - create: remaining = original
+ *   - original increased: remaining += delta
+ *   - original decreased: remaining = min(remaining, newOriginal)
+ *   - installment may be updated freely
+ *   - set original+installment to 0 to clear the loan
  */
 async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   const hasAny =
     "loanOriginal" in body ||
-    "loanRemaining" in body ||
     "loanInstallment" in body;
+  // loanRemaining from client is intentionally ignored
   if (!hasAny) return;
 
   const parse = (v: unknown): number | undefined => {
@@ -67,7 +74,6 @@ async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   };
 
   const orig = parse(body.loanOriginal);
-  const rem = parse(body.loanRemaining);
   const inst = parse(body.loanInstallment);
 
   const existing = await prisma.employeeLoan.findFirst({
@@ -75,12 +81,11 @@ async function syncLoan(employeeId: string, body: Record<string, unknown>) {
     orderBy: { createdAt: "desc" },
   });
 
-  const allZero =
-    (orig ?? existing?.originalAmount ?? 0) === 0 &&
-    (rem ?? existing?.remainingAmount ?? 0) === 0 &&
-    (inst ?? existing?.monthlyInstallment ?? 0) === 0;
+  const nextOrig = orig ?? existing?.originalAmount ?? 0;
+  const nextInst = inst ?? existing?.monthlyInstallment ?? 0;
 
-  if (allZero) {
+  // Clear loan when both principal and installment are zero
+  if (nextOrig === 0 && nextInst === 0) {
     if (existing) {
       await prisma.employeeLoan.delete({ where: { id: existing.id } });
     }
@@ -88,21 +93,33 @@ async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   }
 
   if (existing) {
+    let remaining = existing.remainingAmount;
+    if (orig != null && orig !== existing.originalAmount) {
+      const delta = orig - existing.originalAmount;
+      if (delta > 0) {
+        remaining = existing.remainingAmount + delta;
+      } else {
+        remaining = Math.min(existing.remainingAmount, orig);
+      }
+    }
     await prisma.employeeLoan.update({
       where: { id: existing.id },
       data: {
-        originalAmount: orig ?? existing.originalAmount,
-        remainingAmount: rem ?? existing.remainingAmount,
-        monthlyInstallment: inst ?? existing.monthlyInstallment,
+        originalAmount: nextOrig,
+        remainingAmount: Math.max(0, remaining),
+        monthlyInstallment: nextInst,
       },
     });
   } else {
+    // New loan: balance always starts equal to original
+    const principal = orig ?? 0;
+    if (principal <= 0 && nextInst <= 0) return;
     await prisma.employeeLoan.create({
       data: {
         employeeId,
-        originalAmount: orig ?? rem ?? 0,
-        remainingAmount: rem ?? 0,
-        monthlyInstallment: inst ?? 0,
+        originalAmount: principal,
+        remainingAmount: principal,
+        monthlyInstallment: nextInst,
         notes: "Created from Settings page",
       },
     });
@@ -143,7 +160,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "name required" }, { status: 400 });
     }
 
-    // Always persist a concrete role string — never null on create.
+    // Always persist a concrete role string â€” never null on create.
     data.role = (data.role as string | null) ?? "Sales";
     if (data.isActive == null) data.isActive = true;
 
@@ -178,7 +195,7 @@ export async function PUT(req: NextRequest) {
     if (!("role" in body)) {
       delete (data as Record<string, unknown>).role;
     } else {
-      // Explicit role from client — never leave null if they sent a value.
+      // Explicit role from client â€” never leave null if they sent a value.
       data.role = canonicalizeRole(body.role) ?? "Sales";
     }
 

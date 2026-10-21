@@ -101,10 +101,10 @@ export function CrudPanel({
     setLoading(true);
     try {
       const payload: Record<string, unknown> = { periodId, ...extraPayload };
-      
-      // Send ALL fields, including ones that used to be read-only
+
+      // Skip readOnly / transient fields — server owns those values
       fields.forEach((f) => {
-        if (f.transient) return;
+        if (f.transient || f.readOnly) return;
         if (f.type === "number") {
           const n = parseFloat(form[f.key]);
           payload[f.key] = Number.isFinite(n) ? n : 0;
@@ -116,7 +116,7 @@ export function CrudPanel({
 
       if (editing) {
         payload.id = editing.id;
-        await mutate("Updating record…", async () => {
+        await mutate("Updating recordâ€¦", async () => {
           const res = await fetch(apiPath, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -128,7 +128,7 @@ export function CrudPanel({
           }
         });
       } else {
-        await mutate("Saving record…", async () => {
+        await mutate("Saving recordâ€¦", async () => {
           const res = await fetch(apiPath, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -155,7 +155,7 @@ export function CrudPanel({
     if (!confirm("Delete this record?")) return;
     setLoading(true);
     try {
-      await mutate("Deleting record…", async () => {
+      await mutate("Deleting recordâ€¦", async () => {
         const res = await fetch(`${apiPath}?id=${encodeURIComponent(id)}`, {
           method: "DELETE",
         });
@@ -229,11 +229,20 @@ export function CrudPanel({
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {fields.map((f) => {
               if (f.transient) return null;
-              
+              const ro = !!f.readOnly;
+              const inputCls = ro
+                ? "mt-1 w-full border border-slate-200 bg-slate-100 text-slate-600 rounded-md px-2.5 py-1.5 text-sm cursor-not-allowed"
+                : "mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500";
+
               return (
                 <label key={f.key} className="block text-xs">
                   <span className="text-slate-600 font-medium">
                     {f.label}
+                    {ro && (
+                      <span className="ml-1 text-[10px] text-slate-400 font-normal">
+                        (auto)
+                      </span>
+                    )}
                   </span>
 
                   {f.lookupKey ? (
@@ -241,7 +250,9 @@ export function CrudPanel({
                       lookupKey={f.lookupKey}
                       periodId={periodId}
                       value={form[f.key] || ""}
-                      onChange={(v) => setField(f.key, v)}
+                      onChange={(v) => {
+                        if (!ro) setField(f.key, v);
+                      }}
                       required={f.required}
                     />
                   ) : f.type === "select" ? (
@@ -249,7 +260,8 @@ export function CrudPanel({
                       value={form[f.key] || ""}
                       onChange={(e) => setField(f.key, e.target.value)}
                       required={f.required}
-                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      disabled={ro}
+                      className={inputCls}
                     >
                       {form[f.key] &&
                         !(f.options || []).includes(form[f.key]) && (
@@ -268,15 +280,19 @@ export function CrudPanel({
                       value={form[f.key] || ""}
                       onChange={(e) => setField(f.key, e.target.value)}
                       rows={2}
-                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      disabled={ro}
+                      readOnly={ro}
+                      className={inputCls}
                     />
                   ) : (
                     <input
                       type={f.type || "text"}
                       value={form[f.key] || ""}
                       onChange={(e) => setField(f.key, e.target.value)}
-                      required={f.required}
-                      className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      required={f.required && !ro}
+                      disabled={ro}
+                      readOnly={ro}
+                      className={inputCls}
                     />
                   )}
                 </label>
@@ -289,7 +305,7 @@ export function CrudPanel({
             className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
           >
             {loading && <Loader2 size={16} className="animate-spin" />}
-            {loading ? "Saving…" : editing ? "Update" : "Save"}
+            {loading ? "Savingâ€¦" : editing ? "Update" : "Save"}
           </button>
         </form>
       )}
