@@ -3,6 +3,19 @@ import { getOrCreatePeriod, listPeriods } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { SalesTeamPanel } from "./SalesTeamPanel";
 
+function isSalesRole(role: string | null | undefined): boolean {
+  if (!role) return false;
+  const r = role.trim().toLowerCase();
+  return (
+    r === "sales" ||
+    r === "sale" ||
+    r === "team lead-sales" ||
+    r === "team lead sales" ||
+    r === "teamlead-sales" ||
+    r === "team-lead-sales"
+  );
+}
+
 export default async function SalesTeamPage({
   searchParams,
 }: {
@@ -19,10 +32,10 @@ export default async function SalesTeamPage({
   }
   const current = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const [employees, commissions, payroll, salesEntries, targetRow] =
+  const [allActive, commissions, payroll, salesEntries, targetRow] =
     await Promise.all([
       prisma.employee.findMany({
-        where: { isActive: true, role: { in: ["Sales", "Team Lead-Sales"] } },
+        where: { isActive: true },
         orderBy: { name: "asc" },
       }),
       prisma.commission.findMany({ where: { periodId: current.id } }),
@@ -34,14 +47,26 @@ export default async function SalesTeamPage({
       prisma.salesTarget.findUnique({ where: { periodId: current.id } }),
     ]);
 
+  // Include any case/spacing variant of Sales / Team Lead-Sales
+  const employees = allActive.filter((e) => isSalesRole(e.role));
+
   const monthlyTarget = targetRow?.targetAmount ?? 12_000_000;
   const commissionBase = targetRow?.commissionBaseAmount ?? 7_000_000;
   const targetNotes = targetRow?.notes ?? "";
 
   const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
-  const isTeamLead = (name: string, role: string | null) =>
-    role === "Team Lead-Sales" ||
-    TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
+  const isTeamLead = (name: string, role: string | null) => {
+    const r = (role || "").trim().toLowerCase();
+    if (
+      r === "team lead-sales" ||
+      r === "team lead sales" ||
+      r === "teamlead-sales" ||
+      r === "team-lead-sales"
+    ) {
+      return true;
+    }
+    return TEAM_LEAD_KEYWORDS.some((k) => name.toLowerCase().includes(k));
+  };
 
   function leadPay(teamTotal: number, target: number, base: number) {
     if (teamTotal < base) return { amount: 55_000, rate: 0 };
@@ -51,32 +76,60 @@ export default async function SalesTeamPage({
 
   const entriesByPerson: Record<string, number> = {};
   for (const e of salesEntries) {
-    entriesByPerson[e.employeeName] =
-      (entriesByPerson[e.employeeName] || 0) + (e.debit || 0);
+    const key = e.employeeName;
+    entriesByPerson[key] = (entriesByPerson[key] || 0) + (e.debit || 0);
+  }
+
+  // Case-insensitive helpers for matching payroll / commission
+  function findByName<T extends { employeeName: string }>(
+    list: T[],
+    name: string
+  ): T | undefined {
+    const lower = name.toLowerCase();
+    return (
+      list.find((x) => x.employeeName === name) ??
+      list.find((x) => x.employeeName.toLowerCase() === lower)
+    );
   }
 
   const totalTeamSales = employees
     .filter((e) => !isTeamLead(e.name, e.role))
-    .reduce((s, e) => s + (entriesByPerson[e.name] || 0), 0);
+    .reduce((s, e) => {
+      const direct = entriesByPerson[e.name] || 0;
+      const fuzzy = Object.entries(entriesByPerson).reduce((acc, [k, v]) => {
+        if (k.toLowerCase() === e.name.toLowerCase()) return acc + v;
+        return acc;
+      }, 0);
+      return s + (direct || fuzzy);
+    }, 0);
 
   const rows = employees.map((e) => {
     const lead = isTeamLead(e.name, e.role);
-    const individual = entriesByPerson[e.name] || 0;
-    const comm = commissions.find((c) => c.employeeName === e.name);
-    const pay = payroll.find((p) => p.employeeName === e.name);
+    const individual =
+      entriesByPerson[e.name] ||
+      Object.entries(entriesByPerson).reduce((acc, [k, v]) => {
+        if (k.toLowerCase() === e.name.toLowerCase()) return acc + v;
+        return acc;
+      }, 0);
+    const comm = findByName(commissions, e.name);
+    const pay = findByName(payroll, e.name);
     const saleBase = lead ? totalTeamSales : individual;
     const leadCalc = lead
       ? leadPay(totalTeamSales, monthlyTarget, commissionBase)
       : null;
 
-    const commissionAmt = lead ? leadCalc!.amount : individual * 0.025;
-    const commissionRate = lead ? leadCalc!.rate : 2.5;
+    const commissionAmt = lead
+      ? (comm?.commissionAmt ?? leadCalc!.amount)
+      : (comm?.commissionAmt ?? individual * 0.025);
+    const commissionRate = lead
+      ? (comm?.commissionRate ?? leadCalc!.rate)
+      : (comm?.commissionRate ?? 2.5);
 
     return {
       id: e.id,
       name: e.name,
       isLead: lead,
-      basicSalary: pay?.basicSalary ?? (lead ? 0 : 40000),
+      basicSalary: pay?.basicSalary ?? (lead ? 0 : e.basicSalary || 40000),
       individualSales: individual,
       saleBase,
       commissionRate,
@@ -85,7 +138,7 @@ export default async function SalesTeamPage({
         pay?.netPayable ??
         Math.max(
           0,
-          (lead ? 0 : 40000) +
+          (lead ? 0 : e.basicSalary || 40000) +
             commissionAmt -
             (pay?.loanInstallment ?? 0)
         ),
@@ -94,7 +147,8 @@ export default async function SalesTeamPage({
         pay?.remaining ??
         Math.max(
           0,
-          (pay?.netPayable ?? (lead ? 0 : 40000) + commissionAmt) -
+          (pay?.netPayable ??
+            (lead ? 0 : e.basicSalary || 40000) + commissionAmt) -
             (pay?.amountPaid ?? 0)
         ),
       status: pay?.status ?? "Pending",
@@ -108,7 +162,9 @@ export default async function SalesTeamPage({
           <h1 className="text-2xl font-bold">Sales Team Performance</h1>
           <p className="text-sm text-slate-500">
             Individual sales, 2.5% commission, and Team Lead tiered pay.
-            Monthly target and commission base are editable per month.
+            Monthly target and commission base are editable per month. Delete
+            removes this month&apos;s commission/payroll and moves the person
+            out of the Sales roster (role → Staff).
           </p>
         </div>
         <PeriodSelector periods={periods} currentId={current.id} />

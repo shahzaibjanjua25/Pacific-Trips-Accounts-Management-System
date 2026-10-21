@@ -270,23 +270,33 @@ export async function PUT(req: NextRequest) {
     delete data.createdAt;
     delete data.updatedAt;
     delete data.periodId;
+    // Never pass non-column keys to Prisma
+    delete (data as Record<string, unknown>).team;
+    delete (data as Record<string, unknown>).commissionAmt;
+    delete (data as Record<string, unknown>).loanOriginal;
+    delete (data as Record<string, unknown>).loanBalance;
 
     const nameForEmp = String(
       data.employeeName || old.employeeName || ""
     ).trim();
 
-    // Always honour Team field on edit so moving someone Sales ↔ Staff works
-    const emp = await ensureEmployeeFromTeam({
-      employeeName: nameForEmp,
-      team: body.team as string | null | undefined,
-      basicSalary: data.basicSalary as number | undefined,
-    });
-    if (emp) {
-      data.employeeId = emp.id;
-      if (data.employeeName) data.employeeName = emp.name;
+    let empRole: string | null = null;
+    try {
+      const emp = await ensureEmployeeFromTeam({
+        employeeName: nameForEmp,
+        team: body.team as string | null | undefined,
+        basicSalary: data.basicSalary as number | undefined,
+      });
+      if (emp) {
+        data.employeeId = emp.id;
+        if (data.employeeName) data.employeeName = emp.name;
+        empRole = emp.role;
+      }
+    } catch (syncErr) {
+      console.error("[payroll:PUT] employee sync failed (continuing)", syncErr);
     }
 
-    const row = await prisma.payrollEntry.update({ where: { id }, data });
+    const row = await prisma.payrollEntry.update({ where: { id }, data: data as never });
 
     const loanOriginal =
       body.loanOriginal != null ? Number(body.loanOriginal) : null;
@@ -294,18 +304,22 @@ export async function PUT(req: NextRequest) {
       body.loanBalance != null ? Number(body.loanBalance) : null;
 
     if (row.periodId && row.employeeName) {
-      await syncLoanFromEdit(
-        row.periodId,
-        row.employeeName,
-        loanOriginal,
-        loanBalance,
-        row.loanInstallment
-      );
+      try {
+        await syncLoanFromEdit(
+          row.periodId,
+          row.employeeName,
+          loanOriginal,
+          loanBalance,
+          row.loanInstallment
+        );
+      } catch (loanErr) {
+        console.error("[payroll:PUT] loan sync failed", loanErr);
+      }
     }
 
     return NextResponse.json({
       ...row,
-      team: emp?.role ?? body.team ?? null,
+      team: empRole ?? body.team ?? null,
     });
   } catch (e) {
     console.error("[payroll:PUT]", e);
@@ -319,6 +333,11 @@ export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id");
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+    const existing = await prisma.payrollEntry.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ ok: true, alreadyGone: true });
+    }
 
     await prisma.transactionLink.deleteMany({
       where: { entityType: "payroll", entityId: id },

@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -285,7 +286,9 @@ export function SalesTeamPanel({
   async function removeRow(r: Row) {
     if (
       !confirm(
-        `Delete ${r.name}'s commission and payroll row for this month?\nThis cannot be undone.`
+        `Remove ${r.name} from Sales Team for this month?\n\n` +
+          `This deletes their commission + payroll row and sets their role to Staff ` +
+          `(they leave the Sales Team page).\n\nThis cannot be undone.`
       )
     )
       return;
