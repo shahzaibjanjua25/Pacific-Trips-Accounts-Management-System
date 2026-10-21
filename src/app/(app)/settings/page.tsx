@@ -1,233 +1,66 @@
-import { NextRequest, NextResponse } from "next/server";
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { getSessionUserId } from "@/lib/auth";
+import { resolveActivePeriod } from "@/lib/period";
+import { PeriodSelector } from "@/components/PeriodSelector";
+import { ShieldCheck } from "lucide-react";
+import { EmployeesPanel } from "./EmployeesPanel"; 
 
-type LookupKey =
-  | "clients"
-  | "employees"
-  | "salesEmployees"
-  | "allEmployees"
-  | "hotels"
-  | "drivers"
-  | "suppliers"
-  | "airlines"
-  | "vendors"
-  | "accounts"
-  | "liabilityTypes"
-  | "assetCategories";
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
+  const params = await searchParams;
+  const { periods, current } = await resolveActivePeriod(params.period);
+  const employees = await prisma.employee.findMany({
+    orderBy: { name: "asc" },
+    include: { loans: { orderBy: { createdAt: "desc" }, take: 1 } },
+  });
 
-type LookupItem = { value: string; label: string; meta?: string };
+  // Distinct roles currently in the DB, so the edit form never loses
+  // an existing role even if it's not in the "standard" list.
+  const existingRoles = Array.from(
+    new Set(employees.map((e) => (e.role || "").trim()).filter(Boolean))
+  ).sort();
 
-export async function GET(req: NextRequest) {
-  const uid = await getSessionUserId();
-  if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Settings &amp; Employees</h1>
+          <p className="text-sm text-slate-500">
+            Add or edit staff, set their role, salary and phone.{" "}
+            <strong>Role</strong> decides which payroll table they appear in:{" "}
+            <strong>Sales</strong> / <strong>Team Lead-Sales</strong> → Sales
+            payroll; everything else → Other Staff.
+          </p>
+        </div>
+        <PeriodSelector periods={periods} currentId={current.id} />
+      </div>
 
-  const key = req.nextUrl.searchParams.get("key") as LookupKey | null;
-  const periodId = req.nextUrl.searchParams.get("periodId");
+      <Link
+        href="/settings/security"
+        className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium"
+      >
+        <ShieldCheck size={16} />
+        Security settings (change password &amp; questions)
+      </Link>
 
-  if (!key) {
-    return NextResponse.json({ error: "key required" }, { status: 400 });
-  }
-
-  try {
-    const items = await loadLookup(key, periodId);
-    return NextResponse.json(items);
-  } catch (e) {
-    console.error(`[lookup:${key}]`, e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
-  }
-}
-
-async function loadLookup(key: LookupKey, periodId: string | null): Promise<LookupItem[]> {
-  switch (key) {
-    case "clients": {
-      const rows = await prisma.client.findMany({
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, phone: true },
-      });
-      const recvNames = periodId
-        ? await prisma.receivable.findMany({
-          where: { periodId, clientId: null },
-          select: { clientName: true },
-          distinct: ["clientName"],
-        })
-        : [];
-      const out: LookupItem[] = rows.map((c) => ({
-        value: c.name,
-        label: c.name,
-        meta: c.phone ?? undefined,
-      }));
-      const have = new Set(out.map((o) => o.value));
-      for (const r of recvNames) {
-        if (!have.has(r.clientName)) {
-          out.push({ value: r.clientName, label: r.clientName, meta: "no master" });
-        }
-      }
-      return out.sort((a, b) => a.label.localeCompare(b.label));
-    }
-
-    case "employees":
-    case "allEmployees": {
-      const rows = await prisma.employee.findMany({
-        where: { isActive: true },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, role: true },
-      });
-      return rows.map((e) => ({
-        value: e.name,
-        label: e.name,
-        meta: e.role ?? "Staff",
-      }));
-    }
-
-    case "salesEmployees": {
-      const TEAM_LEAD_KEYWORDS = ["ahmad", "amad", "ammar"];
-      const rows = await prisma.employee.findMany({
-        where: {
-          isActive: true,
-          role: { in: ["Sales", "Team Lead-Sales"] },
-        },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, role: true },
-      });
-      return rows.map((e) => {
-        const isLead =
-          e.role === "Team Lead-Sales" ||
-          TEAM_LEAD_KEYWORDS.some((k) => e.name.toLowerCase().includes(k));
-        return {
-          value: e.name,
-          label: isLead ? `${e.name} (Team Lead)` : e.name,
-          meta: isLead ? "Team Lead" : undefined,
-        };
-      });
-    }
-    case "hotels": {
-      const rows = await prisma.payable.findMany({
-        where: {
-          ...(periodId ? { periodId } : {}),
-          category: { contains: "Hotel" },
-        },
-        orderBy: { supplierName: "asc" },
-        select: { supplierName: true },
-        distinct: ["supplierName"],
-      });
-      const bookings = await prisma.hotelBooking.findMany({
-        where: periodId ? { periodId } : {},
-        select: { hotelName: true },
-        distinct: ["hotelName"],
-      });
-      const names = new Set<string>();
-      rows.forEach((r) => names.add(r.supplierName));
-      bookings.forEach((b) => names.add(b.hotelName));
-      return Array.from(names)
-        .sort()
-        .map((n) => ({ value: n, label: n }));
-    }
-
-    case "drivers": {
-      const rows = await prisma.transportJob.findMany({
-        where: periodId ? { periodId } : {},
-        select: { driverName: true },
-        distinct: ["driverName"],
-      });
-      const payables = await prisma.payable.findMany({
-        where: {
-          ...(periodId ? { periodId } : {}),
-          category: { contains: "Transport" },
-        },
-        select: { supplierName: true },
-        distinct: ["supplierName"],
-      });
-      const names = new Set<string>();
-      rows.forEach((r) => r.driverName && names.add(r.driverName));
-      payables.forEach((p) => names.add(p.supplierName));
-      return Array.from(names)
-        .sort()
-        .map((n) => ({ value: n, label: n }));
-    }
-
-    case "suppliers": {
-      const rows = await prisma.payable.findMany({
-        where: periodId ? { periodId } : {},
-        select: { supplierName: true, category: true },
-        distinct: ["supplierName"],
-      });
-      return rows
-        .map((r) => ({
-          value: r.supplierName,
-          label: r.supplierName,
-          meta: r.category ?? undefined,
-        }))
-        .sort((a, b) => a.label.localeCompare(b.label));
-    }
-
-    case "airlines": {
-      const rows = await prisma.ticketing.findMany({
-        where: periodId ? { periodId } : {},
-        select: { airline: true },
-        distinct: ["airline"],
-      });
-      const names = rows
-        .map((r) => r.airline)
-        .filter((a): a is string => !!a && a.length > 0);
-      return Array.from(new Set(names))
-        .sort()
-        .map((n) => ({ value: n, label: n }));
-    }
-
-    case "vendors": {
-      const [office, marketing] = await Promise.all([
-        prisma.officeExpense.findMany({
-          where: periodId ? { periodId } : {},
-          select: { vendor: true },
-          distinct: ["vendor"],
-        }),
-        prisma.marketingExpense.findMany({
-          where: periodId ? { periodId } : {},
-          select: { vendor: true },
-          distinct: ["vendor"],
-        }),
-      ]);
-      const names = new Set<string>();
-      office.forEach((o) => o.vendor && names.add(o.vendor));
-      marketing.forEach((m) => m.vendor && names.add(m.vendor));
-      return Array.from(names)
-        .sort()
-        .map((n) => ({ value: n, label: n }));
-    }
-
-    case "accounts": {
-      const rows = await prisma.bankBalance.findMany({
-        orderBy: { accountName: "asc" },
-        select: { accountName: true },
-      });
-      return rows.map((b) => ({ value: b.accountName, label: b.accountName }));
-    }
-
-    case "liabilityTypes": {
-      const rows = await prisma.liability.findMany({
-        where: periodId ? { periodId } : {},
-        select: { liabilityType: true },
-        distinct: ["liabilityType"],
-      });
-      const types = rows.map((r) => r.liabilityType).filter(Boolean);
-      return Array.from(new Set(types))
-        .sort()
-        .map((t) => ({ value: t, label: t }));
-    }
-
-    case "assetCategories": {
-      return [
-        "Camera",
-        "Laptop",
-        "Phone",
-        "Furniture",
-        "Vehicle",
-        "Other",
-      ].map((c) => ({ value: c, label: c }));
-    }
-
-    default:
-      return [];
-  }
+      <EmployeesPanel
+        periodId={current.id}
+        initialEmployees={employees.map((e) => ({
+          id: e.id,
+          name: e.name,
+          role: e.role,
+          basicSalary: e.basicSalary,
+          phone: e.phone,
+          isActive: e.isActive,
+          loanOriginal: e.loans[0]?.originalAmount ?? 0,
+          loanRemaining: e.loans[0]?.remainingAmount ?? 0,
+          loanInstallment: e.loans[0]?.monthlyInstallment ?? 0,
+        }))}
+        existingRoles={existingRoles}
+      />
+    </div>
+  );
 }
