@@ -4,7 +4,26 @@ import { getSessionUserId } from "@/lib/auth";
 
 const ALLOWED = ["name", "role", "basicSalary", "phone", "isActive"] as const;
 
-const KNOWN_SALES_ROLES = new Set(["Sales", "Team Lead-Sales"]);
+/**
+ * Canonicalize role strings so case/spacing variants never break
+ * Sales vs Other-Staff bucketing in Settings or Payroll.
+ */
+function canonicalizeRole(raw: unknown): string | null {
+  if (raw == null) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  const lower = t.toLowerCase();
+  if (lower === "sales" || lower === "sale") return "Sales";
+  if (
+    lower === "team lead-sales" ||
+    lower === "team lead sales" ||
+    lower === "teamlead-sales" ||
+    lower === "team-lead-sales"
+  ) {
+    return "Team Lead-Sales";
+  }
+  return t;
+}
 
 function pickEmployee(body: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
@@ -12,16 +31,20 @@ function pickEmployee(body: Record<string, unknown>) {
     if (k in body) out[k] = body[k];
   }
   if (typeof out.name === "string") out.name = out.name.trim();
-  if (typeof out.role === "string") {
-    const r = out.role.trim();
-    out.role = r === "" ? null : r;
+
+  // Always run role through canonicalize when present in the body
+  if ("role" in body) {
+    out.role = canonicalizeRole(body.role);
   }
+
   if (typeof out.phone === "string") {
     const p = out.phone.trim();
     out.phone = p === "" ? null : p;
   }
   if (typeof out.basicSalary === "string") {
     out.basicSalary = parseFloat(out.basicSalary) || 0;
+  } else if (typeof out.basicSalary === "number") {
+    out.basicSalary = Number.isFinite(out.basicSalary) ? out.basicSalary : 0;
   }
   if ("isActive" in out && out.isActive === undefined) out.isActive = true;
   return out;
@@ -119,10 +142,12 @@ export async function POST(req: NextRequest) {
     if (!data.name) {
       return NextResponse.json({ error: "name required" }, { status: 400 });
     }
-    // Only default when caller sent nothing at all. Never override an
-    // explicitly submitted role, including "Team Lead-Sales".
-    if (data.role == null) data.role = "Sales";
+
+    // Always persist a concrete role string — never null on create.
+    data.role = (data.role as string | null) ?? "Sales";
     if (data.isActive == null) data.isActive = true;
+
+    console.log("[employees:POST]", { name: data.name, role: data.role });
 
     const row = await prisma.employee.create({ data: data as never });
     await syncLoan(row.id, body);
@@ -148,15 +173,30 @@ export async function PUT(req: NextRequest) {
 
     const data = pickEmployee(body);
     delete (data as Record<string, unknown>).id;
-    // Only change role when the caller actually supplied a "role" key
-    if (!("role" in body)) delete (data as Record<string, unknown>).role;
+
+    // Only change role when the caller actually supplied a "role" key.
+    if (!("role" in body)) {
+      delete (data as Record<string, unknown>).role;
+    } else {
+      // Explicit role from client — never leave null if they sent a value.
+      data.role = canonicalizeRole(body.role) ?? "Sales";
+    }
+
+    console.log("[employees:PUT]", {
+      id,
+      name: existing.name,
+      bodyRole: body.role,
+      dataRole: data.role,
+    });
 
     // Safety: never quietly downgrade a sales role to "Staff"/empty if
     // they have commission history.
     const nextRole =
       typeof data.role === "string" ? (data.role as string).trim() : null;
     const isDowngradeToStaff =
-      nextRole === null || nextRole === "" || nextRole.toLowerCase() === "staff";
+      nextRole === null ||
+      nextRole === "" ||
+      nextRole.toLowerCase() === "staff";
     if (isDowngradeToStaff) {
       const hasCommission = await prisma.commission.findFirst({
         where: {

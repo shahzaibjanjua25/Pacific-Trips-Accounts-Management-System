@@ -44,8 +44,28 @@ const emptyForm = {
 };
 
 /**
+ * Canonicalize role for both grouping and what we send to the API.
+ * Keeps Sales / Team Lead-Sales consistent regardless of case/spacing.
+ */
+function canonicalizeRole(raw: string | null | undefined): string {
+  if (!raw) return "Sales";
+  const t = raw.trim();
+  if (!t) return "Sales";
+  const lower = t.toLowerCase();
+  if (lower === "sales" || lower === "sale") return "Sales";
+  if (
+    lower === "team lead-sales" ||
+    lower === "team lead sales" ||
+    lower === "teamlead-sales" ||
+    lower === "team-lead-sales"
+  ) {
+    return "Team Lead-Sales";
+  }
+  return t;
+}
+
+/**
  * Normalize a role string for grouping in the UI only.
- * The DB value is never modified by this.
  */
 function normalizedRole(role: string | null): string {
   if (!role) return "";
@@ -74,9 +94,8 @@ export function EmployeesPanel({
   const router = useRouter();
   const mutate = useMutate();
 
-  // KEY FIX #1: keep local state in sync with the server-provided list.
-  // Without this, after router.refresh() fires, the panel could show stale
-  // roles and clicking Edit could then push a wrong role back to the DB.
+  // Keep local state in sync with the server-provided list so after
+  // router.refresh() the panel never shows a stale role.
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
   useEffect(() => {
     setEmployees(initialEmployees);
@@ -89,9 +108,19 @@ export function EmployeesPanel({
   const [error, setError] = useState<string | null>(null);
 
   // Combine standard roles + whatever is already in the DB, dedup + sort.
-  const roleOptions = Array.from(
-    new Set([...STANDARD_ROLES, ...existingRoles, form.role].filter(Boolean))
-  ).sort();
+  // Keep Sales / Team Lead-Sales first so they are easy to pick.
+  const roleOptions = (() => {
+    const set = new Set(
+      [...STANDARD_ROLES, ...existingRoles, form.role]
+        .map((r) => (r || "").trim())
+        .filter(Boolean)
+    );
+    const preferred = ["Sales", "Team Lead-Sales"];
+    const rest = Array.from(set)
+      .filter((r) => !preferred.includes(r))
+      .sort((a, b) => a.localeCompare(b));
+    return [...preferred.filter((r) => set.has(r)), ...rest];
+  })();
 
   function openAdd() {
     setEditing(null);
@@ -102,10 +131,9 @@ export function EmployeesPanel({
 
   function openEdit(e: Employee) {
     setEditing(e);
-    // KEY FIX #2: never default a null role to "Staff". Fall back to "Sales"
-    // so editing an employee can never silently rewrite their role to Staff.
-    const safeRole =
-      e.role && e.role.trim() !== "" ? e.role.trim() : "Sales";
+    // Never default a null/empty role to "Staff" — use Sales so an edit
+    // cannot silently rewrite a salesperson into Other Staff.
+    const safeRole = canonicalizeRole(e.role);
     setForm({
       name: e.name || "",
       role: safeRole,
@@ -143,9 +171,10 @@ export function EmployeesPanel({
       await mutate(
         editing ? "Updating employee…" : "Creating employee…",
         async () => {
+          const role = canonicalizeRole(form.role);
           const payload = {
             name: form.name.trim(),
-            role: form.role.trim(),
+            role,
             basicSalary: parseFloat(form.basicSalary) || 0,
             phone: form.phone.trim() || null,
             isActive: form.isActive,
@@ -176,11 +205,23 @@ export function EmployeesPanel({
 
           const saved = await res.json();
 
+          // Guard: if the server stored a different role, surface it immediately
+          // instead of silently putting the employee in the wrong table.
+          const stored = (saved.role ?? "").toString().trim();
+          if (stored !== role) {
+            throw new Error(
+              `Server stored role "${saved.role}" instead of "${role}". ` +
+                `Redeploy src/app/api/employees/route.ts and hard-refresh.`
+            );
+          }
+
           setEmployees((prev) => {
             const next: Employee = {
               id: saved.id,
               name: saved.name,
-              role: saved.role,
+              // Prefer the role we sent so the UI bucket updates even if
+              // a stale response field is null.
+              role,
               basicSalary: saved.basicSalary,
               phone: saved.phone,
               isActive: saved.isActive ?? true,
@@ -474,43 +515,36 @@ function EmployeeTable({
   periodId: string;
 }) {
   return (
-    <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-      <div className="px-4 py-2 border-b bg-slate-50">
-        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+    <div className="bg-white border rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b bg-slate-50">
+        <h3 className="font-semibold text-slate-800">
+          {title} ({rows.length})
+        </h3>
         <p className="text-xs text-slate-500">{subtitle}</p>
       </div>
       {rows.length === 0 ? (
-        <div className="p-6 text-center text-sm text-slate-500">
-          No {title.toLowerCase()} employees yet.
+        <div className="px-4 py-8 text-sm text-slate-500 text-center">
+          No employees in this group.
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-slate-50/60 border-b">
-                {[
-                  "Name",
-                  "Role",
-                  "Basic Salary",
-                  "Phone",
-                  "Loan Remaining",
-                  "Status",
-                  "Actions",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-3 py-2 text-left text-xs font-semibold text-slate-600 uppercase whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
-                ))}
+              <tr className="text-left text-xs text-slate-500 border-b">
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">Role</th>
+                <th className="px-3 py-2 font-medium text-right">Basic</th>
+                <th className="px-3 py-2 font-medium">Phone</th>
+                <th className="px-3 py-2 font-medium text-right">Loan Left</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((e) => (
                 <tr
                   key={e.id}
-                  className="border-b border-slate-100 hover:bg-slate-50/70"
+                  className="border-b last:border-0 hover:bg-slate-50/70"
                 >
                   <td className="px-3 py-2 font-medium">{e.name}</td>
                   <td className="px-3 py-2">
