@@ -17,13 +17,13 @@
  */
 import { prisma } from "./prisma";
 
-/* ────────────────────────────────────────────────────────────────────────────
- * PAYABLE ↔ OPERATIONAL SYNC
- * ──────────────────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * PAYABLE â†” OPERATIONAL SYNC
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 /**
  * Recompute a payroll entry from scratch based on:
- *   basic + commission − tax − loan installment − other deductions
+ *   basic + commission âˆ’ tax âˆ’ loan installment âˆ’ other deductions
  *
  * Commission is only applied to Sales-role employees.
  */
@@ -65,19 +65,17 @@ export async function syncPayrollForEmployee(
     where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
   });
   // Cap installment at remaining loan so payroll never deducts more than owed
-  // AFTER (safe — payroll reflects the schedule, loan is untouched here)
-  let scheduled = loan?.monthlyInstallment ?? 0;
-  // A scheduled installment larger than remaining means the loan is
-  // effectively finished: don't schedule anything beyond what's owed.
-  let installment = loan ? Math.min(scheduled, loan.remainingAmount) : 0;
-
+  let installment = loan?.monthlyInstallment ?? 0;
+  if (loan && installment > loan.remainingAmount) {
+    installment = loan.remainingAmount;
+  }
   if (loan && installment <= 0) {
+    // Fallback fixed schedules when monthlyInstallment was never set
     const n = employeeName.toLowerCase();
-    const fixed =
-      n.includes("ahsaan") ? 30000 :
-        n.includes("amjad") || n.includes("amad") || n.includes("ammar") ? 20000 :
-          n.includes("awais") ? 20000 : 0;
-    installment = Math.min(fixed, loan.remainingAmount);
+    if (n.includes("ahsaan")) installment = Math.min(30000, loan.remainingAmount);
+    else if (n.includes("amjad") || n.includes("amad") || n.includes("ammar"))
+      installment = Math.min(20000, loan.remainingAmount);
+    else if (n.includes("awais")) installment = Math.min(20000, loan.remainingAmount);
   }
 
   const netPayable = Math.max(0, basic + commissionAmt - tax - installment - other);
@@ -115,9 +113,9 @@ export async function syncPayrollForEmployee(
         status: "Pending",
         notes: isSales
           ? isLead
-            ? "Team Lead — tiered override on team sales"
-            : "Sales — 40k + 2.5% of own sales"
-          : `${emp.role} — no commission`,
+            ? "Team Lead â€” tiered override on team sales"
+            : "Sales â€” 40k + 2.5% of own sales"
+          : `${emp.role} â€” no commission`,
       },
     });
   }
@@ -227,9 +225,9 @@ export async function propagatePayableToOperational(payableId: string) {
   }
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
- * ASSET ↔ TRANSACTION SYNC
- * ──────────────────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * ASSET â†” TRANSACTION SYNC
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 /**
  * Create an Asset row from an "Asset Purchase" transaction.
@@ -288,25 +286,42 @@ export async function updateAssetFromTransaction(
 
 /** Delete an Asset row that came from a transaction. */
 export async function deleteAssetFromTransaction(assetId: string) {
-  await prisma.asset.delete({ where: { id: assetId } }).catch(() => { });
+  await prisma.asset.delete({ where: { id: assetId } }).catch(() => {});
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * PAYMENT APPLICATION
- * ──────────────────────────────────────────────────────────────────────────── */
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+
+/** Dated audit line for EmployeeLoan.notes when balance changes. */
+function appendLoanBalanceNote(
+  existingNotes: string | null | undefined,
+  from: number,
+  to: number,
+  source: string
+): string {
+  const delta = to - from;
+  if (Math.abs(delta) < 0.001) return existingNotes || "";
+  const today = new Date().toISOString().slice(0, 10);
+  const sign = delta < 0 ? "−" : "+";
+  const line = `[${today}] ${source}: balance ${sign}${Math.abs(delta).toLocaleString("en-PK")} (${from.toLocaleString("en-PK")} → ${to.toLocaleString("en-PK")})`;
+  const prev = (existingNotes || "").trim();
+  return prev ? `${prev}\n${line}` : line;
+}
 
 export type AppliedLink = {
   entityType:
-  | "payable"
-  | "hotel"
-  | "transport"
-  | "receivable"
-  | "payroll"
-  | "commission"
-  | "refund"
-  | "advance"
-  | "employee_loan"
-  | "asset";
+    | "payable"
+    | "hotel"
+    | "transport"
+    | "receivable"
+    | "payroll"
+    | "commission"
+    | "refund"
+    | "advance"
+    | "employee_loan"
+    | "asset";
   entityId: string;
   appliedAmount: number;
 };
@@ -320,7 +335,7 @@ function nameMatch(a: string, b: string): boolean {
 
 /**
  * Apply a payment to a Payable.
- * CAP: applied = min(amount, orig − amountPaid).
+ * CAP: applied = min(amount, orig âˆ’ amountPaid).
  */
 async function applyToPayable(
   periodId: string,
@@ -439,7 +454,7 @@ export async function applyReceiptToReceivables(
   return links;
 }
 
-/** Resolve employee display name → canonical Employee row (fuzzy). */
+/** Resolve employee display name â†’ canonical Employee row (fuzzy). */
 async function resolveEmployee(employeeName: string) {
   const all = await prisma.employee.findMany({ where: { isActive: true } });
   return (
@@ -507,8 +522,8 @@ export async function applyPayrollPayment(
     if (!entry) {
       const loan = emp
         ? await prisma.employeeLoan.findFirst({
-          where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
-        })
+            where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
+          })
         : null;
       const isLead =
         canonicalName.toLowerCase().includes("ahmad") ||
@@ -540,7 +555,7 @@ export async function applyPayrollPayment(
   if (amount > outstanding && outstanding > 0) {
     console.warn(
       `[applyPayrollPayment] OVERPAYMENT reached service layer: ${entry.employeeName} ` +
-      `outstanding ${outstanding}, paying ${amount}, capping to ${outstanding}`
+        `outstanding ${outstanding}, paying ${amount}, capping to ${outstanding}`
     );
   }
 
@@ -583,12 +598,16 @@ export async function applyPayrollPayment(
       where: { employeeId: entry.employeeId, remainingAmount: { gt: 0 } },
     });
     if (loan) {
+      const newRem = Math.max(0, loan.remainingAmount - entry.loanInstallment);
       await prisma.employeeLoan.update({
         where: { id: loan.id },
         data: {
-          remainingAmount: Math.max(
-            0,
-            loan.remainingAmount - entry.loanInstallment
+          remainingAmount: newRem,
+          notes: appendLoanBalanceNote(
+            loan.notes,
+            loan.remainingAmount,
+            newRem,
+            `Salary installment (${entry.employeeName})`
           ),
         },
       });

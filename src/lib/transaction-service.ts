@@ -16,6 +16,23 @@ import {
   type AppliedLink,
 } from "./links-service";
 
+
+/** Dated audit line for EmployeeLoan.notes when balance changes. */
+function appendLoanBalanceNote(
+  existingNotes: string | null | undefined,
+  from: number,
+  to: number,
+  source: string
+): string {
+  const delta = to - from;
+  if (Math.abs(delta) < 0.001) return existingNotes || "";
+  const today = new Date().toISOString().slice(0, 10);
+  const sign = delta < 0 ? "−" : "+";
+  const line = `[${today}] ${source}: balance ${sign}${Math.abs(delta).toLocaleString("en-PK")} (${from.toLocaleString("en-PK")} → ${to.toLocaleString("en-PK")})`;
+  const prev = (existingNotes || "").trim();
+  return prev ? `${prev}\n${line}` : line;
+}
+
 export type TxnInput = {
   periodId: string;
   date: string | Date;
@@ -297,7 +314,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
   const party = input.party || input.subCategory || "";
   const periodId = input.periodId;
 
-  // Pure cash-out categories — no operational linkage, no ceiling.
+  // Pure cash-out categories â€” no operational linkage, no ceiling.
   if (isDrawingCategory(input.category) || isAssetCategory(input.category)) {
     return [];
   }
@@ -401,11 +418,18 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
 
     if (creditAmt > 0) {
       if (loan) {
+        const newRem = loan.remainingAmount + creditAmt;
         await prisma.employeeLoan.update({
           where: { id: loan.id },
           data: {
             originalAmount: loan.originalAmount + creditAmt,
-            remainingAmount: loan.remainingAmount + creditAmt,
+            remainingAmount: newRem,
+            notes: appendLoanBalanceNote(
+              loan.notes,
+              loan.remainingAmount,
+              newRem,
+              "Loan advance (transaction)"
+            ),
           },
         });
       } else {
@@ -443,7 +467,15 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
       const newRemaining = Math.max(0, loan.remainingAmount - debitAmt);
       await prisma.employeeLoan.update({
         where: { id: loan.id },
-        data: { remainingAmount: newRemaining },
+        data: {
+          remainingAmount: newRemaining,
+          notes: appendLoanBalanceNote(
+            loan.notes,
+            loan.remainingAmount,
+            newRemaining,
+            "Loan repayment (transaction)"
+          ),
+        },
       });
       return [
         {
