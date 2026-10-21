@@ -131,7 +131,7 @@ export function EmployeesPanel({
 
   function openEdit(e: Employee) {
     setEditing(e);
-    // Never default a null/empty role to "Staff" — use Sales so an edit
+    // Never default a null/empty role to "Staff" â€” use Sales so an edit
     // cannot silently rewrite a salesperson into Other Staff.
     const safeRole = canonicalizeRole(e.role);
     setForm({
@@ -169,7 +169,7 @@ export function EmployeesPanel({
     setError(null);
     try {
       await mutate(
-        editing ? "Updating employee…" : "Creating employee…",
+        editing ? "Updating employeeâ€¦" : "Creating employeeâ€¦",
         async () => {
           const role = canonicalizeRole(form.role);
           const payload = {
@@ -259,7 +259,7 @@ export function EmployeesPanel({
     setLoading(true);
     setError(null);
     try {
-      await mutate("Deleting employee…", async () => {
+      await mutate("Deleting employeeâ€¦", async () => {
         const res = await fetch(`/api/employees?id=${emp.id}`, {
           method: "DELETE",
         });
@@ -294,7 +294,7 @@ export function EmployeesPanel({
             Employees ({employees.length})
           </h2>
           <p className="text-xs text-slate-500">
-            Sales team: {grouped.sales.length} · Other staff:{" "}
+            Sales team: {grouped.sales.length} Â· Other staff:{" "}
             {grouped.other.length}
           </p>
         </div>
@@ -410,23 +410,31 @@ export function EmployeesPanel({
                 <input
                   type="number"
                   value={form.loanOriginal}
-                  onChange={(e) =>
-                    setForm({ ...form, loanOriginal: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    // On create (no editing), keep remaining in sync with original
+                    setForm((prev) => ({
+                      ...prev,
+                      loanOriginal: v,
+                      loanRemaining: editing ? prev.loanRemaining : v,
+                    }));
+                  }}
                   className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                 />
               </label>
               <label className="block text-xs">
                 <span className="text-slate-600 font-medium">
-                  Loan Remaining
+                  Loan Remaining{" "}
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    (auto)
+                  </span>
                 </span>
                 <input
                   type="number"
                   value={form.loanRemaining}
-                  onChange={(e) =>
-                    setForm({ ...form, loanRemaining: e.target.value })
-                  }
-                  className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
+                  readOnly
+                  disabled
+                  className="mt-1 w-full border border-slate-200 bg-slate-100 text-slate-600 rounded-md px-2.5 py-1.5 text-sm cursor-not-allowed"
                 />
               </label>
               <label className="block text-xs">
@@ -444,9 +452,10 @@ export function EmployeesPanel({
               </label>
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              Leave all three at 0 for employees without a loan. The payroll
-              page will deduct the installment from their salary until the
-              remaining reaches 0.
+              Leave Original and Installment at 0 for employees without a loan.
+              Loan Remaining is auto-calculated (starts = Original; drops only
+              when salary installment is paid or a loan-repayment transaction
+              is posted). Raising Original adds the delta to Remaining.
             </p>
           </fieldset>
 
@@ -458,7 +467,7 @@ export function EmployeesPanel({
             >
               {loading && <Loader2 size={16} className="animate-spin" />}
               {loading
-                ? "Saving…"
+                ? "Savingâ€¦"
                 : editing
                   ? "Save Changes"
                   : "Create Employee"}
@@ -549,13 +558,13 @@ function EmployeeTable({
                   <td className="px-3 py-2 font-medium">{e.name}</td>
                   <td className="px-3 py-2">
                     <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">
-                      {e.role || "—"}
+                      {e.role || "â€”"}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {formatPKR(e.basicSalary)}
                   </td>
-                  <td className="px-3 py-2">{e.phone || "—"}</td>
+                  <td className="px-3 py-2">{e.phone || "â€”"}</td>
                   <td
                     className={`px-3 py-2 text-right tabular-nums ${
                       e.loanRemaining > 0
@@ -563,7 +572,7 @@ function EmployeeTable({
                         : "text-slate-500"
                     }`}
                   >
-                    {e.loanRemaining > 0 ? formatPKR(e.loanRemaining) : "—"}
+                    {e.loanRemaining > 0 ? formatPKR(e.loanRemaining) : "â€”"}
                   </td>
                   <td className="px-3 py-2">
                     <span
