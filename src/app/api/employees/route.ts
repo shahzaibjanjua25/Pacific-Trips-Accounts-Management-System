@@ -51,20 +51,33 @@ function pickEmployee(body: Record<string, unknown>) {
 }
 
 /**
+ * Append a dated balance-change line to EmployeeLoan.notes (audit trail).
+ */
+function appendLoanBalanceNote(
+  existingNotes: string | null | undefined,
+  from: number,
+  to: number,
+  source: string
+): string {
+  const delta = to - from;
+  if (Math.abs(delta) < 0.001) return existingNotes || "";
+  const today = new Date().toISOString().slice(0, 10);
+  const sign = delta < 0 ? "−" : "+";
+  const line = `[${today}] ${source}: balance ${sign}${Math.abs(delta).toLocaleString("en-PK")} (${from.toLocaleString("en-PK")} → ${to.toLocaleString("en-PK")})`;
+  const prev = (existingNotes || "").trim();
+  return prev ? `${prev}\n${line}` : line;
+}
+
+/**
  * Sync the EmployeeLoan row when loan fields are present in the body.
- *
- * Loan Remaining (balance) is AUTO-CALCULATED — never trusted from the client:
- *   - create: remaining = original
- *   - original increased: remaining += delta
- *   - original decreased: remaining = min(remaining, newOriginal)
- *   - installment may be updated freely
- *   - set original+installment to 0 to clear the loan
+ * Remaining is editable. Every change is logged with a date in notes so
+ * you can track when the employee repaid / when balance was adjusted.
  */
 async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   const hasAny =
     "loanOriginal" in body ||
+    "loanRemaining" in body ||
     "loanInstallment" in body;
-  // loanRemaining from client is intentionally ignored
   if (!hasAny) return;
 
   const parse = (v: unknown): number | undefined => {
@@ -74,6 +87,7 @@ async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   };
 
   const orig = parse(body.loanOriginal);
+  const rem = parse(body.loanRemaining);
   const inst = parse(body.loanInstallment);
 
   const existing = await prisma.employeeLoan.findFirst({
@@ -82,10 +96,11 @@ async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   });
 
   const nextOrig = orig ?? existing?.originalAmount ?? 0;
+  const nextRem = rem ?? existing?.remainingAmount ?? 0;
   const nextInst = inst ?? existing?.monthlyInstallment ?? 0;
 
-  // Clear loan when both principal and installment are zero
-  if (nextOrig === 0 && nextInst === 0) {
+  // Clear loan when everything is zero
+  if (nextOrig === 0 && nextRem === 0 && nextInst === 0) {
     if (existing) {
       await prisma.employeeLoan.delete({ where: { id: existing.id } });
     }
@@ -93,34 +108,43 @@ async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   }
 
   if (existing) {
-    let remaining = existing.remainingAmount;
-    if (orig != null && orig !== existing.originalAmount) {
-      const delta = orig - existing.originalAmount;
-      if (delta > 0) {
-        remaining = existing.remainingAmount + delta;
-      } else {
-        remaining = Math.min(existing.remainingAmount, orig);
-      }
+    const data: {
+      originalAmount: number;
+      remainingAmount: number;
+      monthlyInstallment: number;
+      notes?: string;
+    } = {
+      originalAmount: nextOrig,
+      remainingAmount: nextRem,
+      monthlyInstallment: nextInst,
+    };
+    if (rem != null && Math.abs(rem - existing.remainingAmount) >= 0.001) {
+      data.notes = appendLoanBalanceNote(
+        existing.notes,
+        existing.remainingAmount,
+        rem,
+        "Settings edit"
+      );
     }
     await prisma.employeeLoan.update({
       where: { id: existing.id },
-      data: {
-        originalAmount: nextOrig,
-        remainingAmount: Math.max(0, remaining),
-        monthlyInstallment: nextInst,
-      },
+      data,
     });
   } else {
-    // New loan: balance always starts equal to original
-    const principal = orig ?? 0;
-    if (principal <= 0 && nextInst <= 0) return;
+    const principal = orig ?? rem ?? 0;
+    const remaining = rem ?? principal;
     await prisma.employeeLoan.create({
       data: {
         employeeId,
         originalAmount: principal,
-        remainingAmount: principal,
+        remainingAmount: remaining,
         monthlyInstallment: nextInst,
-        notes: "Created from Settings page",
+        notes: appendLoanBalanceNote(
+          "Created from Settings page",
+          0,
+          remaining,
+          "Loan opened"
+        ),
       },
     });
   }
@@ -146,6 +170,7 @@ export async function GET(req: NextRequest) {
       loanOriginal: e.loans[0]?.originalAmount ?? 0,
       loanRemaining: e.loans[0]?.remainingAmount ?? 0,
       loanInstallment: e.loans[0]?.monthlyInstallment ?? 0,
+      loanNotes: e.loans[0]?.notes ?? null,
     }))
   );
 }

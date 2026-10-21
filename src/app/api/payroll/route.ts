@@ -138,23 +138,35 @@ async function ensureEmployeeFromTeam(opts: {
   return emp;
 }
 
+/** Append a dated balance-change line to EmployeeLoan.notes (audit trail). */
+function appendLoanBalanceNote(
+  existingNotes: string | null | undefined,
+  from: number,
+  to: number,
+  source: string
+): string {
+  const delta = to - from;
+  if (Math.abs(delta) < 0.001) return existingNotes || "";
+  const today = new Date().toISOString().slice(0, 10);
+  const sign = delta < 0 ? "−" : "+";
+  const line = `[${today}] ${source}: balance ${sign}${Math.abs(delta).toLocaleString("en-PK")} (${from.toLocaleString("en-PK")} → ${to.toLocaleString("en-PK")})`;
+  const prev = (existingNotes || "").trim();
+  return prev ? `${prev}\n${line}` : line;
+}
+
 /**
- * Sync loan principal / installment from payroll form to EmployeeLoan.
- * Loan Balance (remainingAmount) is NEVER taken from the client — it is
- * auto-managed:
- *   - on create: remaining = original
- *   - on original increase: remaining += delta
- *   - on original decrease: remaining = min(remaining, newOriginal)
- *   - reductions otherwise only via salary payment / loan-repayment txns
+ * Sync loan fields from payroll form to EmployeeLoan.
+ * Balance is editable. Every change to remainingAmount is logged with a date
+ * in EmployeeLoan.notes so you can see when repayments / adjustments happened.
  */
 async function syncLoanFromEdit(
   _periodId: string,
   employeeName: string,
   loanOriginal?: number | null,
-  _loanBalance?: number | null, // ignored — auto-calculated
+  loanBalance?: number | null,
   loanInstallment?: number | null
 ) {
-  if (loanOriginal == null && loanInstallment == null) {
+  if (loanOriginal == null && loanBalance == null && loanInstallment == null) {
     return;
   }
 
@@ -172,6 +184,10 @@ async function syncLoanFromEdit(
     loanOriginal != null && Number.isFinite(Number(loanOriginal))
       ? Math.max(0, Number(loanOriginal))
       : null;
+  const bal =
+    loanBalance != null && Number.isFinite(Number(loanBalance))
+      ? Math.max(0, Number(loanBalance))
+      : null;
   const inst =
     loanInstallment != null && Number.isFinite(Number(loanInstallment))
       ? Math.max(0, Number(loanInstallment))
@@ -182,18 +198,21 @@ async function syncLoanFromEdit(
       originalAmount?: number;
       remainingAmount?: number;
       monthlyInstallment?: number;
+      notes?: string;
     } = {};
 
-    if (orig != null && orig !== existing.originalAmount) {
-      const delta = orig - existing.originalAmount;
-      update.originalAmount = orig;
-      if (delta > 0) {
-        update.remainingAmount = existing.remainingAmount + delta;
-      } else {
-        update.remainingAmount = Math.min(existing.remainingAmount, orig);
-      }
-    }
+    if (orig != null) update.originalAmount = orig;
     if (inst != null) update.monthlyInstallment = inst;
+
+    if (bal != null && Math.abs(bal - existing.remainingAmount) >= 0.001) {
+      update.remainingAmount = bal;
+      update.notes = appendLoanBalanceNote(
+        existing.notes,
+        existing.remainingAmount,
+        bal,
+        "Payroll edit"
+      );
+    }
 
     if (Object.keys(update).length > 0) {
       await prisma.employeeLoan.update({
@@ -201,14 +220,21 @@ async function syncLoanFromEdit(
         data: update,
       });
     }
-  } else if ((orig ?? 0) > 0) {
+  } else if ((orig ?? 0) > 0 || (bal ?? 0) > 0) {
+    const principal = orig ?? bal ?? 0;
+    const remaining = bal ?? principal;
     await prisma.employeeLoan.create({
       data: {
         employeeId: emp.id,
-        originalAmount: orig!,
-        remainingAmount: orig!,
+        originalAmount: principal,
+        remainingAmount: remaining,
         monthlyInstallment: inst ?? 0,
-        notes: "Created from payroll edit",
+        notes: appendLoanBalanceNote(
+          "Created from payroll edit",
+          0,
+          remaining,
+          "Loan opened"
+        ),
       },
     });
   }

@@ -117,7 +117,6 @@ function makeFields(teamOptions: string[]): FieldDef[] {
       label: "Loan Balance (Total Owed)",
       type: "number" as const,
       money: true,
-      readOnly: true,
     },
     {
       key: "otherDeductions",

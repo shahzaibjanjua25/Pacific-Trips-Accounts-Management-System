@@ -16,6 +16,7 @@ type Employee = {
   loanOriginal: number;
   loanRemaining: number;
   loanInstallment: number;
+  loanNotes?: string | null;
 };
 
 const STANDARD_ROLES = [
@@ -412,7 +413,7 @@ export function EmployeesPanel({
                   value={form.loanOriginal}
                   onChange={(e) => {
                     const v = e.target.value;
-                    // On create (no editing), keep remaining in sync with original
+                    // On create, keep remaining in sync with original until user overrides
                     setForm((prev) => ({
                       ...prev,
                       loanOriginal: v,
@@ -424,17 +425,15 @@ export function EmployeesPanel({
               </label>
               <label className="block text-xs">
                 <span className="text-slate-600 font-medium">
-                  Loan Remaining{" "}
-                  <span className="text-[10px] text-slate-400 font-normal">
-                    (auto)
-                  </span>
+                  Loan Remaining
                 </span>
                 <input
                   type="number"
                   value={form.loanRemaining}
-                  readOnly
-                  disabled
-                  className="mt-1 w-full border border-slate-200 bg-slate-100 text-slate-600 rounded-md px-2.5 py-1.5 text-sm cursor-not-allowed"
+                  onChange={(e) =>
+                    setForm({ ...form, loanRemaining: e.target.value })
+                  }
+                  className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm"
                 />
               </label>
               <label className="block text-xs">
@@ -452,10 +451,10 @@ export function EmployeesPanel({
               </label>
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              Leave Original and Installment at 0 for employees without a loan.
-              Loan Remaining is auto-calculated (starts = Original; drops only
-              when salary installment is paid or a loan-repayment transaction
-              is posted). Raising Original adds the delta to Remaining.
+              Leave Original / Remaining / Installment at 0 if there is no loan.
+              Changing Remaining records a dated line in the loan notes so you
+              can see when balance was adjusted. Salary installment payments and
+              Employee Loan transactions also reduce the balance with a full audit trail.
             </p>
           </fieldset>
 
@@ -572,7 +571,15 @@ function EmployeeTable({
                         : "text-slate-500"
                     }`}
                   >
-                    {e.loanRemaining > 0 ? formatPKR(e.loanRemaining) : "â€”"}
+                    {e.loanRemaining > 0 ? formatPKR(e.loanRemaining) : "—"}
+                    {e.loanNotes ? (
+                      <div
+                        className="mt-1 text-[10px] text-slate-400 whitespace-pre-line max-w-[14rem]"
+                        title={e.loanNotes}
+                      >
+                        {e.loanNotes.split(/\n/).slice(-3).join("\n")}
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2">
                     <span
