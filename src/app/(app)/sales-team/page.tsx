@@ -105,7 +105,7 @@ export default async function SalesTeamPage({
 
   const rows = employees.map((e) => {
     const lead = isTeamLead(e.name, e.role);
-    const individual =
+    const fromEntries =
       entriesByPerson[e.name] ||
       Object.entries(entriesByPerson).reduce((acc, [k, v]) => {
         if (k.toLowerCase() === e.name.toLowerCase()) return acc + v;
@@ -113,44 +113,56 @@ export default async function SalesTeamPage({
       }, 0);
     const comm = findByName(commissions, e.name);
     const pay = findByName(payroll, e.name);
-    const saleBase = lead ? totalTeamSales : individual;
     const leadCalc = lead
       ? leadPay(totalTeamSales, monthlyTarget, commissionBase)
       : null;
 
-    const commissionAmt = lead
-      ? (comm?.commissionAmt ?? leadCalc!.amount)
-      : (comm?.commissionAmt ?? individual * 0.025);
-    const commissionRate = lead
-      ? (comm?.commissionRate ?? leadCalc!.rate)
-      : (comm?.commissionRate ?? 2.5);
+    // Prefer values already saved on Commission / Payroll so edits stick.
+    // Fall back to live sales entries / formula only when no row exists yet.
+    const individual =
+      !lead && comm && typeof comm.saleAmount === "number"
+        ? comm.saleAmount
+        : fromEntries;
+    const saleBase = lead
+      ? (comm && typeof comm.saleAmount === "number"
+          ? comm.saleAmount
+          : totalTeamSales)
+      : individual;
+
+    const commissionAmt =
+      comm && typeof comm.commissionAmt === "number"
+        ? comm.commissionAmt
+        : lead
+          ? leadCalc!.amount
+          : individual * 0.025;
+    const commissionRate =
+      comm && typeof comm.commissionRate === "number"
+        ? comm.commissionRate
+        : lead
+          ? leadCalc!.rate
+          : 2.5;
+
+    const basicDefault = lead ? 0 : e.basicSalary || 40000;
+    const basic = pay?.basicSalary ?? basicDefault;
+    const netDefault = Math.max(
+      0,
+      basic + commissionAmt - (pay?.loanInstallment ?? 0)
+    );
 
     return {
       id: e.id,
       name: e.name,
       isLead: lead,
-      basicSalary: pay?.basicSalary ?? (lead ? 0 : e.basicSalary || 40000),
+      basicSalary: basic,
       individualSales: individual,
       saleBase,
       commissionRate,
       commissionAmt,
-      netPayable:
-        pay?.netPayable ??
-        Math.max(
-          0,
-          (lead ? 0 : e.basicSalary || 40000) +
-            commissionAmt -
-            (pay?.loanInstallment ?? 0)
-        ),
+      netPayable: pay?.netPayable ?? netDefault,
       amountPaid: pay?.amountPaid ?? 0,
       remaining:
         pay?.remaining ??
-        Math.max(
-          0,
-          (pay?.netPayable ??
-            (lead ? 0 : e.basicSalary || 40000) + commissionAmt) -
-            (pay?.amountPaid ?? 0)
-        ),
+        Math.max(0, (pay?.netPayable ?? netDefault) - (pay?.amountPaid ?? 0)),
       status: pay?.status ?? "Pending",
     };
   });

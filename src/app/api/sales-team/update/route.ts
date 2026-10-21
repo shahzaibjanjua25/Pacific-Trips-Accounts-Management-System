@@ -16,8 +16,13 @@ function canonicalizeRole(raw: unknown): string {
   ) {
     return "Team Lead-Sales";
   }
-  // Keep other roles as-is, but Sales Team page only shows Sales roles
   return t;
+}
+
+function num(v: unknown, fallback = 0): number {
+  if (v === null || v === undefined || v === "") return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 /** Case-insensitive employee lookup; create Sales employee if missing. */
@@ -81,44 +86,55 @@ export async function POST(req: NextRequest) {
     }
 
     const nextRole = canonicalizeRole(role ?? emp.role ?? "Sales");
+    const isLead = nextRole === "Team Lead-Sales";
 
     await prisma.employee.update({
       where: { id: emp.id },
       data: {
         role: nextRole,
         isActive: true,
-        ...(basicSalary != null
-          ? { basicSalary: Number(basicSalary) || 0 }
+        ...(basicSalary != null && basicSalary !== ""
+          ? { basicSalary: num(basicSalary, emp.basicSalary) }
           : {}),
       },
     });
 
-    const saleAmt =
-      saleBase != null
-        ? Number(saleBase) || 0
-        : individualSales != null
-          ? Number(individualSales) || 0
-          : 0;
+    // Non-lead: prefer individualSales (what the form labels "Individual Sales").
+    // Lead: prefer saleBase (team sales). Previously saleBase was ALWAYS sent and
+    // won, so editing Individual Sales never stuck.
+    const saleAmt = isLead
+      ? num(
+          saleBase != null && saleBase !== "" ? saleBase : individualSales,
+          0
+        )
+      : num(
+          individualSales != null && individualSales !== ""
+            ? individualSales
+            : saleBase,
+          0
+        );
+
     const rate =
-      commissionRate != null && !Number.isNaN(Number(commissionRate))
-        ? Number(commissionRate)
+      commissionRate != null && commissionRate !== ""
+        ? num(commissionRate, 2.5)
         : 2.5;
+
     const commAmt =
-      commissionAmt != null && !Number.isNaN(Number(commissionAmt))
-        ? Number(commissionAmt)
+      commissionAmt != null && commissionAmt !== ""
+        ? num(commissionAmt, 0)
         : saleAmt * (rate / 100);
 
-    // Match commission by period + name (case-insensitive via employeeName stored)
-    const existingComm =
-      (await prisma.commission.findFirst({
-        where: { periodId, employeeName: emp.name },
-      })) ??
-      (await prisma.commission.findFirst({
-        where: {
-          periodId,
-          employeeName: { equals: emp.name, mode: "insensitive" },
-        },
-      }));
+    const existingComm = await prisma.commission.findFirst({
+      where: {
+        periodId,
+        OR: [
+          { employeeName: emp.name },
+          { employeeName: { equals: emp.name, mode: "insensitive" } },
+          { employeeId: emp.id },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
 
     if (existingComm) {
       await prisma.commission.update({
@@ -130,7 +146,7 @@ export async function POST(req: NextRequest) {
           commissionRate: rate,
           commissionAmt: commAmt,
           status: status === "Paid" ? "Paid" : "Accrued",
-          notes: notes != null ? notes : existingComm.notes,
+          notes: notes != null ? String(notes) : existingComm.notes,
         },
       });
     } else {
@@ -143,25 +159,26 @@ export async function POST(req: NextRequest) {
           commissionRate: rate,
           commissionAmt: commAmt,
           status: status === "Paid" ? "Paid" : "Accrued",
-          notes: notes || null,
+          notes: notes ? String(notes) : null,
         },
       });
     }
 
-    const existingPay =
-      (await prisma.payrollEntry.findFirst({
-        where: { periodId, employeeName: emp.name },
-      })) ??
-      (await prisma.payrollEntry.findFirst({
-        where: {
-          periodId,
-          employeeName: { equals: emp.name, mode: "insensitive" },
-        },
-      }));
+    const existingPay = await prisma.payrollEntry.findFirst({
+      where: {
+        periodId,
+        OR: [
+          { employeeName: emp.name },
+          { employeeName: { equals: emp.name, mode: "insensitive" } },
+          { employeeId: emp.id },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
 
     const basic =
-      basicSalary != null
-        ? Number(basicSalary) || 0
+      basicSalary != null && basicSalary !== ""
+        ? num(basicSalary, 0)
         : existingPay?.basicSalary ?? emp.basicSalary ?? 0;
     const loan = existingPay?.loanInstallment ?? 0;
     const tax = existingPay?.taxDeducted ?? 0;
@@ -169,21 +186,22 @@ export async function POST(req: NextRequest) {
 
     const computedNet = Math.max(0, basic + commAmt - tax - loan - other);
     const net =
-      netPayable != null && !Number.isNaN(Number(netPayable))
-        ? Number(netPayable)
+      netPayable != null && netPayable !== ""
+        ? num(netPayable, computedNet)
         : computedNet;
 
     const paid =
-      amountPaid != null
-        ? Number(amountPaid) || 0
+      amountPaid != null && amountPaid !== ""
+        ? num(amountPaid, 0)
         : existingPay?.amountPaid ?? 0;
+
     const rem =
-      remaining != null && !Number.isNaN(Number(remaining))
-        ? Math.max(0, Number(remaining))
+      remaining != null && remaining !== ""
+        ? Math.max(0, num(remaining, 0))
         : Math.max(0, net - paid);
 
     let nextStatus: string;
-    if (status) nextStatus = status;
+    if (status) nextStatus = String(status);
     else if (rem <= 0 && paid > 0) nextStatus = "Paid";
     else if (paid > 0) nextStatus = "Partial";
     else nextStatus = "Pending";
@@ -199,7 +217,8 @@ export async function POST(req: NextRequest) {
           amountPaid: paid,
           remaining: rem,
           status: nextStatus,
-          notes: notes != null ? notes : existingPay.notes,
+          notes:
+            notes != null ? String(notes) : existingPay.notes,
         },
       });
     } else {
@@ -216,12 +235,22 @@ export async function POST(req: NextRequest) {
           amountPaid: paid,
           remaining: rem,
           status: nextStatus,
-          notes: notes || null,
+          notes: notes ? String(notes) : null,
         },
       });
     }
 
-    return NextResponse.json({ ok: true, employeeId: emp.id, role: nextRole });
+    return NextResponse.json({
+      ok: true,
+      employeeId: emp.id,
+      role: nextRole,
+      saleAmount: saleAmt,
+      commissionAmt: commAmt,
+      netPayable: net,
+      amountPaid: paid,
+      remaining: rem,
+      status: nextStatus,
+    });
   } catch (e) {
     console.error("[sales-team:update POST]", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
@@ -235,10 +264,7 @@ export async function DELETE(req: NextRequest) {
   try {
     const periodId = req.nextUrl.searchParams.get("periodId");
     const employeeName = req.nextUrl.searchParams.get("employeeName");
-    // Optional: demoteFromSales=1 also sets Employee.role to Staff so they
-    // leave the Sales Team page (rows are built from Employee, not payroll).
-    const demote =
-      req.nextUrl.searchParams.get("demoteFromSales") !== "0";
+    const demote = req.nextUrl.searchParams.get("demoteFromSales") !== "0";
 
     if (!periodId || !employeeName) {
       return NextResponse.json(
@@ -249,7 +275,6 @@ export async function DELETE(req: NextRequest) {
 
     const name = employeeName.trim();
 
-    // Find all payroll rows for this person this period (any casing)
     const pays = await prisma.payrollEntry.findMany({
       where: {
         periodId,
@@ -278,8 +303,6 @@ export async function DELETE(req: NextRequest) {
       },
     });
 
-    // Remove from Sales Team roster for this app view by demoting role.
-    // (Page lists employees where role is Sales / Team Lead-Sales.)
     if (demote) {
       await prisma.employee.updateMany({
         where: {
