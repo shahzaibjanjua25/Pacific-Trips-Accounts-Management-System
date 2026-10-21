@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Plus, X, Loader2, Check } from "lucide-react";
+import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
 import { useMutate } from "@/components/useMutate";
 
@@ -43,6 +43,25 @@ const emptyForm = {
   loanInstallment: "0",
 };
 
+/**
+ * Normalize a role string for grouping in the UI only.
+ * The DB value is never modified by this.
+ */
+function normalizedRole(role: string | null): string {
+  if (!role) return "";
+  const r = role.trim().toLowerCase();
+  if (r === "sales" || r === "sale") return "Sales";
+  if (
+    r === "team lead-sales" ||
+    r === "team lead sales" ||
+    r === "teamlead-sales" ||
+    r === "team-lead-sales"
+  ) {
+    return "Team Lead-Sales";
+  }
+  return role.trim();
+}
+
 export function EmployeesPanel({
   periodId,
   initialEmployees,
@@ -54,7 +73,15 @@ export function EmployeesPanel({
 }) {
   const router = useRouter();
   const mutate = useMutate();
+
+  // KEY FIX #1: keep local state in sync with the server-provided list.
+  // Without this, after router.refresh() fires, the panel could show stale
+  // roles and clicking Edit could then push a wrong role back to the DB.
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
+  useEffect(() => {
+    setEmployees(initialEmployees);
+  }, [initialEmployees]);
+
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -75,9 +102,13 @@ export function EmployeesPanel({
 
   function openEdit(e: Employee) {
     setEditing(e);
+    // KEY FIX #2: never default a null role to "Staff". Fall back to "Sales"
+    // so editing an employee can never silently rewrite their role to Staff.
+    const safeRole =
+      e.role && e.role.trim() !== "" ? e.role.trim() : "Sales";
     setForm({
       name: e.name || "",
-      role: e.role || "Staff",
+      role: safeRole,
       basicSalary: String(e.basicSalary ?? 0),
       phone: e.phone || "",
       isActive: e.isActive,
@@ -167,7 +198,6 @@ export function EmployeesPanel({
         }
       );
       closeForm();
-      // Refresh so the payroll page etc. pick up the new role
       router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -204,18 +234,14 @@ export function EmployeesPanel({
   }
 
   const grouped = (() => {
-    const sales = employees.filter(
-      (e) =>
-        e.role === "Sales" ||
-        e.role === "Team Lead-Sales" ||
-        (e.role || "").toLowerCase() === "sales"
-    );
-    const other = employees.filter(
-      (e) =>
-        e.role !== "Sales" &&
-        e.role !== "Team Lead-Sales" &&
-        (e.role || "").toLowerCase() !== "sales"
-    );
+    const sales = employees.filter((e) => {
+      const n = normalizedRole(e.role);
+      return n === "Sales" || n === "Team Lead-Sales";
+    });
+    const other = employees.filter((e) => {
+      const n = normalizedRole(e.role);
+      return n !== "Sales" && n !== "Team Lead-Sales";
+    });
     return { sales, other };
   })();
 
@@ -263,9 +289,7 @@ export function EmployeesPanel({
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <label className="block text-xs">
-              <span className="text-slate-600 font-medium">
-                Full Name *
-              </span>
+              <span className="text-slate-600 font-medium">Full Name *</span>
               <input
                 required
                 value={form.name}
@@ -392,7 +416,11 @@ export function EmployeesPanel({
               className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium"
             >
               {loading && <Loader2 size={16} className="animate-spin" />}
-              {loading ? "Saving…" : editing ? "Save Changes" : "Create Employee"}
+              {loading
+                ? "Saving…"
+                : editing
+                  ? "Save Changes"
+                  : "Create Employee"}
             </button>
             <button
               type="button"
@@ -496,12 +524,12 @@ function EmployeeTable({
                   <td className="px-3 py-2">{e.phone || "—"}</td>
                   <td
                     className={`px-3 py-2 text-right tabular-nums ${
-                      e.loanRemaining > 0 ? "text-red-600 font-medium" : "text-slate-500"
+                      e.loanRemaining > 0
+                        ? "text-red-600 font-medium"
+                        : "text-slate-500"
                     }`}
                   >
-                    {e.loanRemaining > 0
-                      ? formatPKR(e.loanRemaining)
-                      : "—"}
+                    {e.loanRemaining > 0 ? formatPKR(e.loanRemaining) : "—"}
                   </td>
                   <td className="px-3 py-2">
                     <span
@@ -540,7 +568,7 @@ function EmployeeTable({
           </table>
         </div>
       )}
-      {/* keep periodId referenced so linters don't complain in future refactors */}
+      {/* keep periodId referenced for linters */}
       <span className="sr-only" aria-hidden="true">
         {periodId}
       </span>

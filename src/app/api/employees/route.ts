@@ -28,17 +28,8 @@ function pickEmployee(body: Record<string, unknown>) {
 /**
  * Upsert the EmployeeLoan row for the given employee when any of the three
  * loan fields is present in the request body.
- *
- * Rules:
- *  - loanOriginal / loanRemaining / loanInstallment all default to keeping
- *    the existing value when the field is absent.
- *  - If all three net to 0 AND no loan exists, do nothing.
- *  - If all three net to 0 AND a loan exists, delete the loan.
  */
-async function syncLoan(
-  employeeId: string,
-  body: Record<string, unknown>
-) {
+async function syncLoan(employeeId: string, body: Record<string, unknown>) {
   const hasAny =
     "loanOriginal" in body ||
     "loanRemaining" in body ||
@@ -113,8 +104,6 @@ export async function POST(req: NextRequest) {
     if (!data.name) {
       return NextResponse.json({ error: "name required" }, { status: 400 });
     }
-    // Only default when the caller sent literally nothing — otherwise
-    // respect whatever role the form submitted (including Team Lead-Sales).
     if (data.role == null) data.role = "Sales";
     if (data.isActive == null) data.isActive = true;
 
@@ -142,9 +131,36 @@ export async function PUT(req: NextRequest) {
 
     const data = pickEmployee(body);
     delete (data as Record<string, unknown>).id;
-    // If the caller left role out, keep what's there. If they explicitly
-    // sent null, set it to null (user cleared the field).
     if (!("role" in body)) delete (data as Record<string, unknown>).role;
+
+    // ─── Safety guard ─────────────────────────────────────────────────────
+    // If the request is trying to change an employee's role to "Staff" or
+    // empty, but that employee has ANY commission history, they must have
+    // been a real Sales / Team Lead. Refuse the downgrade and tell the user.
+    const nextRole = typeof data.role === "string" ? data.role.trim() : null;
+    const isDowngradeToStaff =
+      nextRole === null ||
+      nextRole === "" ||
+      nextRole.toLowerCase() === "staff";
+
+    if (isDowngradeToStaff) {
+      const hasCommission = await prisma.commission.findFirst({
+        where: {
+          employeeName: { equals: existing.name, mode: "insensitive" },
+        },
+        select: { id: true },
+      });
+      if (hasCommission) {
+        return NextResponse.json(
+          {
+            error:
+              `${existing.name} has commission history and cannot be set to "Staff". ` +
+              `Choose "Sales" or "Team Lead-Sales" instead.`,
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     const row = await prisma.employee.update({
       where: { id },
@@ -170,7 +186,6 @@ export async function DELETE(req: NextRequest) {
     const emp = await prisma.employee.findUnique({ where: { id } });
     if (!emp) return NextResponse.json({ ok: true, alreadyGone: true });
 
-    // 1. Detach any transaction links tied to this employee's payroll rows
     const payrollRows = await prisma.payrollEntry.findMany({
       where: { employeeId: id },
       select: { id: true },
@@ -184,7 +199,6 @@ export async function DELETE(req: NextRequest) {
       });
     }
 
-    // 2. Remove payroll / commission / loan / asset assignments
     await prisma.payrollEntry.deleteMany({ where: { employeeId: id } });
     await prisma.commission.deleteMany({ where: { employeeId: id } });
     await prisma.employeeLoan.deleteMany({ where: { employeeId: id } });
@@ -193,7 +207,6 @@ export async function DELETE(req: NextRequest) {
       data: { assignedToId: null },
     });
 
-    // 3. Delete the employee
     await prisma.employee.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e) {
