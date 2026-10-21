@@ -91,7 +91,7 @@ function makeFields(teamOptions: string[]): FieldDef[] {
       label: "Commission (2.5%)",
       type: "number" as const,
       money: true,
-      readOnly: true,
+      // readOnly: true,
     },
     {
       key: "taxDeducted",
@@ -110,7 +110,7 @@ function makeFields(teamOptions: string[]): FieldDef[] {
       label: "Loan Original",
       type: "number" as const,
       money: true,
-      readOnly: true,
+      // readOnly: true,
     },
     {
       key: "loanBalance",
@@ -141,7 +141,7 @@ function makeFields(teamOptions: string[]): FieldDef[] {
       label: "Remaining",
       type: "number" as const,
       money: true,
-      readOnly: true,
+      // readOnly: true,
     },
     {
       key: "status",
