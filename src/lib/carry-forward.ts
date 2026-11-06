@@ -29,7 +29,8 @@ function prevYearMonth(year: number, month: number) {
 
 export async function getOrCreatePeriodWithCarryForward(
   year: number,
-  month: number
+  month: number,
+  carryForward: boolean,
 ) {
   const label = monthLabel(year, month);
 
@@ -45,27 +46,31 @@ export async function getOrCreatePeriodWithCarryForward(
       });
       if (recheck) return { period: recheck, carried: false };
 
+      const prevPeriod = carryForward
+        ? await tx.period.findUnique({ where: { year_month: prevYearMonth(year, month) } })
+        : null;
+      if (carryForward && !prevPeriod?.isClosed) {
+        throw new CarryForwardError("Close the previous calendar month before carrying its balances forward.");
+      }
+
       const period = await tx.period.create({ data: { year, month, label } });
-
-      const prev = prevYearMonth(year, month);
-      const prevPeriod = await tx.period.findUnique({
-        where: { year_month: { year: prev.year, month: prev.month } },
-      });
       if (!prevPeriod) return { period, carried: false };
-
-      await carryForwardTx(tx, prevPeriod.id, period.id);
+      await carryForwardTx(tx, prevPeriod.id, period.id, `${prevPeriod.year}-${prevPeriod.month}`);
       return { period, carried: true };
     },
-    { timeout: 60000 }
+    { isolationLevel: "Serializable", timeout: 60_000 }
   );
 
   return result;
 }
 
+export class CarryForwardError extends Error {}
+
 async function carryForwardTx(
   tx: Prisma.TransactionClient,
   fromPeriodId: string,
-  toPeriodId: string
+  toPeriodId: string,
+  sourceMonth: string,
 ) {
   // --- Receivables (open balances only) ---
   try {
@@ -216,8 +221,9 @@ async function carryForwardTx(
       }
 
       // Did previous month's payroll already recover this installment?
-      let alreadyApplied = false;
-      if (loan.employeeId) {
+      const marker = `[Carry-forward installment ${sourceMonth}]`;
+      let alreadyApplied = loan.notes?.includes(marker) ?? false;
+      if (!alreadyApplied && loan.employeeId) {
         const prevPay = await tx.payrollEntry.findFirst({
           where: {
             periodId: fromPeriodId,
@@ -255,6 +261,7 @@ async function carryForwardTx(
         data: {
           remainingAmount: remaining,
           monthlyInstallment: nextInstallment,
+          notes: alreadyApplied ? undefined : [loan.notes, marker].filter(Boolean).join("\n"),
         },
       });
     }

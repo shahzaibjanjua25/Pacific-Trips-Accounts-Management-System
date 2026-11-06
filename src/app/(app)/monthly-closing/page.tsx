@@ -1,5 +1,6 @@
+import { NoAccountingMonth } from "@/components/NoAccountingMonth";
 import { prisma } from "@/lib/prisma";
-import { getOrCreatePeriod, listPeriods } from "@/lib/period";
+import { canCloseMonth, resolveActivePeriod } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { getDashboardData } from "@/lib/dashboard";
 import { formatPKR } from "@/lib/utils";
@@ -11,7 +12,6 @@ import {
   CheckCircle2,
   XCircle,
   ArrowRight,
-  Download,
   Lock,
   Unlock,
 } from "lucide-react";
@@ -22,15 +22,9 @@ export default async function MonthlyClosingPage({
   searchParams: Promise<{ period?: string }>;
 }) {
   const params = await searchParams;
-  let periods = await listPeriods();
-  let periodId = params.period;
-  if (!periodId || periods.length === 0) {
-    const now = new Date();
-    const c = await getOrCreatePeriod(now.getFullYear(), now.getMonth() + 1);
-    periodId = c.id;
-    periods = await listPeriods();
-  }
-  const current = periods.find((p) => p.id === periodId) ?? periods[0];
+  const { periods, current } = await resolveActivePeriod(params.period);
+  if (!current) return <NoAccountingMonth />;
+  const monthLink = (path: string) => path + "?period=" + encodeURIComponent(current.id);
   const dash = await getDashboardData(current.id);
   const d = dash.current;
   const trends = dash.trends;
@@ -44,7 +38,7 @@ export default async function MonthlyClosingPage({
     const bsLines = await prisma.balanceSheetLine.findMany({
       where: { periodId: current.id },
     });
-    bsReady = true;
+    bsReady = bsLines.length > 0;
     bsAssets = bsLines
       .filter((r) => r.section === "Asset")
       .reduce((s, r) => s + r.amount, 0);
@@ -58,7 +52,7 @@ export default async function MonthlyClosingPage({
     bsReady = false;
   }
 
-  const balanced = Math.abs(bsAssets - (bsLiab + bsEquity)) < 0.5;
+  const balanced = bsReady && Math.abs(bsAssets - (bsLiab + bsEquity)) < 0.5;
 
   // Month-close checklist
   const checks = [
@@ -66,31 +60,31 @@ export default async function MonthlyClosingPage({
       label: "All payroll marked paid",
       ok: d.payables.salaryPayable <= 0,
       detail: d.payables.salaryPayable > 0 ? `${formatPKR(d.payables.salaryPayable)} outstanding` : "All clear",
-      href: "/payroll",
+      href: monthLink("/payroll"),
     },
     {
       label: "No overdue supplier bills",
       ok: d.payables.overdue <= 0,
       detail: d.payables.overdue > 0 ? `${formatPKR(d.payables.overdue)} overdue` : "All clear",
-      href: "/payables",
+      href: monthLink("/payables"),
     },
     {
       label: "No overdue client receivables",
       ok: d.receivables.overdue <= 0,
       detail: d.receivables.overdue > 0 ? `${formatPKR(d.receivables.overdue)} overdue` : "All clear",
-      href: "/receivables",
+      href: monthLink("/receivables"),
     },
     {
       label: "No pending refunds",
       ok: d.payables.refundsPending <= 0,
       detail: d.payables.refundsPending > 0 ? `${formatPKR(d.payables.refundsPending)} pending` : "All clear",
-      href: "/refunds",
+      href: monthLink("/refunds"),
     },
     {
       label: "Balance sheet is balanced",
       ok: balanced,
       detail: bsReady ? (balanced ? "Assets = Liab + Equity" : "Out of balance") : "Not set up yet",
-      href: "/balance-sheet",
+      href: monthLink("/balance-sheet"),
     },
   ];
   const checksPassed = checks.filter((c) => c.ok).length;
@@ -123,7 +117,7 @@ export default async function MonthlyClosingPage({
   return (
     <div className="space-y-6 max-w-7xl">
       {/* ═══ HEADER ═══ */}
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+      <div className="flex flex-col gap-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:flex-row xl:items-start xl:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Monthly Closing · Pacific Trips
@@ -138,7 +132,8 @@ export default async function MonthlyClosingPage({
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-          <PeriodSelector periods={periods} currentId={current.id} />
+          <PeriodSelector periods={periods} currentId={current.id}
+            allowClose closeAvailable={canCloseMonth(current.year, current.month)} />
           <div
             className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium ${current.isClosed
                 ? "bg-slate-800 text-white"
@@ -256,7 +251,7 @@ export default async function MonthlyClosingPage({
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
               Cash Movement
             </h2>
-            <Link href="/bank" className="text-xs text-sky-700 hover:underline">
+            <Link href={monthLink("/bank")} className="text-xs text-sky-700 hover:underline">
               Open Bank →
             </Link>
           </div>

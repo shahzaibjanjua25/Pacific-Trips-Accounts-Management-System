@@ -1,7 +1,8 @@
+import { NoAccountingMonth } from "@/components/NoAccountingMonth";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getOrCreatePeriod, listPeriods } from "@/lib/period";
+import { resolveActivePeriod } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { formatPKR } from "@/lib/utils";
 import { ArrowLeft, Phone, Mail, User } from "lucide-react";
@@ -20,15 +21,8 @@ export default async function ClientDetailPage({
   const client = await prisma.client.findUnique({ where: { id } });
   if (!client) notFound();
 
-  let periods = await listPeriods();
-  let periodId = sp.period;
-  if (!periodId || periods.length === 0) {
-    const now = new Date();
-    const c = await getOrCreatePeriod(now.getFullYear(), now.getMonth() + 1);
-    periodId = c.id;
-    periods = await listPeriods();
-  }
-  const current = periods.find((p) => p.id === periodId) ?? periods[0];
+  const { periods, current } = await resolveActivePeriod(sp.period);
+  if (!current) return <NoAccountingMonth />;
 
   const [ledgerRows, receivables] = await Promise.all([
     prisma.clientLedger.findMany({

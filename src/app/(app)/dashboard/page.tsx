@@ -1,4 +1,5 @@
-import { getOrCreatePeriod, listPeriods } from "@/lib/period";
+import { NoAccountingMonth } from "@/components/NoAccountingMonth";
+import { resolveActivePeriod } from "@/lib/period";
 import { getDashboardData, trendSeries } from "@/lib/dashboard";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { formatPKR } from "@/lib/utils";
@@ -11,7 +12,6 @@ import {
   TrendingUp,
   TrendingDown,
   AlertTriangle,
-  CheckCircle2,
   ArrowRight,
   Banknote,
   Plane,
@@ -19,6 +19,8 @@ import {
   Briefcase,
   Receipt,
   Sparkles,
+  ArrowLeftRight,
+  CalendarCheck,
 } from "lucide-react";
 
 export default async function DashboardPage({
@@ -27,17 +29,9 @@ export default async function DashboardPage({
   searchParams: Promise<{ period?: string }>;
 }) {
   const params = await searchParams;
-  let periods = await listPeriods();
-  let periodId = params.period;
-
-  if (!periodId || periods.length === 0) {
-    const now = new Date();
-    const current = await getOrCreatePeriod(now.getFullYear(), now.getMonth() + 1);
-    periodId = current.id;
-    periods = await listPeriods();
-  }
-
-  const currentPeriod = periods.find((p) => p.id === periodId) ?? periods[0];
+  const { periods, current: currentPeriod } = await resolveActivePeriod(params.period);
+  if (!currentPeriod) return <NoAccountingMonth />;
+  const monthLink = (path: string) => path + "?period=" + encodeURIComponent(currentPeriod.id);
   const dash = await getDashboardData(currentPeriod.id);
   const d = dash.current;
   const trends = dash.trends;
@@ -53,7 +47,7 @@ export default async function DashboardPage({
   const grossMargin = d.profitability.grossMarginPct;
 
   // ── Trend series ──────────────────────────────────────────────────────
-  const cashSeries = trendSeries(moneyInBanks, trends, (t) => t.cash.totalAvailable);
+  const cashSeries = trendSeries(freeCash, trends, (t) => t.cash.freeCash);
   const profitSeries = trendSeries(profit, trends, (t) => t.profitability.netProfit);
   const owedSeries = trendSeries(clientsOweUs, trends, (t) => t.receivables.clientOutstanding);
   const oweSeries = trendSeries(weOweOthers, trends, (t) => t.payables.totalWeOwe);
@@ -92,7 +86,7 @@ export default async function DashboardPage({
       icon: <AlertTriangle size={18} />,
       title: `${formatPKR(d.receivables.overdue)} is overdue from clients`,
       body: "Follow up on overdue receivables to keep cash flowing.",
-      href: "/receivables",
+      href: monthLink("/receivables"),
       cta: "View receivables",
     });
   }
@@ -102,7 +96,7 @@ export default async function DashboardPage({
       icon: <AlertTriangle size={18} />,
       title: `${formatPKR(d.payables.overdue)} of supplier bills are overdue`,
       body: "Settle overdue hotels and transport to avoid disruption.",
-      href: "/payables",
+      href: monthLink("/payables"),
       cta: "View payables",
     });
   }
@@ -112,7 +106,7 @@ export default async function DashboardPage({
       icon: <Receipt size={18} />,
       title: `${formatPKR(d.payables.refundsPending)} in refunds pending`,
       body: "Clients are waiting on refunds. Keep them satisfied.",
-      href: "/refunds",
+      href: monthLink("/refunds"),
       cta: "View refunds",
     });
   }
@@ -122,7 +116,7 @@ export default async function DashboardPage({
       icon: <Users size={18} />,
       title: `${formatPKR(d.payables.salaryPayable)} in salaries unpaid`,
       body: "Mark payroll as paid once disbursed to keep reports clean.",
-      href: "/payroll",
+      href: monthLink("/payroll"),
       cta: "View payroll",
     });
   }
@@ -132,7 +126,7 @@ export default async function DashboardPage({
       icon: <TrendingDown size={18} />,
       title: `This month is in loss (${formatPKR(profit)})`,
       body: "Revenue is below direct + operating costs. Review pricing and expenses.",
-      href: "/monthly-closing",
+      href: monthLink("/monthly-closing"),
       cta: "See month review",
     });
   }
@@ -178,31 +172,42 @@ export default async function DashboardPage({
   }
 
   return (
-    <div className="space-y-8 max-w-7xl">
-      {/* ═══ HEADER ═══ */}
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Pacific Trips · {currentPeriod.label} · All figures in PKR
-          </p>
-          <h1 className="text-3xl font-bold text-slate-900 mt-1">
-            Command Center
-          </h1>
-          <p className="text-sm text-slate-600 mt-1 max-w-2xl">
-            The single page you check every morning. Live snapshot of cash,
-            profit, obligations, and what needs your attention right now.
-          </p>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <section className="relative isolate overflow-hidden rounded-3xl bg-[#13233b] px-6 py-8 text-white shadow-sm sm:px-9 sm:py-10">
+        <div aria-hidden className="pointer-events-none absolute -right-16 -top-32 -z-10 h-96 w-96 rounded-full bg-teal-400/20 blur-3xl" />
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200">Pacific Trips · Finance workspace</p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-5xl">Financial overview</h1>
+            <p className="mt-3 max-w-lg text-sm leading-6 text-slate-300">
+              Review cash, profit and outstanding balances for the selected accounting month.
+            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-2 text-xs font-medium">
+              <span className="rounded-full bg-white/10 px-3 py-1.5 text-white">{currentPeriod.label}</span>
+              <span className="rounded-full bg-teal-300/15 px-3 py-1.5 text-teal-100">{currentPeriod.isClosed ? "Closed" : "Open"}</span>
+              <span className="rounded-full bg-white/10 px-3 py-1.5 text-slate-200">PKR</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href={monthLink("/transactions")} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-200 px-4 text-sm font-semibold text-slate-950 hover:bg-teal-100">
+              <ArrowLeftRight size={16} aria-hidden /> Transactions
+            </Link>
+            <Link href={monthLink("/monthly-closing")} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/25 px-4 text-sm font-semibold text-white hover:bg-white/10">
+              <CalendarCheck size={16} aria-hidden /> Month review
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-          <PeriodSelector periods={periods} currentId={currentPeriod.id} allowCreate />
-          <ExportMonthButton periodId={currentPeriod.id} periodLabel={currentPeriod.label} />
-        </div>
-      </div>
+      </section>
+
+      <section aria-label="Month management" className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+        <PeriodSelector key={currentPeriod.id} periods={periods} currentId={currentPeriod.id} allowCreate />
+        <div className="shrink-0"><ExportMonthButton periodId={currentPeriod.id} periodLabel={currentPeriod.label} /></div>
+      </section>
 
       {/* ═══ HERO BAND ═══ */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {/* Health ring */}
-        <div className="lg:col-span-1 bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white flex items-center gap-4 shadow-lg">
+        <div className="lg:col-span-1 bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white flex items-center gap-4 shadow-sm">
           <div className="relative w-24 h-24 shrink-0">
             <svg viewBox="0 0 100 100" className="w-24 h-24 -rotate-90">
               <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
@@ -239,7 +244,7 @@ export default async function DashboardPage({
           icon={<Banknote size={20} />}
           trend={trendArrow(cashSeries)}
           subtitle="After near-term commitments"
-          href="/bank"
+          href={monthLink("/bank")}
         />
         <HeroStat
           label="Net Profit"
@@ -248,7 +253,7 @@ export default async function DashboardPage({
           icon={<TrendingUp size={20} />}
           trend={trendArrow(profitSeries)}
           subtitle={`${margin.toFixed(1)}% margin`}
-          href="/monthly-closing"
+          href={monthLink("/monthly-closing")}
         />
         <HeroStat
           label="Net Position"
@@ -259,7 +264,7 @@ export default async function DashboardPage({
             trendSeries(netPosition, trends, (t) => t.ratios.netPosition)
           )}
           subtitle="Cash + owed − we owe"
-          href="/balance-sheet"
+          href={monthLink("/balance-sheet")}
         />
       </div>
 
@@ -334,7 +339,7 @@ export default async function DashboardPage({
             title="Cash & Banks"
             icon={<Wallet size={18} />}
             color="emerald"
-            href="/bank"
+            href={monthLink("/bank")}
             stats={[
               { label: "In banks", value: moneyInBanks },
               { label: "Expected 7d", value: d.cash.expectedCollections7d },
@@ -348,7 +353,7 @@ export default async function DashboardPage({
             title="Receivables"
             icon={<Users size={18} />}
             color="sky"
-            href="/receivables"
+            href={monthLink("/receivables")}
             stats={[
               { label: "Open clients", value: d.receivables.openClients, count: true },
               { label: "Outstanding", value: clientsOweUs },
@@ -362,7 +367,7 @@ export default async function DashboardPage({
             title="Payables"
             icon={<CreditCard size={18} />}
             color="amber"
-            href="/payables"
+            href={monthLink("/payables")}
             stats={[
               { label: "Suppliers", value: d.payables.supplierRemaining },
               { label: "Salaries", value: d.payables.salaryPayable },
@@ -376,7 +381,7 @@ export default async function DashboardPage({
             title="Profit & Margin"
             icon={<TrendingUp size={18} />}
             color="violet"
-            href="/monthly-closing"
+            href={monthLink("/monthly-closing")}
             stats={[
               { label: "Revenue", value: d.profitability.revenue },
               { label: "Direct costs", value: d.profitability.directCosts },
@@ -416,7 +421,7 @@ export default async function DashboardPage({
         <CompactTable
           title="Top clients owing us"
           icon={<Users size={16} />}
-          href="/receivables"
+          href={monthLink("/receivables")}
           headers={["Client", "Owed", "Overdue"]}
           rows={topClients.map((c) => ({
             key: c.id,
@@ -435,7 +440,7 @@ export default async function DashboardPage({
         <CompactTable
           title="Top suppliers we owe"
           icon={<CreditCard size={16} />}
-          href="/payables"
+          href={monthLink("/payables")}
           headers={["Supplier", "Owed", "Overdue"]}
           rows={topPayables.map((p) => ({
             key: p.id,
@@ -454,7 +459,7 @@ export default async function DashboardPage({
         <CompactTable
           title="Top sales reps"
           icon={<Briefcase size={16} />}
-          href="/sales-team"
+          href={monthLink("/sales-team")}
           headers={["Salesperson", "Revenue"]}
           rows={topReps.map(([name, amt]) => ({
             key: name,
@@ -470,7 +475,7 @@ export default async function DashboardPage({
           title="Hotels"
           icon={<Building2 size={16} />}
           color="emerald"
-          href="/hotels"
+          href={monthLink("/hotels")}
           rows={[
             ["Total cost", d.operations.hotelsTotalCost],
             ["Still unpaid", d.operations.hotelsRemaining],
@@ -480,7 +485,7 @@ export default async function DashboardPage({
           title="Transport"
           icon={<Plane size={16} />}
           color="sky"
-          href="/transport"
+          href={monthLink("/transport")}
           rows={[
             ["Agreed", d.operations.transportAgreed],
             ["Paid", d.operations.transportSettlement],
@@ -491,7 +496,7 @@ export default async function DashboardPage({
           title="Running costs"
           icon={<Receipt size={16} />}
           color="slate"
-          href="/expenses"
+          href={monthLink("/expenses")}
           rows={[
             ["Office", d.monthlyExpenses.office],
             ["Marketing", d.monthlyExpenses.marketing],
@@ -509,9 +514,9 @@ export default async function DashboardPage({
           · Balance check <strong className="text-slate-800">{formatPKR(d.activity.balanceCheck)}</strong>
         </span>
         <div className="flex flex-wrap gap-2">
-          <FooterLink href="/transactions" label="Add transaction" />
-          <FooterLink href="/balance-sheet" label="Balance Sheet" />
-          <FooterLink href="/monthly-closing" label="Month Review" />
+          <FooterLink href={monthLink("/transactions")} label="Add transaction" />
+          <FooterLink href={monthLink("/balance-sheet")} label="Balance Sheet" />
+          <FooterLink href={monthLink("/monthly-closing")} label="Month Review" />
         </div>
       </section>
     </div>

@@ -1,5 +1,6 @@
+import { NoAccountingMonth } from "@/components/NoAccountingMonth";
 import { prisma } from "@/lib/prisma";
-import { getOrCreatePeriod, listPeriods } from "@/lib/period";
+import { resolveActivePeriod } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { TransactionManager } from "./TransactionForm";
 
@@ -9,17 +10,8 @@ export default async function TransactionsPage({
   searchParams: Promise<{ period?: string }>;
 }) {
   const params = await searchParams;
-  let periods = await listPeriods();
-  let periodId = params.period;
-
-  if (!periodId || periods.length === 0) {
-    const now = new Date();
-    const current = await getOrCreatePeriod(now.getFullYear(), now.getMonth() + 1);
-    periodId = current.id;
-    periods = await listPeriods();
-  }
-
-  const currentPeriod = periods.find((p) => p.id === periodId) ?? periods[0];
+  const { periods, current: currentPeriod } = await resolveActivePeriod(params.period);
+  if (!currentPeriod) return <NoAccountingMonth />;
   const txns = await prisma.transaction.findMany({
     where: { periodId: currentPeriod.id },
     orderBy: { date: "desc" },

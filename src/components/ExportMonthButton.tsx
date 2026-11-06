@@ -3,45 +3,54 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 
-export function ExportMonthButton({
-  periodId,
-  periodLabel,
-}: {
-  periodId: string;
-  periodLabel: string;
-}) {
+export async function downloadMonthZip(periodId: string, periodLabel: string, forDeletion = false) {
+  const query = new URLSearchParams({ periodId });
+  if (forDeletion) query.set("forDeletion", "1");
+  const res = await fetch("/api/export?" + query.toString());
+  if (!res.ok) {
+    const error = await res.json().catch(() => null);
+    throw new Error(error?.error || "Could not prepare the ZIP.");
+  }
+  const blob = await res.blob();
+  if (!blob.size || !res.headers.get("Content-Type")?.includes("application/zip")) {
+    throw new Error("The server did not return a valid ZIP.");
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const label = periodLabel.replace(/\s+/g, "_");
+  link.download = "Pacific_Trips_" + label + (forDeletion ? "_Backup.zip" : "_Export.zip");
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return res.headers.get("X-Month-Backup-Proof");
+}
+
+export function ExportMonthButton({ periodId, periodLabel }: { periodId: string; periodLabel: string }) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function download() {
     setLoading(true);
+    setError("");
     try {
-      const res = await fetch(`/api/export?periodId=${periodId}`);
-      if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Pacific_Trips_${periodLabel.replace(/\s+/g, "_")}_Export.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Export failed: " + e);
+      await downloadMonthZip(periodId, periodLabel);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Export failed.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <button
-      type="button"
-      onClick={download}
-      disabled={loading}
-      className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
-    >
-      <Download size={16} />
-      {loading ? "Preparing ZIP…" : `Download 3 Excel files (${periodLabel})`}
-    </button>
+    <div className="space-y-2">
+      <button type="button" onClick={download} disabled={loading}
+        className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:border-teal-400 hover:text-teal-800 disabled:opacity-50">
+        <Download size={16} aria-hidden />
+        {loading ? "Preparing ZIP…" : "Export Excel ZIP"}
+      </button>
+      {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
+    </div>
   );
 }

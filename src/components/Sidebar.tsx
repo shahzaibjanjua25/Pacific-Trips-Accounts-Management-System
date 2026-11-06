@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -51,41 +51,27 @@ const nav = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { begin, end } = useLoading(); // ⭐ Bring in the loading controls
+  const { run } = useLoading();
+  const selectedPeriod = useSearchParams().get("period");
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState(false);
 
   async function logout() {
     setSigningOut(true);
-    begin("Signing out...");
+    setLogoutError(false);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      router.push("/login");
-      router.refresh();
+      await run("Signing out…", async () => {
+        const response = await fetch("/api/auth/logout", { method: "POST" });
+        if (!response.ok) throw new Error("Sign out failed.");
+        router.replace("/login");
+        router.refresh();
+      });
+    } catch {
+      setLogoutError(true);
     } finally {
       setSigningOut(false);
-      end(); // hide overlay if redirect fails
     }
-  }
-
-  // ⭐ Handle navigation clicks
-  function handleNavClick(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
-    // Don't show loading if clicking the page they are already on
-    if (pathname === href) {
-      setOpen(false);
-      return;
-    }
-    
-    // Show the global overlay
-    begin("Loading page...");
-    
-    // Close mobile menu
-    setOpen(false);
-
-    // Next.js will handle the route change. 
-    // The overlay will stay up until the page finishes rendering.
-    // (We rely on the LoadingProvider's router events to clear it, 
-    // or it will naturally disappear when the new page hydrates).
   }
 
   return (
@@ -94,13 +80,17 @@ export function Sidebar() {
         className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-md bg-slate-800 text-white"
         onClick={() => setOpen(!open)}
         aria-label="Toggle menu"
+        aria-expanded={open}
+        aria-controls="workspace-sidebar"
       >
         {open ? <X size={20} /> : <Menu size={20} />}
       </button>
 
+      {open && <button type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" />}
       <aside
+        id="workspace-sidebar"
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-100 flex flex-col transition-transform duration-200",
+          "fixed inset-y-0 left-0 z-40 w-64 bg-[#101b2e] text-slate-100 flex flex-col transition-transform duration-200",
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
@@ -108,7 +98,7 @@ export function Sidebar() {
           <div className="w-12 h-12 rounded-full bg-white overflow-hidden shrink-0 flex items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="logo.jpg"
+              src="/logo.jpg"
               alt="Pacific Trips"
               className="w-full h-full object-contain p-1"
             />
@@ -131,13 +121,14 @@ export function Sidebar() {
             return (
               <Link
                 key={item.href}
-                href={item.href}
-                onClick={(e) => handleNavClick(e, item.href)} // ⭐ Trigger loading on click
+                href={selectedPeriod ? { pathname: item.href, query: { period: selectedPeriod } } : item.href}
+                onNavigate={() => setOpen(false)}
+                aria-current={pathname === item.href ? "page" : undefined}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
                   active
-                    ? "bg-emerald-600/20 text-emerald-400 font-medium"
-                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    ? "bg-emerald-400/15 text-emerald-200 font-medium"
+                    : "text-slate-300 hover:bg-white/10 hover:text-white"
                 )}
               >
                 <Icon size={16} className="shrink-0" />
@@ -147,6 +138,7 @@ export function Sidebar() {
           })}
         </nav>
 
+        {logoutError && <p role="alert" className="px-4 pb-2 text-xs text-red-300">Sign out failed. Try again.</p>}
         <button
           type="button"
           onClick={logout}

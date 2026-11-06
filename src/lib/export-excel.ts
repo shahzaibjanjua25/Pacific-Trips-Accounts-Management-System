@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import ExcelJS from "exceljs";
 import { prisma } from "./prisma";
 
@@ -91,8 +92,8 @@ function addSheet(
   return ws;
 }
 
-export async function buildAccountingWorkbook(periodId: string) {
-  const period = await prisma.period.findUnique({ where: { id: periodId } });
+export async function buildAccountingWorkbook(periodId: string, db: Prisma.TransactionClient = prisma) {
+  const period = await db.period.findUnique({ where: { id: periodId } });
   if (!period) throw new Error("Period not found");
 
   const [
@@ -130,55 +131,55 @@ export async function buildAccountingWorkbook(periodId: string) {
     cashFlowSnapshots,
     companySettings,
   ] = await Promise.all([
-    prisma.period.findMany({ orderBy: [{ year: "desc" }, { month: "desc" }] }),
-    prisma.transaction.findMany({ where: { periodId }, orderBy: { date: "asc" } }),
-    prisma.transactionLink.findMany({
+    db.period.findMany({ orderBy: [{ year: "desc" }, { month: "desc" }] }),
+    db.transaction.findMany({ where: { periodId }, orderBy: { date: "asc" } }),
+    db.transactionLink.findMany({
       where: { periodId },
       orderBy: { createdAt: "desc" },
     }),
-    prisma.client.findMany({ orderBy: { name: "asc" } }),
-    prisma.clientLedger.findMany({ orderBy: { tourDate: "asc" } }),
-    prisma.receivable.findMany({ where: { periodId } }),
-    prisma.trip.findMany({ where: { periodId } }),
-    prisma.payable.findMany({ where: { periodId } }),
-    prisma.hotelBooking.findMany({
+    db.client.findMany({ orderBy: { name: "asc" } }),
+    db.clientLedger.findMany({ orderBy: { tourDate: "asc" } }),
+    db.receivable.findMany({ where: { periodId } }),
+    db.trip.findMany({ where: { periodId } }),
+    db.payable.findMany({ where: { periodId } }),
+    db.hotelBooking.findMany({
       where: { periodId },
       include: { payable: true },
     }),
-    prisma.transportJob.findMany({
+    db.transportJob.findMany({
       where: { periodId },
       include: { payable: true },
     }),
-    prisma.ticketing.findMany({ where: { periodId } }),
-    prisma.supplierAdvance.findMany({ where: { periodId } }),
-    prisma.refund.findMany({ where: { periodId } }),
-    prisma.employee.findMany({ orderBy: { name: "asc" } }),
-    prisma.employeeLoan.findMany({ orderBy: { createdAt: "desc" } }),
-    prisma.payrollEntry.findMany({ where: { periodId } }),
-    prisma.commission.findMany({ where: { periodId } }),
-    prisma.officeExpense.findMany({ where: { periodId } }),
-    prisma.marketingExpense.findMany({ where: { periodId } }),
-    prisma.pettyCashTxn.findMany({ where: { periodId } }),
-    prisma.bankBalance.findMany(),
-    prisma.bankAccount.findMany().catch(() => []),
-    prisma.bankTxn
+    db.ticketing.findMany({ where: { periodId } }),
+    db.supplierAdvance.findMany({ where: { periodId } }),
+    db.refund.findMany({ where: { periodId } }),
+    db.employee.findMany({ orderBy: { name: "asc" } }),
+    db.employeeLoan.findMany({ orderBy: { createdAt: "desc" } }),
+    db.payrollEntry.findMany({ where: { periodId } }),
+    db.commission.findMany({ where: { periodId } }),
+    db.officeExpense.findMany({ where: { periodId } }),
+    db.marketingExpense.findMany({ where: { periodId } }),
+    db.pettyCashTxn.findMany({ where: { periodId } }),
+    db.bankBalance.findMany(),
+    db.bankAccount.findMany().catch(() => []),
+    db.bankTxn
       .findMany({ where: { periodId }, orderBy: { date: "asc" } })
       .catch(() => []),
-    prisma.asset.findMany(),
-    prisma.liability.findMany({ where: { periodId } }),
-    prisma.ownerTxn.findMany({ where: { periodId } }),
-    prisma.vadet.findMany({ where: { periodId } }),
-    prisma.salesPerformance.findMany({ where: { periodId } }),
-    prisma.salesTarget.findUnique({ where: { periodId } }),
-    prisma.balanceSheetLine
+    db.asset.findMany(),
+    db.liability.findMany({ where: { periodId } }),
+    db.ownerTxn.findMany({ where: { periodId } }),
+    db.vadet.findMany({ where: { periodId } }),
+    db.salesPerformance.findMany({ where: { periodId } }),
+    db.salesTarget.findUnique({ where: { periodId } }),
+    db.balanceSheetLine
       .findMany({
         where: { periodId },
         orderBy: [{ section: "asc" }, { sortOrder: "asc" }],
       })
       .catch(() => []),
-    prisma.monthlyClosing.findMany({ where: { periodId } }).catch(() => []),
-    prisma.cashFlowSnapshot.findMany({ where: { periodId } }).catch(() => []),
-    prisma.companySettings.findFirst().catch(() => null),
+    db.monthlyClosing.findMany({ where: { periodId } }).catch(() => []),
+    db.cashFlowSnapshot.findMany({ where: { periodId } }).catch(() => []),
+    db.companySettings.findFirst().catch(() => null),
   ]);
 
   const wb = new ExcelJS.Workbook();
@@ -1244,15 +1245,15 @@ export async function buildAccountingWorkbook(periodId: string) {
   return wb;
 }
 
-export async function buildClientDataWorkbook(periodId: string) {
-  const period = await prisma.period.findUnique({ where: { id: periodId } });
+export async function buildClientDataWorkbook(periodId: string, db: Prisma.TransactionClient = prisma) {
+  const period = await db.period.findUnique({ where: { id: periodId } });
   if (!period) throw new Error("Period not found");
 
-  const clients = await prisma.client.findMany({ orderBy: { name: "asc" } });
-  const ledgers = await prisma.clientLedger.findMany({
+  const clients = await db.client.findMany({ orderBy: { name: "asc" } });
+  const ledgers = await db.clientLedger.findMany({
     orderBy: { tourDate: "asc" },
   });
-  const receivables = await prisma.receivable.findMany({ where: { periodId } });
+  const receivables = await db.receivable.findMany({ where: { periodId } });
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Pacific Trips";
@@ -1360,19 +1361,19 @@ export async function buildClientDataWorkbook(periodId: string) {
   return wb;
 }
 
-export async function buildSalesTeamWorkbook(periodId: string) {
-  const period = await prisma.period.findUnique({ where: { id: periodId } });
+export async function buildSalesTeamWorkbook(periodId: string, db: Prisma.TransactionClient = prisma) {
+  const period = await db.period.findUnique({ where: { id: periodId } });
   if (!period) throw new Error("Period not found");
 
-  const employees = await prisma.employee.findMany({
+  const employees = await db.employee.findMany({
     where: { role: "Sales", isActive: true },
     orderBy: { name: "asc" },
   });
-  const performance = await prisma.salesPerformance.findMany({
+  const performance = await db.salesPerformance.findMany({
     where: { periodId },
   });
-  const commissions = await prisma.commission.findMany({ where: { periodId } });
-  const payroll = await prisma.payrollEntry.findMany({ where: { periodId } });
+  const commissions = await db.commission.findMany({ where: { periodId } });
+  const payroll = await db.payrollEntry.findMany({ where: { periodId } });
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Pacific Trips";

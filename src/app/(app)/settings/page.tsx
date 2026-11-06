@@ -4,6 +4,7 @@ import { resolveActivePeriod } from "@/lib/period";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { ShieldCheck } from "lucide-react";
 import { EmployeesPanel } from "./EmployeesPanel"; 
+import { NoAccountingMonth } from "@/components/NoAccountingMonth";
 
 export default async function SettingsPage({
   searchParams,
@@ -12,6 +13,7 @@ export default async function SettingsPage({
 }) {
   const params = await searchParams;
   const { periods, current } = await resolveActivePeriod(params.period);
+  if (!current) return <NoAccountingMonth />;
   const employees = await prisma.employee.findMany({
     orderBy: { name: "asc" },
     include: { loans: { orderBy: { createdAt: "desc" }, take: 1 } },

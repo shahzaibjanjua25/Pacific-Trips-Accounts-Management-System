@@ -16,11 +16,11 @@ export default async function AppLayout({
 
   return (
     <LoadingProvider>
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-[#f3f6fa] text-slate-900">
         <LoadingOverlay />
         <Sidebar />
-        <main className="lg:pl-64 min-h-screen">
-          <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
+        <main className="min-h-screen lg:pl-64">
+          <div className="mx-auto max-w-[1600px] px-4 pb-8 pt-20 md:px-6 lg:p-8">
             {children}
           </div>
         </main>
