@@ -2,10 +2,8 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import { COOKIE, signSessionValue, verifySessionValue } from "./auth-edge";
+import { COOKIE, getAuthSecret, signSessionValue, verifySessionValue } from "./auth-edge";
 
-const SECRET =
-  process.env.AUTH_SECRET || "REDACTED";
 const SESSION_DAYS = 14;
 
 /* ── Password ── */
@@ -20,7 +18,7 @@ export function verifyPassword(plain: string, hash: string) {
 /* ── Security answers ── */
 export function hashAnswer(answer: string) {
   return createHash("sha256")
-    .update(answer.trim().toLowerCase() + SECRET)
+    .update(answer.trim().toLowerCase() + getAuthSecret())
     .digest("hex");
 }
 export function verifyAnswer(answer: string, hash: string) {
@@ -75,7 +73,8 @@ export async function ensureDefaultUser() {
   if (count > 0) return;
 
   const username = process.env.DEFAULT_ADMIN_USERNAME || "admin";
-  const password = process.env.DEFAULT_ADMIN_PASSWORD || "REDACTED";
+  const password = process.env.DEFAULT_ADMIN_PASSWORD;
+  if (!password) throw new Error("DEFAULT_ADMIN_PASSWORD is required to create the first user");
 
   await prisma.user.create({
     data: {
@@ -88,7 +87,4 @@ export async function ensureDefaultUser() {
     },
   });
 
-  console.log(
-    `\n🔐 Default admin created\n   username: ${username}\n   password: ${password}\n   ⚠️  Change this after first login via /settings/security\n`
-  );
 }

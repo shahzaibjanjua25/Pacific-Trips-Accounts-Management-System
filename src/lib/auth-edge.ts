@@ -1,8 +1,11 @@
 // src/lib/auth-edge.ts
 // Edge-safe session helpers — Web Crypto (HMAC-SHA256). Works on Node + Edge.
 
-const SECRET =
-  process.env.AUTH_SECRET || "REDACTED";
+export function getAuthSecret(): string {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) throw new Error("AUTH_SECRET is required");
+  return secret;
+}
 
 export const COOKIE = "pt_session";
 
@@ -10,7 +13,7 @@ async function hmacHex(message: string): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
-    enc.encode(SECRET),
+    enc.encode(getAuthSecret()),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
