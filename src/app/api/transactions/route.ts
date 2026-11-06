@@ -1,7 +1,11 @@
+import type { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
   postTransaction,
+  runTransactionMutation,
+  StaleTransactionError,
+  isCompletedStatus,
   deleteTransaction,
   updateTransaction,
 } from "@/lib/transaction-service";
@@ -34,53 +38,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const cat = (body.category || "").toLowerCase();
-    const party = body.party || body.subCategory || "";
-    const debit = Number(body.debit) || 0;
-    const credit = Number(body.credit) || 0;
+    const debit = parseAmount(body.debit) ?? 0;
+    const credit = parseAmount(body.credit) ?? 0;
     const isNewClient = !!body.isNewClient;
 
-    const isClientReceipt =
-      cat.includes("receipt") ||
-      cat.includes("revenue") ||
-      cat.includes("client receipt");
-    const isEmployeeLoan =
-      cat.includes("employee loan") || cat.includes("staff advance");
-    const skipCeiling =
-      isDrawingCategory(cat) || isAssetCategory(cat);
-
-    const amountMoving = isClientReceipt
-      ? debit
-      : isEmployeeLoan
-        ? debit
-        : credit;
-
-    // Server-side overpayment guard (skip for drawing/asset — no ceiling)
-    if (
-      party &&
-      amountMoving > 0 &&
-      body.periodId &&
-      !isNewClient &&
-      !skipCeiling &&
-      !(isEmployeeLoan && credit > 0 && debit <= 0)
-    ) {
-      const outstanding = await lookupOutstanding(body.periodId, cat, party, {
-        hotelAgreedCost: Number(body.hotelAgreedCost) || 0,
-        transportAgreedCost: Number(body.transportAgreedCost) || 0,
-      });
-      if (outstanding != null && amountMoving > outstanding) {
-        return NextResponse.json(
-          {
-            error:
-              `Overpayment blocked: ${party} has outstanding ${outstanding}, ` +
-              `but ${amountMoving} was entered.`,
-          },
-          { status: 400 }
-        );
-      }
-    }
-
-    const txn = await postTransaction({
+    const input = {
       periodId: body.periodId,
       date: body.date,
       description: body.description,
@@ -103,10 +65,10 @@ export async function POST(req: NextRequest) {
       relatedTransportId: body.relatedTransportId,
       relatedCommissionId: body.relatedCommissionId,
       relatedAdvanceId: body.relatedAdvanceId,
-      clientTotalPackage: Number(body.clientTotalPackage) || 0,
-      clientAmountPaid: Number(body.clientAmountPaid) || 0,
-      hotelAgreedCost: Number(body.hotelAgreedCost) || 0,
-      transportAgreedCost: Number(body.transportAgreedCost) || 0,
+      clientTotalPackage: parseAmount(body.clientTotalPackage),
+      clientAmountPaid: parseAmount(body.clientAmountPaid),
+      hotelAgreedCost: parseAmount(body.hotelAgreedCost),
+      transportAgreedCost: parseAmount(body.transportAgreedCost),
       clientPhone: body.clientPhone || null,
       clientContact: body.clientContact || null,
       clientEmail: body.clientEmail || null,
@@ -114,11 +76,14 @@ export async function POST(req: NextRequest) {
       isNewClient,
       salesperson: body.salesperson || null,
       assetCategory: body.assetCategory || null,
+    };
+    const txn = await runTransactionMutation(async (db) => {
+      await validateTransaction(input, db);
+      return postTransaction(input, db);
     });
     return NextResponse.json(txn);
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return mutationError(e);
   }
 }
 
@@ -127,58 +92,9 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-    const cat = (body.category || "").toLowerCase();
-    const party = body.party || body.subCategory || "";
-    const debit = Number(body.debit) || 0;
-    const credit = Number(body.credit) || 0;
-
-    const isClientReceipt =
-      cat.includes("receipt") ||
-      cat.includes("revenue") ||
-      cat.includes("client receipt");
-    const isEmployeeLoan =
-      cat.includes("employee loan") || cat.includes("staff advance");
-    const skipCeiling =
-      isDrawingCategory(cat) || isAssetCategory(cat);
-    const amountMoving = isClientReceipt
-      ? debit
-      : isEmployeeLoan
-        ? debit
-        : credit;
-
-    if (
-      party &&
-      amountMoving > 0 &&
-      !body.isNewClient &&
-      !skipCeiling &&
-      !(isEmployeeLoan && credit > 0 && debit <= 0)
-    ) {
-      const existing = await prisma.transaction.findUnique({
-        where: { id: body.id },
-      });
-      if (existing) {
-        const outstanding = await lookupOutstanding(
-          existing.periodId,
-          cat,
-          party,
-          {
-            hotelAgreedCost: Number(body.hotelAgreedCost) || 0,
-            transportAgreedCost: Number(body.transportAgreedCost) || 0,
-          }
-        );
-        if (outstanding != null && amountMoving > outstanding) {
-          return NextResponse.json(
-            {
-              error:
-                `Overpayment blocked: ${party} has outstanding ${outstanding}, ` +
-                `but ${amountMoving} was entered.`,
-            },
-            { status: 400 }
-          );
-        }
-      }
+    if (body.date != null && !Number.isFinite(new Date(body.date).getTime())) {
+      throw new TransactionValidationError("Enter a valid date.");
     }
-
     const txn = await updateTransaction(body.id, {
       date: body.date,
       description: body.description,
@@ -186,26 +102,23 @@ export async function PUT(req: NextRequest) {
       subCategory: body.subCategory,
       party: body.party,
       tripRef: body.tripRef,
-      debit: body.debit != null ? Number(body.debit) : undefined,
-      credit: body.credit != null ? Number(body.credit) : undefined,
+      debit: parseAmount(body.debit),
+      credit: parseAmount(body.credit),
       paymentMethod: body.paymentMethod,
       bankAccount: body.bankAccount,
       status: body.status,
       enteredBy: body.enteredBy,
       notes: body.notes,
-      hotelAgreedCost:
-        body.hotelAgreedCost != null ? Number(body.hotelAgreedCost) : undefined,
-      transportAgreedCost:
-        body.transportAgreedCost != null
-          ? Number(body.transportAgreedCost)
-          : undefined,
+      clientTotalPackage: parseAmount(body.clientTotalPackage),
+      hotelAgreedCost: parseAmount(body.hotelAgreedCost),
+      transportAgreedCost: parseAmount(body.transportAgreedCost),
       salesperson: body.salesperson || null,
       assetCategory: body.assetCategory || null,
-    });
+    }, { expectedUpdatedAt: body.expectedUpdatedAt, validate: validateTransaction });
+    if (!txn) return NextResponse.json({ error: "Transaction no longer exists." }, { status: 404 });
     return NextResponse.json(txn);
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return mutationError(e);
   }
 }
 
@@ -213,11 +126,72 @@ export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id");
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-    await deleteTransaction(id);
+    if (!(await deleteTransaction(id))) {
+      return NextResponse.json({ error: "Transaction no longer exists." }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return mutationError(e);
+  }
+}
+
+class TransactionValidationError extends Error {}
+
+function parseAmount(value: unknown) {
+  if (value == null) return undefined;
+  const amount = typeof value === "number" || typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new TransactionValidationError("Enter a valid, non-negative amount.");
+  }
+  return amount;
+}
+
+function mutationError(error: unknown) {
+  if (error instanceof StaleTransactionError) {
+    return NextResponse.json({ error: "This transaction changed while you were editing. Refresh and reopen it before saving." }, { status: 409 });
+  }
+  if (error instanceof TransactionValidationError ||
+      (error instanceof Error && error.message.startsWith("Overpayment blocked:"))) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+  if (error && typeof error === "object" && "code" in error && error.code === "P2034") {
+    return NextResponse.json({ error: "Another transaction changed these balances. Please try saving again." }, { status: 409 });
+  }
+  console.error(error);
+  return NextResponse.json({ error: "Could not save this change. Your balances were not changed." }, { status: 500 });
+}
+
+async function validateTransaction(
+  input: Parameters<typeof postTransaction>[0],
+  db: Prisma.TransactionClient,
+) {
+  const debit = input.debit ?? 0;
+  const credit = input.credit ?? 0;
+  const category = input.category.toLowerCase();
+  const party = (input.party || input.subCategory || "").trim();
+
+  if (!input.periodId || !input.date || !Number.isFinite(new Date(input.date).getTime()) || !input.description?.trim()) {
+    throw new TransactionValidationError("Enter a valid date and description.");
+  }
+  if ((debit > 0) === (credit > 0)) {
+    throw new TransactionValidationError("Enter a positive amount in either Debit or Credit.");
+  }
+  if (category.includes("bank transfer")) {
+    const from = input.bankAccount?.trim();
+    if (!from || !party || from.toLowerCase() === party.toLowerCase()) {
+      throw new TransactionValidationError("Choose two different accounts for the bank transfer.");
+    }
+    return;
+  }
+  if (!isCompletedStatus(input.status) || !party || input.isNewClient ||
+      isDrawingCategory(category) || isAssetCategory(category)) return;
+  const moving = /receipt|revenue|employee loan|staff advance/.test(category) ? debit : credit;
+  if (!moving) return;
+  const outstanding = await lookupOutstanding(input.periodId, category, party, input, db);
+  if (outstanding != null && moving > outstanding) {
+    throw new TransactionValidationError(
+      `Overpayment blocked: ${party} has ${outstanding.toLocaleString("en-PK")} PKR outstanding. Enter that amount or less.`
+    );
   }
 }
 
@@ -225,7 +199,8 @@ async function lookupOutstanding(
   periodId: string,
   category: string,
   party: string,
-  opts?: { hotelAgreedCost?: number; transportAgreedCost?: number }
+  opts: { clientTotalPackage?: number; hotelAgreedCost?: number; transportAgreedCost?: number },
+  db: Prisma.TransactionClient
 ): Promise<number | null> {
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -256,15 +231,17 @@ async function lookupOutstanding(
     category.includes("revenue") ||
     category.includes("client receipt")
   ) {
-    const rows = await prisma.receivable.findMany({
-      where: { periodId, remainingAmount: { gt: 0 } },
+    const rows = await db.receivable.findMany({
+      where: { periodId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
-    const r = find(rows, "clientName");
-    return r ? r.remainingAmount : 0;
+    const r = find(rows.filter((row) => row.remainingAmount > 0), "clientName") ??
+      find(rows, "clientName");
+    return Math.max(0, Math.max(r?.totalPackage ?? 0, opts.clientTotalPackage ?? 0) - (r?.amountReceived ?? 0));
   }
 
   if (category.includes("salary") || category.includes("payroll")) {
-    const rows = await prisma.payrollEntry.findMany({ where: { periodId } });
+    const rows = await db.payrollEntry.findMany({ where: { periodId } });
     if (rows.length === 0) return null;
     const e = find(rows, "employeeName");
     if (e) return Math.max(0, e.netPayable - (e.amountPaid ?? 0));
@@ -276,7 +253,7 @@ async function lookupOutstanding(
   }
 
   if (category.includes("hotel")) {
-    const rows = await prisma.payable.findMany({
+    const rows = await db.payable.findMany({
       where: { periodId, category: { contains: "Hotel" } },
     });
     const p = find(rows, "supplierName");
@@ -288,7 +265,7 @@ async function lookupOutstanding(
   }
 
   if (category.includes("transport") || category.includes("driver")) {
-    const rows = await prisma.payable.findMany({
+    const rows = await db.payable.findMany({
       where: { periodId, category: { contains: "Transport" } },
     });
     const p = find(rows, "supplierName");
@@ -300,39 +277,31 @@ async function lookupOutstanding(
   }
 
   if (category.includes("supplier") || category.includes("payable")) {
-    const rows = await prisma.payable.findMany({ where: { periodId } });
+    const rows = await db.payable.findMany({ where: { periodId } });
     const p = find(rows, "supplierName");
     return p ? p.remaining : null;
   }
 
   if (category.includes("commission")) {
-    const rows = await prisma.commission.findMany({
+    const rows = await db.commission.findMany({
       where: { periodId, status: "Accrued" },
     });
     const c = find(rows, "employeeName");
     return c ? c.commissionAmt : null;
   }
 
-  if (category.includes("refund")) {
-    const rows = await prisma.refund.findMany({
-      where: { periodId, status: "Pending" },
-    });
-    const r = find(rows, "clientName");
-    return r ? r.amount : null;
-  }
-
   if (category.includes("employee loan") || category.includes("staff advance")) {
-    const emps = await prisma.employee.findMany({ where: { isActive: true } });
+    const emps = await db.employee.findMany({ where: { isActive: true } });
     const emp = find(emps, "name");
     if (!emp) return null;
-    const loan = await prisma.employeeLoan.findFirst({
+    const loan = await db.employeeLoan.findFirst({
       where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
     });
     return loan ? loan.remainingAmount : null;
   }
 
   if (category.includes("advance")) {
-    const rows = await prisma.supplierAdvance.findMany({
+    const rows = await db.supplierAdvance.findMany({
       where: { periodId, remaining: { gt: 0 } },
     });
     const a = find(rows, "supplierName");

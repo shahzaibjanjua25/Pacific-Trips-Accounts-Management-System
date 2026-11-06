@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 /**
  * Links operational modules (HotelBooking, TransportJob) to the financial
  * master (Payable). Payable is the single source of truth for money owed.
@@ -29,9 +30,9 @@ import { prisma } from "./prisma";
  */
 export async function syncPayrollForEmployee(
   periodId: string,
-  employeeName: string
+  employeeName: string, db: Prisma.TransactionClient = prisma
 ): Promise<void> {
-  const emp = await prisma.employee.findFirst({ where: { name: employeeName } });
+  const emp = await db.employee.findFirst({ where: { name: employeeName } });
   if (!emp) return;
 
   const isSales = emp.role === "Sales";
@@ -44,13 +45,13 @@ export async function syncPayrollForEmployee(
         employeeName.toLowerCase().includes("amad") ||
         employeeName.toLowerCase().includes("ammar")));
 
-  const pay = await prisma.payrollEntry.findFirst({
+  const pay = await db.payrollEntry.findFirst({
     where: { periodId, employeeName },
   });
 
   let commissionAmt = 0;
   if (isSales || isLeadRole) {
-    const commission = await prisma.commission.findFirst({
+    const commission = await db.commission.findFirst({
       where: { periodId, employeeName },
     });
     commissionAmt = commission?.commissionAmt ?? 0;
@@ -61,7 +62,7 @@ export async function syncPayrollForEmployee(
   const tax = pay?.taxDeducted ?? 0;
   const other = pay?.otherDeductions ?? 0;
 
-  const loan = await prisma.employeeLoan.findFirst({
+  const loan = await db.employeeLoan.findFirst({
     where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
   });
   // Cap installment at remaining loan so payroll never deducts more than owed
@@ -89,7 +90,7 @@ export async function syncPayrollForEmployee(
         : "Pending";
 
   if (pay) {
-    await prisma.payrollEntry.update({
+    await db.payrollEntry.update({
       where: { id: pay.id },
       data: {
         basicSalary: basic,
@@ -100,7 +101,7 @@ export async function syncPayrollForEmployee(
       },
     });
   } else {
-    await prisma.payrollEntry.create({
+    await db.payrollEntry.create({
       data: {
         periodId,
         employeeId: emp.id,
@@ -203,22 +204,22 @@ export function deriveTransportStatus(remaining: number, paid: number): string {
   return "Pending";
 }
 
-export async function propagatePayableToOperational(payableId: string) {
-  const p = await prisma.payable.findUnique({
+export async function propagatePayableToOperational(payableId: string, db: Prisma.TransactionClient = prisma) {
+  const p = await db.payable.findUnique({
     where: { id: payableId },
     include: { hotelBooking: true, transportJob: true },
   });
   if (!p) return;
 
   if (p.hotelBooking) {
-    await prisma.hotelBooking.update({
+    await db.hotelBooking.update({
       where: { id: p.hotelBooking.id },
       data: { status: deriveHotelStatus(p.remaining, p.amountPaid) },
     });
   }
 
   if (p.transportJob) {
-    await prisma.transportJob.update({
+    await db.transportJob.update({
       where: { id: p.transportJob.id },
       data: { status: deriveTransportStatus(p.remaining, p.amountPaid) },
     });
@@ -240,9 +241,9 @@ export async function createAssetFromTransaction(opts: {
   category: string;
   cost: number;
   notes?: string | null;
-}): Promise<string | null> {
+}, db: Prisma.TransactionClient = prisma): Promise<string | null> {
   if (opts.cost <= 0) return null;
-  const asset = await prisma.asset.create({
+  const asset = await db.asset.create({
     data: {
       periodId: opts.periodId,
       assetName: opts.description || opts.category || "Asset",
@@ -285,8 +286,8 @@ export async function updateAssetFromTransaction(
 }
 
 /** Delete an Asset row that came from a transaction. */
-export async function deleteAssetFromTransaction(assetId: string) {
-  await prisma.asset.delete({ where: { id: assetId } }).catch(() => {});
+export async function deleteAssetFromTransaction(assetId: string, db: Prisma.TransactionClient = prisma) {
+  await db.asset.deleteMany({ where: { id: assetId } });
 }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -341,9 +342,9 @@ async function applyToPayable(
   periodId: string,
   payableId: string,
   amount: number,
-  agreedCost?: number
+  agreedCost?: number, db: Prisma.TransactionClient = prisma
 ): Promise<number> {
-  const p = await prisma.payable.findUnique({ where: { id: payableId } });
+  const p = await db.payable.findUnique({ where: { id: payableId } });
   if (!p) return 0;
 
   let orig = p.originalAmount;
@@ -361,7 +362,7 @@ async function applyToPayable(
   const newPaid = p.amountPaid + pay;
   const newRem = Math.max(0, orig - newPaid);
 
-  await prisma.payable.update({
+  await db.payable.update({
     where: { id: p.id },
     data: {
       originalAmount: orig,
@@ -371,7 +372,7 @@ async function applyToPayable(
     },
   });
 
-  await propagatePayableToOperational(p.id);
+  await propagatePayableToOperational(p.id, db);
   return pay;
 }
 
@@ -379,7 +380,7 @@ export async function applyPaymentToPayables(
   periodId: string,
   partyName: string,
   amount: number,
-  categories?: string[]
+  categories?: string[], db: Prisma.TransactionClient = prisma
 ): Promise<AppliedLink[]> {
   if (!partyName || amount <= 0) return [];
 
@@ -391,7 +392,7 @@ export async function applyPaymentToPayables(
     where.category = { in: categories };
   }
 
-  const list = await prisma.payable.findMany({
+  const list = await db.payable.findMany({
     where,
     orderBy: { createdAt: "asc" },
   });
@@ -402,7 +403,7 @@ export async function applyPaymentToPayables(
   for (const p of list) {
     if (left <= 0) break;
     if (!nameMatch(p.supplierName, partyName)) continue;
-    const applied = await applyToPayable(periodId, p.id, left);
+    const applied = await applyToPayable(periodId, p.id, left, undefined, db);
     if (applied > 0) {
       links.push({ entityType: "payable", entityId: p.id, appliedAmount: applied });
       left -= applied;
@@ -418,11 +419,11 @@ export async function applyPaymentToPayables(
 export async function applyReceiptToReceivables(
   periodId: string,
   clientName: string,
-  amount: number
+  amount: number, db: Prisma.TransactionClient = prisma
 ): Promise<AppliedLink[]> {
   if (!clientName || amount <= 0) return [];
 
-  const list = await prisma.receivable.findMany({
+  const list = await db.receivable.findMany({
     where: { periodId, remainingAmount: { gt: 0 } },
     orderBy: { createdAt: "asc" },
   });
@@ -438,7 +439,7 @@ export async function applyReceiptToReceivables(
     const newReceived = r.amountReceived + recv;
     const newRem = Math.max(0, r.totalPackage - newReceived);
 
-    await prisma.receivable.update({
+    await db.receivable.update({
       where: { id: r.id },
       data: {
         amountReceived: newReceived,
@@ -455,8 +456,8 @@ export async function applyReceiptToReceivables(
 }
 
 /** Resolve employee display name â†’ canonical Employee row (fuzzy). */
-async function resolveEmployee(employeeName: string) {
-  const all = await prisma.employee.findMany({ where: { isActive: true } });
+async function resolveEmployee(employeeName: string, db: Prisma.TransactionClient) {
+  const all = await db.employee.findMany({ where: { isActive: true } });
   return (
     all.find((e) => nameMatch(e.name, employeeName)) ??
     all.find((e) => {
@@ -477,7 +478,7 @@ async function resolveEmployee(employeeName: string) {
 export async function applyPayrollPayment(
   periodId: string,
   employeeName: string,
-  amount: number
+  amount: number, db: Prisma.TransactionClient = prisma
 ): Promise<AppliedLink[]> {
   if (!employeeName || amount <= 0) return [];
 
@@ -502,18 +503,18 @@ export async function applyPayrollPayment(
       return !!lastA && lastA === lastB && lastA.length > 2;
     });
 
-  let candidates = await prisma.payrollEntry.findMany({
+  let candidates = await db.payrollEntry.findMany({
     where: { periodId, status: { in: ["Pending", "Partial"] } },
     orderBy: { createdAt: "asc" },
   });
   let entry = matchEntry(candidates);
 
   if (!entry) {
-    const emp = await resolveEmployee(employeeName);
+    const emp = await resolveEmployee(employeeName, db);
     const canonicalName = emp?.name ?? employeeName.trim();
-    await syncPayrollForEmployee(periodId, canonicalName);
+    await syncPayrollForEmployee(periodId, canonicalName, db);
 
-    candidates = await prisma.payrollEntry.findMany({
+    candidates = await db.payrollEntry.findMany({
       where: { periodId },
       orderBy: { createdAt: "asc" },
     });
@@ -521,7 +522,7 @@ export async function applyPayrollPayment(
 
     if (!entry) {
       const loan = emp
-        ? await prisma.employeeLoan.findFirst({
+        ? await db.employeeLoan.findFirst({
             where: { employeeId: emp.id, remainingAmount: { gt: 0 } },
           })
         : null;
@@ -533,7 +534,7 @@ export async function applyPayrollPayment(
       const installment = loan?.monthlyInstallment ?? 0;
       const net = Math.max(0, basic - installment);
 
-      entry = await prisma.payrollEntry.create({
+      entry = await db.payrollEntry.create({
         data: {
           periodId,
           employeeId: emp?.id ?? null,
@@ -578,7 +579,7 @@ export async function applyPayrollPayment(
   const fullyPaid = newRemaining <= 0 && newPaid > 0;
   const wasFullyPaidBefore = entry.status === "Paid";
 
-  await prisma.payrollEntry.update({
+  await db.payrollEntry.update({
     where: { id: entry.id },
     data: {
       amountPaid: newPaid,
@@ -594,12 +595,12 @@ export async function applyPayrollPayment(
     entry.employeeId &&
     entry.loanInstallment > 0
   ) {
-    const loan = await prisma.employeeLoan.findFirst({
+    const loan = await db.employeeLoan.findFirst({
       where: { employeeId: entry.employeeId, remainingAmount: { gt: 0 } },
     });
     if (loan) {
       const newRem = Math.max(0, loan.remainingAmount - entry.loanInstallment);
-      await prisma.employeeLoan.update({
+      await db.employeeLoan.update({
         where: { id: loan.id },
         data: {
           remainingAmount: newRem,
@@ -626,11 +627,11 @@ export async function applyPayrollPayment(
 export async function applyCommissionPayment(
   periodId: string,
   employeeName: string,
-  amount: number
+  amount: number, db: Prisma.TransactionClient = prisma
 ): Promise<AppliedLink[]> {
   if (!employeeName || amount <= 0) return [];
 
-  const candidates = await prisma.commission.findMany({
+  const candidates = await db.commission.findMany({
     where: { periodId, status: "Accrued" },
   });
   const c =
@@ -644,7 +645,7 @@ export async function applyCommissionPayment(
 
   const applied = Math.min(amount, c.commissionAmt);
 
-  await prisma.commission.update({
+  await db.commission.update({
     where: { id: c.id },
     data: { status: "Paid" },
   });
@@ -677,22 +678,22 @@ export async function applyRefundPayment(
 /**
  * Post or update a ClientLedger row for a refund.
  */
-export async function syncRefundToClientLedger(refundId: string) {
-  const refund = await prisma.refund.findUnique({ where: { id: refundId } });
+export async function syncRefundToClientLedger(refundId: string, db: Prisma.TransactionClient = prisma) {
+  const refund = await db.refund.findUnique({ where: { id: refundId } });
   if (!refund) return;
 
   let client = refund.clientId
-    ? await prisma.client.findUnique({ where: { id: refund.clientId } })
+    ? await db.client.findUnique({ where: { id: refund.clientId } })
     : null;
   if (!client) {
-    client = await prisma.client.findFirst({ where: { name: refund.clientName } });
+    client = await db.client.findFirst({ where: { name: refund.clientName } });
   }
   if (!client) {
-    client = await prisma.client.create({ data: { name: refund.clientName } });
+    client = await db.client.create({ data: { name: refund.clientName } });
   }
 
   const marker = `REFUND:${refund.id}`;
-  const existing = await prisma.clientLedger.findFirst({
+  const existing = await db.clientLedger.findFirst({
     where: { clientId: client.id, receiptRef: marker },
   });
 
@@ -715,12 +716,12 @@ export async function syncRefundToClientLedger(refundId: string) {
   };
 
   if (existing) {
-    await prisma.clientLedger.update({
+    await db.clientLedger.update({
       where: { id: existing.id },
       data: ledgerData,
     });
   } else {
-    await prisma.clientLedger.create({ data: ledgerData });
+    await db.clientLedger.create({ data: ledgerData });
   }
 }
 
@@ -730,9 +731,9 @@ export async function syncRefundToClientLedger(refundId: string) {
 export async function findOrCreateHotelPayable(
   periodId: string,
   hotelName: string,
-  opts?: { description?: string; tripRef?: string; agreedCost?: number }
+  opts?: { description?: string; tripRef?: string; agreedCost?: number }, db: Prisma.TransactionClient = prisma
 ): Promise<string> {
-  let payable = await prisma.payable.findFirst({
+  let payable = await db.payable.findFirst({
     where: {
       periodId,
       category: "Hotel",
@@ -742,11 +743,11 @@ export async function findOrCreateHotelPayable(
   });
 
   if (payable) {
-    const existingBooking = await prisma.hotelBooking.findFirst({
+    const existingBooking = await db.hotelBooking.findFirst({
       where: { payableId: payable.id },
     });
     if (!existingBooking) {
-      await prisma.hotelBooking.create({
+      await db.hotelBooking.create({
         data: {
           periodId,
           hotelName,
@@ -761,7 +762,7 @@ export async function findOrCreateHotelPayable(
   const initialOriginal =
     opts?.agreedCost && opts.agreedCost > 0 ? opts.agreedCost : 0;
 
-  payable = await prisma.payable.create({
+  payable = await db.payable.create({
     data: {
       periodId,
       supplierName: hotelName,
@@ -776,7 +777,7 @@ export async function findOrCreateHotelPayable(
     },
   });
 
-  await prisma.hotelBooking.create({
+  await db.hotelBooking.create({
     data: {
       periodId,
       hotelName,
@@ -796,9 +797,9 @@ export async function findOrCreateHotelPayable(
 export async function findOrCreateTransportPayable(
   periodId: string,
   driverName: string,
-  opts?: { description?: string; tripRef?: string; agreedCost?: number }
+  opts?: { description?: string; tripRef?: string; agreedCost?: number }, db: Prisma.TransactionClient = prisma
 ): Promise<string> {
-  let payable = await prisma.payable.findFirst({
+  let payable = await db.payable.findFirst({
     where: {
       periodId,
       category: "Transport",
@@ -808,11 +809,11 @@ export async function findOrCreateTransportPayable(
   });
 
   if (payable) {
-    const existing = await prisma.transportJob.findFirst({
+    const existing = await db.transportJob.findFirst({
       where: { payableId: payable.id },
     });
     if (!existing) {
-      await prisma.transportJob.create({
+      await db.transportJob.create({
         data: {
           periodId,
           driverName,
@@ -827,7 +828,7 @@ export async function findOrCreateTransportPayable(
   const initialOriginal =
     opts?.agreedCost && opts.agreedCost > 0 ? opts.agreedCost : 0;
 
-  payable = await prisma.payable.create({
+  payable = await db.payable.create({
     data: {
       periodId,
       supplierName: driverName,
@@ -842,7 +843,7 @@ export async function findOrCreateTransportPayable(
     },
   });
 
-  await prisma.transportJob.create({
+  await db.transportJob.create({
     data: {
       periodId,
       driverName,
@@ -861,9 +862,9 @@ export async function findOrCreateGenericPayable(
   periodId: string,
   supplierName: string,
   category: string,
-  opts?: { description?: string; tripRef?: string }
+  opts?: { description?: string; tripRef?: string }, db: Prisma.TransactionClient = prisma
 ): Promise<string> {
-  let payable = await prisma.payable.findFirst({
+  let payable = await db.payable.findFirst({
     where: {
       periodId,
       category,
@@ -873,7 +874,7 @@ export async function findOrCreateGenericPayable(
   });
   if (payable) return payable.id;
 
-  payable = await prisma.payable.create({
+  payable = await db.payable.create({
     data: {
       periodId,
       supplierName,
@@ -897,7 +898,7 @@ export async function applyHotelPayment(
   periodId: string,
   hotelName: string,
   amount: number,
-  opts?: { description?: string; tripRef?: string; agreedCost?: number }
+  opts?: { description?: string; tripRef?: string; agreedCost?: number }, db: Prisma.TransactionClient = prisma
 ): Promise<AppliedLink[]> {
   if (!hotelName) return [];
 
@@ -906,7 +907,7 @@ export async function applyHotelPayment(
 
   if (payment <= 0 && agreedCost <= 0) return [];
 
-  const existingBefore = await prisma.payable.findFirst({
+  const existingBefore = await db.payable.findFirst({
     where: {
       periodId,
       category: "Hotel",
@@ -915,10 +916,10 @@ export async function applyHotelPayment(
     orderBy: { createdAt: "asc" },
   });
 
-  const payableId = await findOrCreateHotelPayable(periodId, hotelName, opts);
+  const payableId = await findOrCreateHotelPayable(periodId, hotelName, opts, db);
   if (!payableId) return [];
 
-  const p = await prisma.payable.findUnique({ where: { id: payableId } });
+  const p = await db.payable.findUnique({ where: { id: payableId } });
   if (!p) return [];
 
   let newOriginal = p.originalAmount;
@@ -931,7 +932,7 @@ export async function applyHotelPayment(
   const newPaid = p.amountPaid + applied;
   const newRemaining = Math.max(0, newOriginal - newPaid);
 
-  await prisma.payable.update({
+  await db.payable.update({
     where: { id: p.id },
     data: {
       originalAmount: newOriginal,
@@ -946,7 +947,7 @@ export async function applyHotelPayment(
     },
   });
 
-  await propagatePayableToOperational(p.id);
+  await propagatePayableToOperational(p.id, db);
 
   return [
     {
@@ -964,7 +965,7 @@ export async function applyTransportPayment(
   periodId: string,
   driverName: string,
   amount: number,
-  opts?: { description?: string; tripRef?: string; agreedCost?: number }
+  opts?: { description?: string; tripRef?: string; agreedCost?: number }, db: Prisma.TransactionClient = prisma
 ): Promise<AppliedLink[]> {
   if (!driverName) return [];
 
@@ -973,7 +974,7 @@ export async function applyTransportPayment(
 
   if (payment <= 0 && agreedCost <= 0) return [];
 
-  const existingBefore = await prisma.payable.findFirst({
+  const existingBefore = await db.payable.findFirst({
     where: {
       periodId,
       category: "Transport",
@@ -982,10 +983,10 @@ export async function applyTransportPayment(
     orderBy: { createdAt: "asc" },
   });
 
-  const payableId = await findOrCreateTransportPayable(periodId, driverName, opts);
+  const payableId = await findOrCreateTransportPayable(periodId, driverName, opts, db);
   if (!payableId) return [];
 
-  const p = await prisma.payable.findUnique({ where: { id: payableId } });
+  const p = await db.payable.findUnique({ where: { id: payableId } });
   if (!p) return [];
 
   let newOriginal = p.originalAmount;
@@ -998,7 +999,7 @@ export async function applyTransportPayment(
   const newPaid = p.amountPaid + applied;
   const newRemaining = Math.max(0, newOriginal - newPaid);
 
-  await prisma.payable.update({
+  await db.payable.update({
     where: { id: p.id },
     data: {
       originalAmount: newOriginal,
@@ -1013,7 +1014,7 @@ export async function applyTransportPayment(
     },
   });
 
-  await propagatePayableToOperational(p.id);
+  await propagatePayableToOperational(p.id, db);
 
   return [
     {
@@ -1029,23 +1030,23 @@ export async function applyGenericPayablePayment(
   supplierName: string,
   category: string,
   amount: number,
-  opts?: { description?: string; tripRef?: string }
+  opts?: { description?: string; tripRef?: string }, db: Prisma.TransactionClient = prisma
 ): Promise<AppliedLink[]> {
   if (!supplierName || amount <= 0) return [];
   const payableId = await findOrCreateGenericPayable(
     periodId,
     supplierName,
     category,
-    opts
+    opts, db
   );
-  const applied = await applyToPayable(periodId, payableId, amount);
+  const applied = await applyToPayable(periodId, payableId, amount, undefined, db);
   return applied > 0
     ? [{ entityType: "payable", entityId: payableId, appliedAmount: applied }]
     : [{ entityType: "payable", entityId: payableId, appliedAmount: 0 }];
 }
 
 /** Remove the ledger row tied to a refund (used on refund delete). */
-export async function removeRefundFromClientLedger(refundId: string) {
+export async function removeRefundFromClientLedger(refundId: string, db: Prisma.TransactionClient = prisma) {
   const marker = `REFUND:${refundId}`;
-  await prisma.clientLedger.deleteMany({ where: { receiptRef: marker } });
+  await db.clientLedger.deleteMany({ where: { receiptRef: marker } });
 }

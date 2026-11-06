@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 // src/lib/sales-sync.ts
 // Single source of truth for keeping SalesPerformance in sync with
 // Receivable / client edits.
@@ -48,7 +49,7 @@ export async function setSaleForClient(opts: {
   tourDate?: string | Date | null;
   description?: string | null;
   notes?: string | null;
-}): Promise<{ salespersonChanged: boolean }> {
+}, db: Prisma.TransactionClient = prisma): Promise<{ salespersonChanged: boolean }> {
   const { periodId, salesperson, clientName } = opts;
   const amount = Math.max(0, Number(opts.amount) || 0);
 
@@ -57,7 +58,7 @@ export async function setSaleForClient(opts: {
   }
 
   // Only Sales-role (or Team Lead-Sales) employees get commission rows
-  const emp = await prisma.employee.findFirst({
+  const emp = await db.employee.findFirst({
     where: { name: salesperson, isActive: true },
   });
   if (!emp || !isSalesLikeRole(emp.role)) {
@@ -67,7 +68,7 @@ export async function setSaleForClient(opts: {
   // Find every sales row this employee has for this client (defensive â€”
   // older data may have duplicates from previous bugs). Keep ONE, delete
   // the rest so we converge on a single truth.
-  const rows = await prisma.salesPerformance.findMany({
+  const rows = await db.salesPerformance.findMany({
     where: { periodId, clientName },
     orderBy: { createdAt: "asc" },
   });
@@ -87,10 +88,10 @@ export async function setSaleForClient(opts: {
   if (amount <= 0) {
     // Remove all rows for this salesperson + client
     for (const r of mine) {
-      await prisma.salesPerformance.delete({ where: { id: r.id } });
+      await db.salesPerformance.delete({ where: { id: r.id } });
     }
-    await computeSalesPayroll(periodId);
-    await syncPayrollForEmployee(periodId, emp.name);
+    await computeSalesPayroll(periodId, db);
+    await syncPayrollForEmployee(periodId, emp.name, db);
     return { salespersonChanged };
   }
 
@@ -98,7 +99,7 @@ export async function setSaleForClient(opts: {
 
   if (mine.length === 0) {
     // Create exactly ONE row
-    await prisma.salesPerformance.create({
+    await db.salesPerformance.create({
       data: {
         periodId,
         employeeId: emp.id,
@@ -116,7 +117,7 @@ export async function setSaleForClient(opts: {
   } else {
     // Update the first, delete the rest
     const keep = mine[0];
-    await prisma.salesPerformance.update({
+    await db.salesPerformance.update({
       where: { id: keep.id },
       data: {
         debit: amount,
@@ -126,12 +127,12 @@ export async function setSaleForClient(opts: {
       },
     });
     for (const extra of mine.slice(1)) {
-      await prisma.salesPerformance.delete({ where: { id: extra.id } });
+      await db.salesPerformance.delete({ where: { id: extra.id } });
     }
   }
 
-  await computeSalesPayroll(periodId);
-  await syncPayrollForEmployee(periodId, emp.name);
+  await computeSalesPayroll(periodId, db);
+  await syncPayrollForEmployee(periodId, emp.name, db);
   return { salespersonChanged };
 }
 

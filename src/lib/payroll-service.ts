@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 /**
  * Sales team payroll rules (Pacific Trips policy):
  * - Each sales member: Basic 40,000 PKR + 2.5% commission on THEIR individual sales
@@ -80,19 +81,19 @@ export function computeLeadPay(
   };
 }
 
-export async function computeSalesPayroll(periodId: string) {
-  const targetRow = await prisma.salesTarget.findUnique({ where: { periodId } });
+export async function computeSalesPayroll(periodId: string, db: Prisma.TransactionClient = prisma) {
+  const targetRow = await db.salesTarget.findUnique({ where: { periodId } });
   const leadTarget = targetRow?.targetAmount ?? DEFAULT_LEAD_TARGET;
   const commissionBase = targetRow?.commissionBaseAmount ?? LEAD_FLOOR;
 
-  const employees = await prisma.employee.findMany({
+  const employees = await db.employee.findMany({
     where: {
       isActive: true,
       role: { in: ["Sales", "Team Lead-Sales"] },
     },
   });
 
-  const salesEntries = await prisma.salesPerformance.findMany({
+  const salesEntries = await db.salesPerformance.findMany({
     where: { periodId },
   });
 
@@ -129,12 +130,12 @@ export async function computeSalesPayroll(periodId: string) {
       ratePct = COMMISSION_RATE * 100;
     }
 
-    const existingComm = await prisma.commission.findFirst({
+    const existingComm = await db.commission.findFirst({
       where: { periodId, employeeName: emp.name },
     });
 
     if (existingComm) {
-      await prisma.commission.update({
+      await db.commission.update({
         where: { id: existingComm.id },
         data: {
           saleAmount: saleBase,
@@ -145,7 +146,7 @@ export async function computeSalesPayroll(periodId: string) {
         },
       });
     } else {
-      await prisma.commission.create({
+      await db.commission.create({
         data: {
           periodId,
           employeeId: emp.id,
@@ -159,7 +160,7 @@ export async function computeSalesPayroll(periodId: string) {
       });
     }
 
-    await syncPayrollForEmployee(periodId, emp.name);
+    await syncPayrollForEmployee(periodId, emp.name, db);
 
     results.push({
       employee: emp.name,

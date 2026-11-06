@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+import { prisma } from "./prisma";
 // src/lib/sales-attribution.ts
 import { setSaleForClient } from "./sales-sync";
 
@@ -15,7 +17,7 @@ export async function attributeSaleToSalesperson(opts: {
   description?: string | null;
   tripRef?: string | null;
   notes?: string | null;
-}) {
+}, db: Prisma.TransactionClient = prisma) {
   if (!opts.salesperson || !opts.clientName || opts.amount <= 0) return null;
   await setSaleForClient({
     periodId: opts.periodId,
@@ -25,6 +27,6 @@ export async function attributeSaleToSalesperson(opts: {
     tourDate: opts.tourDate,
     description: opts.description,
     notes: opts.notes,
-  });
+  }, db);
   return { ok: true };
 }

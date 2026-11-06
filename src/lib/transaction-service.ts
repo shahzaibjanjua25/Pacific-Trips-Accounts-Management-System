@@ -1,17 +1,15 @@
+import type { Prisma, Transaction } from "@prisma/client";
 import { prisma } from "./prisma";
 import {
   applyPaymentToPayables,
-  applyReceiptToReceivables,
   applyPayrollPayment,
   applyCommissionPayment,
-  applyRefundPayment,
   applyHotelPayment,
   applyTransportPayment,
   applyGenericPayablePayment,
   syncRefundToClientLedger,
   removeRefundFromClientLedger,
   createAssetFromTransaction,
-  updateAssetFromTransaction,
   deleteAssetFromTransaction,
   type AppliedLink,
 } from "./links-service";
@@ -88,7 +86,7 @@ function isAssetCategory(category?: string | null): boolean {
 /* ------ BANK ------ */
 
 /** Only Completed (and synonyms) move real money. Pending / Cancelled do not. */
-function isCompletedStatus(status?: string | null): boolean {
+export function isCompletedStatus(status?: string | null): boolean {
   const s = (status || "Completed").toLowerCase().trim();
   return s === "completed" || s === "paid" || s === "settled";
 }
@@ -97,23 +95,23 @@ function isBankTransferCategory(category?: string | null): boolean {
   return (category || "").toLowerCase().includes("bank transfer");
 }
 
-async function adjustBank(accountName: string | null | undefined, delta: number) {
+async function adjustBank(accountName: string | null | undefined, delta: number, db: Prisma.TransactionClient) {
   if (!accountName || delta === 0) return;
   const trimmed = accountName.trim();
   const normalized = trimmed.toLowerCase();
-  const all = await prisma.bankBalance.findMany();
+  const all = await db.bankBalance.findMany();
 
   const existing = all.find(
     (b) => b.accountName.trim().toLowerCase() === normalized
   );
   if (existing) {
-    await prisma.bankBalance.update({
+    await db.bankBalance.update({
       where: { id: existing.id },
-      data: { balance: existing.balance + delta },
+      data: { balance: { increment: delta } },
     });
   } else {
-    await prisma.bankBalance.create({
-      data: { accountName: trimmed, balance: Math.max(0, delta) },
+    await db.bankBalance.create({
+      data: { accountName: trimmed, balance: delta },
     });
   }
 }
@@ -122,6 +120,8 @@ const cashDelta = (debit: number, credit: number) => debit - credit;
 
 /** History row for Bank page (BankTxn table). */
 async function recordBankTxn(opts: {
+  transactionId?: string;
+  legacyCreatedAt?: Date;
   periodId: string;
   accountName: string;
   date: Date;
@@ -131,38 +131,62 @@ async function recordBankTxn(opts: {
   transferIn?: number;
   transferOut?: number;
   notes?: string | null;
-}) {
+}, db: Prisma.TransactionClient) {
   const name = opts.accountName.trim();
   if (!name) return;
 
-  const bal = await prisma.bankBalance.findFirst({
+  const movement = {
+    periodId: opts.periodId,
+    accountName: name,
+    date: opts.date,
+    description: opts.description ?? null,
+    deposit: opts.deposit ?? 0,
+    withdrawal: opts.withdrawal ?? 0,
+    transferIn: opts.transferIn ?? 0,
+    transferOut: opts.transferOut ?? 0,
+    notes: opts.notes ?? null,
+  };
+  if (opts.legacyCreatedAt) {
+    const candidates = await db.bankTxn.findMany({
+      where: {
+        ...movement,
+        createdAt: { gte: opts.legacyCreatedAt, lte: new Date(opts.legacyCreatedAt.getTime() + 5_000) },
+        reconciled: false, statementRef: null,
+      },
+      select: { id: true },
+      take: 2,
+    });
+    if (candidates.length === 1) {
+      await db.bankTxn.delete({ where: { id: candidates[0].id } });
+    }
+    return;
+  }
+
+  const bal = await db.bankBalance.findFirst({
     where: { accountName: { equals: name, mode: "insensitive" } },
   });
-  const bankAccount = await prisma.bankAccount.findFirst({
+  const bankAccount = await db.bankAccount.findFirst({
     where: { name: { equals: name, mode: "insensitive" } },
   });
 
-  await prisma.bankTxn.create({
+  const row = await db.bankTxn.create({
     data: {
-      periodId: opts.periodId,
-      accountName: name,
+      ...movement,
       accountId: bankAccount?.id ?? null,
-      date: opts.date,
-      description: opts.description ?? null,
-      deposit: opts.deposit ?? 0,
-      withdrawal: opts.withdrawal ?? 0,
-      transferIn: opts.transferIn ?? 0,
-      transferOut: opts.transferOut ?? 0,
       balance: bal?.balance ?? 0,
-      notes: opts.notes ?? null,
     },
   });
+  if (opts.transactionId) {
+    await trackGeneratedRow(db, { id: opts.transactionId, periodId: opts.periodId }, "bank_txn", row.id);
+  }
 }
 
 /**
  * Apply bank effect for a transaction.
  */
 async function applyBankEffect(input: {
+  transactionId?: string;
+  legacyCreatedAt?: Date;
   periodId: string;
   date: string | Date;
   description?: string | null;
@@ -175,7 +199,7 @@ async function applyBankEffect(input: {
   status?: string | null;
   notes?: string | null;
   sign?: 1 | -1;
-}) {
+}, db: Prisma.TransactionClient) {
   if (!isCompletedStatus(input.status)) return;
 
   const sign = input.sign ?? 1;
@@ -194,41 +218,48 @@ async function applyBankEffect(input: {
       }
       return;
     }
-    await adjustBank(from, sign * -amount);
-    await adjustBank(to, sign * amount);
-    if (sign === 1) {
+    await adjustBank(from, sign * -amount, db);
+    await adjustBank(to, sign * amount, db);
+    if (sign === 1 || input.legacyCreatedAt) {
       await recordBankTxn({
+        transactionId: input.transactionId,
+        legacyCreatedAt: input.legacyCreatedAt,
         periodId: input.periodId,
         accountName: from,
         date,
         description: input.description || `Transfer to ${to}`,
         transferOut: amount,
         notes: input.notes,
-      });
+      }, db);
       await recordBankTxn({
+        transactionId: input.transactionId,
+        legacyCreatedAt: input.legacyCreatedAt,
         periodId: input.periodId,
         accountName: to,
         date,
         description: input.description || `Transfer from ${from}`,
         transferIn: amount,
         notes: input.notes,
-      });
+      }, db);
     }
     return;
   }
 
   const delta = sign * cashDelta(input.debit || 0, input.credit || 0);
-  await adjustBank(input.bankAccount, delta);
-  if (sign === 1 && input.bankAccount && delta !== 0) {
+  await adjustBank(input.bankAccount, delta, db);
+  if ((sign === 1 || input.legacyCreatedAt) && input.bankAccount && delta !== 0) {
+    const postedDelta = delta * sign;
     await recordBankTxn({
+      transactionId: input.transactionId,
+      legacyCreatedAt: input.legacyCreatedAt,
       periodId: input.periodId,
       accountName: input.bankAccount,
       date,
       description: input.description,
-      deposit: delta > 0 ? delta : 0,
-      withdrawal: delta < 0 ? -delta : 0,
+      deposit: Math.max(0, postedDelta),
+      withdrawal: Math.max(0, -postedDelta),
       notes: input.notes,
-    });
+    }, db);
   }
 }
 
@@ -242,39 +273,35 @@ async function createRefundFromTransaction(opts: {
   description?: string | null;
   tripRef?: string | null;
   notes?: string | null;
-}): Promise<AppliedLink[]> {
+}, db: Prisma.TransactionClient): Promise<AppliedLink[]> {
   const { periodId, clientName, amount } = opts;
   if (!clientName || amount <= 0) return [];
 
-  let client = await prisma.client.findFirst({
+  const client = await db.client.findFirst({
     where: { name: clientName },
   });
-  if (!client) {
-    client = await prisma.client.create({ data: { name: clientName } });
-  }
-
-  const recv =
-    (await prisma.receivable.findFirst({
+  const recv = client
+    ? await db.receivable.findFirst({
       where: {
         periodId,
         OR: [{ clientId: client.id }, { clientName: client.name }],
       },
       orderBy: { createdAt: "asc" },
-    })) ?? null;
+    })
+    : null;
 
   const paidBefore = recv ? Math.max(0, recv.amountReceived || 0) : 0;
 
-  const cappedRefund = Math.min(amount, paidBefore);
-  if (cappedRefund <= 0) {
-    return [];
+  if (!client || !recv || amount > paidBefore) {
+    throw new Error(`Overpayment blocked: ${clientName} has ${paidBefore} PKR available to refund.`);
   }
 
-  const refund = await prisma.refund.create({
+  const refund = await db.refund.create({
     data: {
       periodId,
       clientId: client.id,
       clientName: client.name,
-      amount: cappedRefund,
+      amount,
       reason: opts.description || "Refund issued",
       status: "Paid",
       paidDate: opts.date,
@@ -283,33 +310,27 @@ async function createRefundFromTransaction(opts: {
     },
   });
 
-  if (recv) {
-    const newReceived = Math.max(0, paidBefore - cappedRefund);
-    const newRemaining = Math.max(0, recv.totalPackage - newReceived);
-    await prisma.receivable.update({
-      where: { id: recv.id },
-      data: {
-        amountReceived: newReceived,
-        remainingAmount: newRemaining,
-        status:
-          newRemaining <= 0 && newReceived > 0
-            ? "Settled"
-            : newReceived > 0
-              ? "Partial"
-              : "Open",
-      },
-    });
-  }
+  const newReceived = paidBefore - amount;
+  const newRemaining = Math.max(0, recv.totalPackage - newReceived);
+  await db.receivable.update({
+    where: { id: recv.id },
+    data: {
+      amountReceived: newReceived,
+      remainingAmount: newRemaining,
+      status: newRemaining <= 0 ? "Settled" : newReceived > 0 ? "Partial" : "Open",
+    },
+  });
 
-  await syncRefundToClientLedger(refund.id);
+  await syncRefundToClientLedger(refund.id, db);
 
   return [
-    { entityType: "refund", entityId: refund.id, appliedAmount: cappedRefund },
+    { entityType: "refund", entityId: refund.id, appliedAmount: 0 },
+    { entityType: "receivable", entityId: recv.id, appliedAmount: -amount },
   ];
 }
 
 /* ------ LINK RESOLUTION ------ */
-async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
+async function resolveLinks(input: TxnInput, db: Prisma.TransactionClient): Promise<AppliedLink[]> {
   const cat = (input.category || "").toLowerCase();
   const party = input.party || input.subCategory || "";
   const periodId = input.periodId;
@@ -321,7 +342,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
 
   if (input.relatedPayableId) {
     const signedPayAmount = (input.credit || 0) - (input.debit || 0);
-    return applyPaymentToPayables(periodId, party, signedPayAmount).then((links) => {
+    return applyPaymentToPayables(periodId, party, signedPayAmount, undefined, db).then((links) => {
       if (!links.find((l) => l.entityId === input.relatedPayableId)) {
         links.unshift({
           entityType: "payable",
@@ -338,9 +359,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     cat.includes("client receipt") ||
     cat.includes("revenue")
   ) {
-    const debitAmount = Math.abs(input.debit || 0);
-    if (debitAmount <= 0) return [];
-    return applyReceiptToReceivables(periodId, party, debitAmount);
+    return [];
   }
 
   const signedPayAmount = (input.credit || 0) - (input.debit || 0);
@@ -350,7 +369,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
       agreedCost: input.hotelAgreedCost,
-    });
+    }, db);
   }
 
   if (cat.includes("transport") || cat.includes("driver")) {
@@ -358,22 +377,22 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
       agreedCost: input.transportAgreedCost,
-    });
+    }, db);
   }
 
   if (cat.includes("supplier") || cat.includes("payable")) {
     return applyGenericPayablePayment(periodId, party, "Other", signedPayAmount, {
       description: input.description,
       tripRef: input.tripRef ?? undefined,
-    });
+    }, db);
   }
 
   if (cat.includes("salary") || cat.includes("payroll")) {
-    return applyPayrollPayment(periodId, party, signedPayAmount);
+    return applyPayrollPayment(periodId, party, signedPayAmount, db);
   }
 
   if (cat.includes("commission")) {
-    return applyCommissionPayment(periodId, party, signedPayAmount);
+    return applyCommissionPayment(periodId, party, signedPayAmount, db);
   }
 
   if (cat.includes("refund")) {
@@ -386,7 +405,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
       description: input.description,
       tripRef: input.tripRef ?? null,
       notes: input.notes ?? null,
-    });
+    }, db);
   }
 
   if (
@@ -397,10 +416,10 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     const debitAmt = Math.abs(input.debit || 0);
 
     const emp =
-      (await prisma.employee.findFirst({
+      (await db.employee.findFirst({
         where: { name: party, isActive: true },
       })) ||
-      (await prisma.employee.findFirst({
+      (await db.employee.findFirst({
         where: {
           isActive: true,
           name: { contains: party, mode: "insensitive" },
@@ -411,7 +430,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
       return [];
     }
 
-    let loan = await prisma.employeeLoan.findFirst({
+    let loan = await db.employeeLoan.findFirst({
       where: { employeeId: emp.id },
       orderBy: { createdAt: "desc" },
     });
@@ -419,7 +438,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
     if (creditAmt > 0) {
       if (loan) {
         const newRem = loan.remainingAmount + creditAmt;
-        await prisma.employeeLoan.update({
+        await db.employeeLoan.update({
           where: { id: loan.id },
           data: {
             originalAmount: loan.originalAmount + creditAmt,
@@ -433,7 +452,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
           },
         });
       } else {
-        loan = await prisma.employeeLoan.create({
+        loan = await db.employeeLoan.create({
           data: {
             employeeId: emp.id,
             originalAmount: creditAmt,
@@ -465,7 +484,7 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
         );
       }
       const newRemaining = Math.max(0, loan.remainingAmount - debitAmt);
-      await prisma.employeeLoan.update({
+      await db.employeeLoan.update({
         where: { id: loan.id },
         data: {
           remainingAmount: newRemaining,
@@ -491,8 +510,13 @@ async function resolveLinks(input: TxnInput): Promise<AppliedLink[]> {
 }
 
 /* ------ POST ------ */
-export async function postTransaction(input: TxnInput) {
-  const txn = await prisma.transaction.create({
+export function runTransactionMutation<T>(operation: (db: Prisma.TransactionClient) => Promise<T>) {
+  return prisma.$transaction(operation, { isolationLevel: "Serializable", timeout: 30_000 });
+}
+
+export async function postTransaction(input: TxnInput, db?: Prisma.TransactionClient): Promise<Transaction> {
+  if (!db) return runTransactionMutation((tx) => postTransaction(input, tx));
+  const txn = await db.transaction.create({
     data: {
       periodId: input.periodId,
       date: new Date(input.date),
@@ -511,79 +535,73 @@ export async function postTransaction(input: TxnInput) {
     },
   });
 
-  try {
-    await applyBankEffect({
-      periodId: input.periodId,
-      date: input.date,
-      description: input.description,
-      category: input.category,
-      party: input.party,
-      subCategory: input.subCategory,
-      bankAccount: input.bankAccount,
-      debit: input.debit || 0,
-      credit: input.credit || 0,
-      status: input.status || "Completed",
-      notes: input.notes,
-      sign: 1,
-    });
-  } catch (err) {
-    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => { });
-    throw err;
-  }
+  await applyTransactionEffects(txn, input, db);
+  return txn;
+}
+
+async function trackGeneratedRow(
+  db: Prisma.TransactionClient,
+  txn: Pick<Transaction, "id" | "periodId">,
+  entityType: string,
+  entityId: string,
+) {
+  await db.transactionLink.create({
+    data: { transactionId: txn.id, periodId: txn.periodId, entityType, entityId, appliedAmount: 0 },
+  });
+}
+
+async function applyTransactionEffects(txn: Transaction, input: TxnInput, db: Prisma.TransactionClient) {
+  if (!isCompletedStatus(txn.status)) return;
+  await applyBankEffect({
+    transactionId: txn.id,
+    periodId: input.periodId,
+    date: input.date,
+    description: input.description,
+    category: input.category,
+    party: input.party,
+    subCategory: input.subCategory,
+    bankAccount: input.bankAccount,
+    debit: input.debit || 0,
+    credit: input.credit || 0,
+    status: input.status || "Completed",
+    notes: input.notes,
+    sign: 1,
+  }, db);
 
   let links: AppliedLink[] = [];
-  try {
-    if (isBankTransferCategory(input.category)) {
-      links = [];
-    } else if (isAssetCategory(input.category)) {
-      // Asset purchase: create an Asset row and link it for later reversal.
-      const amount =
-        Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
-      if (amount > 0) {
-        const assetId = await createAssetFromTransaction({
-          periodId: input.periodId,
-          date: new Date(input.date),
-          description: input.description,
-          category: input.assetCategory || input.subCategory || "Other",
-          cost: amount,
-          notes: input.notes || null,
-        });
-        if (assetId) {
-          links = [
-            {
-              entityType: "asset",
-              entityId: assetId,
-              appliedAmount: amount,
-            },
-          ];
-        }
+  if (isBankTransferCategory(input.category)) {
+    links = [];
+  } else if (isAssetCategory(input.category)) {
+    // Asset purchase: create an Asset row and link it for later reversal.
+    const amount =
+      Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
+    if (amount > 0) {
+      const assetId = await createAssetFromTransaction({
+        periodId: input.periodId,
+        date: new Date(input.date),
+        description: input.description,
+        category: input.assetCategory || input.subCategory || "Other",
+        cost: amount,
+        notes: input.notes || null,
+      }, db);
+      if (assetId) {
+        links = [
+          {
+            entityType: "asset",
+            entityId: assetId,
+            appliedAmount: amount,
+          },
+        ];
       }
-    } else if (isDrawingCategory(input.category)) {
-      // Drawing / personal: cash moves, no other record anywhere.
-      links = [];
-    } else {
-      links = await resolveLinks(input);
     }
-  } catch (err) {
-    await applyBankEffect({
-      periodId: input.periodId,
-      date: input.date,
-      description: input.description,
-      category: input.category,
-      party: input.party,
-      subCategory: input.subCategory,
-      bankAccount: input.bankAccount,
-      debit: input.debit || 0,
-      credit: input.credit || 0,
-      status: input.status || "Completed",
-      notes: input.notes,
-      sign: -1,
-    }).catch(() => { });
-    await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => { });
-    throw err;
+  } else if (isDrawingCategory(input.category)) {
+    // Drawing / personal: cash moves, no other record anywhere.
+    links = [];
+  } else {
+    links = await resolveLinks(input, db);
   }
   for (const link of links) {
-    await prisma.transactionLink.create({
+    await db.transactionLink.create({
       data: {
         transactionId: txn.id,
         periodId: input.periodId,
@@ -599,7 +617,7 @@ export async function postTransaction(input: TxnInput) {
   const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
 
   if (cat.includes("office") && amount > 0) {
-    await prisma.officeExpense.create({
+    const generated = await db.officeExpense.create({
       data: {
         periodId: input.periodId,
         date: new Date(input.date),
@@ -610,10 +628,11 @@ export async function postTransaction(input: TxnInput) {
         paymentMethod: input.paymentMethod || null,
       },
     });
+    await trackGeneratedRow(db, txn, "office_expense", generated.id);
   }
 
   if (cat.includes("marketing") && amount > 0) {
-    await prisma.marketingExpense.create({
+    const generated = await db.marketingExpense.create({
       data: {
         periodId: input.periodId,
         date: new Date(input.date),
@@ -624,6 +643,7 @@ export async function postTransaction(input: TxnInput) {
         paymentMethod: input.paymentMethod || null,
       },
     });
+    await trackGeneratedRow(db, txn, "marketing_expense", generated.id);
   }
 
   const isClientSide =
@@ -632,10 +652,10 @@ export async function postTransaction(input: TxnInput) {
     cat.includes("revenue");
 
   if (isClientSide && party) {
-    let client = await prisma.client.findFirst({ where: { name: party } });
+    let client = await db.client.findFirst({ where: { name: party } });
     const isNewClient = !client;
     if (!client) {
-      client = await prisma.client.create({
+      client = await db.client.create({
         data: {
           name: party,
           phone: input.clientPhone || null,
@@ -651,7 +671,7 @@ export async function postTransaction(input: TxnInput) {
       if (!client.email && input.clientEmail) updates.email = input.clientEmail;
       if (!client.notes && input.clientNotes) updates.notes = input.clientNotes;
       if (Object.keys(updates).length > 0) {
-        client = await prisma.client.update({
+        client = await db.client.update({
           where: { id: client.id },
           data: updates,
         });
@@ -672,7 +692,7 @@ export async function postTransaction(input: TxnInput) {
         ? input.clientTotalPackage
         : 0;
 
-    let recv = await prisma.receivable.findFirst({
+    let recv = await db.receivable.findFirst({
       where: {
         periodId: input.periodId,
         OR: [{ clientId: client.id }, { clientName: client.name }],
@@ -680,7 +700,7 @@ export async function postTransaction(input: TxnInput) {
       orderBy: { createdAt: "asc" },
     });
 
-    const openRecv = await prisma.receivable.findFirst({
+    const openRecv = await db.receivable.findFirst({
       where: {
         periodId: input.periodId,
         OR: [{ clientId: client.id }, { clientName: client.name }],
@@ -698,36 +718,11 @@ export async function postTransaction(input: TxnInput) {
           ? Math.max(recv.totalPackage, explicitPackage)
           : recv.totalPackage;
 
-      const linked = await prisma.transactionLink.aggregate({
-        where: {
-          transactionId: txn.id,
-          entityType: "receivable",
-          entityId: recv.id,
-        },
-        _sum: { appliedAmount: true },
-      });
-      const alreadyLinked = (linked._sum.appliedAmount ?? 0) > 0;
-
       let newReceived = recv.amountReceived;
-      if (paidNow > 0 && !alreadyLinked) {
+      if (paidNow > 0) {
         const wouldBe = newReceived + paidNow;
-        if (wouldBe > newTotal && !input.isNewClient) {
+        if (wouldBe > newTotal) {
           const over = wouldBe - newTotal;
-          await prisma.transaction.delete({ where: { id: txn.id } }).catch(() => { });
-          await applyBankEffect({
-            periodId: input.periodId,
-            date: input.date,
-            description: input.description,
-            category: input.category,
-            party: input.party,
-            subCategory: input.subCategory,
-            bankAccount: input.bankAccount,
-            debit: input.debit || 0,
-            credit: input.credit || 0,
-            status: input.status || "Completed",
-            notes: input.notes,
-            sign: -1,
-          }).catch(() => { });
           throw new Error(
             `Overpayment blocked: ${party} owes ${newTotal - newReceived} ` +
             `but ${paidNow} was entered (excess ${over}).`
@@ -741,7 +736,7 @@ export async function postTransaction(input: TxnInput) {
       newReceived = Math.max(0, Math.min(newTotal, newReceived));
       const newRemaining = Math.max(0, newTotal - newReceived);
 
-      await prisma.receivable.update({
+      await db.receivable.update({
         where: { id: recv.id },
         data: {
           totalPackage: newTotal,
@@ -762,21 +757,25 @@ export async function postTransaction(input: TxnInput) {
         },
       });
 
-      if (creditedNow > 0) {
-        await prisma.transactionLink.create({
+      const appliedAmount = newReceived - recv.amountReceived;
+      if (appliedAmount !== 0) {
+        await db.transactionLink.create({
           data: {
             transactionId: txn.id,
             periodId: input.periodId,
             entityType: "receivable",
             entityId: recv.id,
-            appliedAmount: -creditedNow,
+            appliedAmount,
           },
         });
       }
     } else if (explicitPackage > 0 || (isNewClient && paidNow > 0)) {
       const packageVal = explicitPackage > 0 ? explicitPackage : paidNow;
+      if (paidNow > packageVal) {
+        throw new Error(`Overpayment blocked: ${party} owes ${packageVal} PKR.`);
+      }
       const remaining = Math.max(0, packageVal - paidNow);
-      recv = await prisma.receivable.create({
+      recv = await db.receivable.create({
         data: {
           periodId: input.periodId,
           clientId: client.id,
@@ -792,6 +791,14 @@ export async function postTransaction(input: TxnInput) {
         },
       });
       isNewReceivable = true;
+      if (recv.amountReceived > 0) {
+        await db.transactionLink.create({
+          data: {
+            transactionId: txn.id, periodId: txn.periodId, entityType: "receivable",
+            entityId: recv.id, appliedAmount: recv.amountReceived,
+          },
+        });
+      }
     }
 
     if (input.salesperson && (explicitPackage > 0 || paidNow > 0)) {
@@ -811,12 +818,12 @@ export async function postTransaction(input: TxnInput) {
           description: input.description || `Sale to ${client.name}`,
           tripRef: input.tripRef || null,
           notes: input.notes || null,
-        });
+        }, db);
       }
     }
 
     if (paidNow > 0) {
-      await prisma.clientLedger.create({
+      const generated = await db.clientLedger.create({
         data: {
           clientId: client.id,
           clientName: client.name,
@@ -832,10 +839,11 @@ export async function postTransaction(input: TxnInput) {
           notes: "Auto-posted from transaction",
         },
       });
+      await trackGeneratedRow(db, txn, "client_ledger", generated.id);
     }
 
     if (creditedNow > 0) {
-      await prisma.clientLedger.create({
+      const generated = await db.clientLedger.create({
         data: {
           clientId: client.id,
           clientName: client.name,
@@ -852,12 +860,13 @@ export async function postTransaction(input: TxnInput) {
             "Auto-posted from transaction (money returned to client - reduces amount received)",
         },
       });
+      await trackGeneratedRow(db, txn, "client_ledger", generated.id);
     }
 
     if (explicitPackage > 0 && isNewClient) {
       const stillOwed = Math.max(0, explicitPackage - paidNow);
       if (stillOwed > 0) {
-        await prisma.clientLedger.create({
+        const generated = await db.clientLedger.create({
           data: {
             clientId: client.id,
             clientName: client.name,
@@ -872,38 +881,21 @@ export async function postTransaction(input: TxnInput) {
             notes: "Auto-created outstanding from total package",
           },
         });
+        await trackGeneratedRow(db, txn, "client_ledger", generated.id);
       }
     }
   }
 
-  return txn;
 }
 
 /* ------ DELETE ------ */
-export async function deleteTransaction(id: string) {
-  const txn = await prisma.transaction.findUnique({ where: { id } });
+export async function deleteTransaction(id: string, db?: Prisma.TransactionClient): Promise<Transaction | null> {
+  if (!db) return runTransactionMutation((tx) => deleteTransaction(id, tx));
+  const txn = await db.transaction.findUnique({ where: { id } });
   if (!txn) return null;
 
-  const links = await prisma.transactionLink.findMany({
-    where: { transactionId: id },
-  });
-  for (const link of links) await reverseLink(link);
-
-  await applyBankEffect({
-    periodId: txn.periodId,
-    date: txn.date,
-    description: txn.description,
-    category: txn.category,
-    party: txn.party,
-    subCategory: txn.subCategory,
-    bankAccount: txn.bankAccount,
-    debit: txn.debit,
-    credit: txn.credit,
-    status: txn.status,
-    notes: txn.notes,
-    sign: -1,
-  });
-  await prisma.transaction.delete({ where: { id } });
+  await reverseTransactionEffects(txn, db);
+  await db.transaction.delete({ where: { id } });
   return txn;
 }
 
@@ -911,16 +903,32 @@ async function reverseLink(link: {
   entityType: string;
   entityId: string;
   appliedAmount: number;
-}) {
+}, db: Prisma.TransactionClient) {
   const amt = link.appliedAmount;
-  if (amt === 0) return;
+  if (link.entityType === "client_ledger") {
+    await db.clientLedger.deleteMany({ where: { id: link.entityId } });
+    return;
+  }
+  if (link.entityType === "office_expense") {
+    await db.officeExpense.deleteMany({ where: { id: link.entityId } });
+    return;
+  }
+  if (link.entityType === "marketing_expense") {
+    await db.marketingExpense.deleteMany({ where: { id: link.entityId } });
+    return;
+  }
+  if (link.entityType === "bank_txn") {
+    await db.bankTxn.deleteMany({ where: { id: link.entityId } });
+    return;
+  }
+  if (amt === 0 && link.entityType !== "refund") return;
 
   if (link.entityType === "payable") {
-    const p = await prisma.payable.findUnique({ where: { id: link.entityId } });
+    const p = await db.payable.findUnique({ where: { id: link.entityId } });
     if (!p) return;
     const newPaid = Math.max(0, Math.min(p.originalAmount, p.amountPaid - amt));
     const newRem = Math.max(0, p.originalAmount - newPaid);
-    await prisma.payable.update({
+    await db.payable.update({
       where: { id: p.id },
       data: {
         amountPaid: newPaid,
@@ -929,15 +937,15 @@ async function reverseLink(link: {
       },
     });
     const { propagatePayableToOperational } = await import("./links-service");
-    await propagatePayableToOperational(p.id);
+    await propagatePayableToOperational(p.id, db);
   }
 
   if (link.entityType === "receivable") {
-    const r = await prisma.receivable.findUnique({ where: { id: link.entityId } });
+    const r = await db.receivable.findUnique({ where: { id: link.entityId } });
     if (!r) return;
-    const newReceived = Math.max(0, r.amountReceived - amt);
+    const newReceived = Math.max(0, Math.min(r.totalPackage, r.amountReceived - amt));
     const newRem = Math.max(0, r.totalPackage - newReceived);
-    await prisma.receivable.update({
+    await db.receivable.update({
       where: { id: r.id },
       data: {
         amountReceived: newReceived,
@@ -948,13 +956,13 @@ async function reverseLink(link: {
   }
 
   if (link.entityType === "payroll") {
-    const p = await prisma.payrollEntry.findUnique({ where: { id: link.entityId } });
+    const p = await db.payrollEntry.findUnique({ where: { id: link.entityId } });
     if (!p) return;
     const wasFullyPaid = p.status === "Paid";
     const newPaid = Math.max(0, (p.amountPaid ?? 0) - amt);
     const newRemaining = Math.max(0, p.netPayable - newPaid);
     const nowFullyPaid = newRemaining <= 0 && newPaid > 0;
-    await prisma.payrollEntry.update({
+    await db.payrollEntry.update({
       where: { id: p.id },
       data: {
         amountPaid: newPaid,
@@ -965,21 +973,21 @@ async function reverseLink(link: {
     });
     if (p.employeeId && p.loanInstallment > 0) {
       if (wasFullyPaid && !nowFullyPaid) {
-        const loan = await prisma.employeeLoan.findFirst({
+        const loan = await db.employeeLoan.findFirst({
           where: { employeeId: p.employeeId },
         });
         if (loan) {
-          await prisma.employeeLoan.update({
+          await db.employeeLoan.update({
             where: { id: loan.id },
             data: { remainingAmount: loan.remainingAmount + p.loanInstallment },
           });
         }
       } else if (!wasFullyPaid && nowFullyPaid) {
-        const loan = await prisma.employeeLoan.findFirst({
+        const loan = await db.employeeLoan.findFirst({
           where: { employeeId: p.employeeId, remainingAmount: { gt: 0 } },
         });
         if (loan) {
-          await prisma.employeeLoan.update({
+          await db.employeeLoan.update({
             where: { id: loan.id },
             data: {
               remainingAmount: Math.max(0, loan.remainingAmount - p.loanInstallment),
@@ -991,14 +999,14 @@ async function reverseLink(link: {
   }
 
   if (link.entityType === "commission") {
-    await prisma.commission.update({
+    await db.commission.update({
       where: { id: link.entityId },
       data: { status: "Accrued" },
     });
   }
 
   if (link.entityType === "employee_loan") {
-    const loan = await prisma.employeeLoan.findUnique({
+    const loan = await db.employeeLoan.findUnique({
       where: { id: link.entityId },
     });
     if (!loan) return;
@@ -1008,7 +1016,7 @@ async function reverseLink(link: {
       link.appliedAmount > 0
         ? Math.max(0, loan.originalAmount - link.appliedAmount)
         : loan.originalAmount;
-    await prisma.employeeLoan.update({
+    await db.employeeLoan.update({
       where: { id: loan.id },
       data: {
         remainingAmount: newRemaining,
@@ -1018,16 +1026,16 @@ async function reverseLink(link: {
   }
 
   if (link.entityType === "asset") {
-    await deleteAssetFromTransaction(link.entityId);
+    await deleteAssetFromTransaction(link.entityId, db);
   }
 
   if (link.entityType === "refund") {
-    const refund = await prisma.refund.findUnique({
+    const refund = await db.refund.findUnique({
       where: { id: link.entityId },
     });
     if (!refund) return;
 
-    const recv = await prisma.receivable.findFirst({
+    const recv = amt === 0 ? null : await db.receivable.findFirst({
       where: {
         periodId: refund.periodId,
         OR: [
@@ -1043,7 +1051,7 @@ async function reverseLink(link: {
         recv.amountReceived + refund.amount
       );
       const newRemaining = Math.max(0, recv.totalPackage - newReceived);
-      await prisma.receivable.update({
+      await db.receivable.update({
         where: { id: recv.id },
         data: {
           amountReceived: newReceived,
@@ -1058,45 +1066,70 @@ async function reverseLink(link: {
       });
     }
 
-    await removeRefundFromClientLedger(refund.id);
-    await prisma.refund.delete({ where: { id: refund.id } }).catch(() => { });
+    await removeRefundFromClientLedger(refund.id, db);
+    await db.refund.delete({ where: { id: refund.id } });
   }
 }
 
 /* ------ UPDATE ------ */
-export async function updateTransaction(id: string, input: Partial<TxnInput>) {
-  const old = await prisma.transaction.findUnique({ where: { id } });
-  if (!old) return null;
+async function reverseTransactionEffects(txn: Transaction, db: Prisma.TransactionClient) {
+  const links = await db.transactionLink.findMany({
+    where: { transactionId: txn.id },
+  });
+  if (!links.some((link) => link.entityType === "client_ledger") && txn.party &&
+      /receipt|revenue/i.test(txn.category)) {
+    // Older receipts lacked row IDs. Only remove a uniquely identifiable generated row.
+    const candidates = await db.clientLedger.findMany({
+      where: {
+        clientName: txn.party, tourDate: txn.date, category: txn.category,
+        description: txn.description, debit: txn.debit, credit: txn.credit,
+        notes: { startsWith: "Auto-posted from transaction" },
+      },
+      select: { id: true },
+      take: 2,
+    });
+    if (candidates.length === 1) {
+      await db.clientLedger.delete({ where: { id: candidates[0].id } });
+    }
+  }
+  for (const link of links) await reverseLink(link, db);
 
   await applyBankEffect({
-    periodId: old.periodId,
-    date: old.date,
-    description: old.description,
-    category: old.category,
-    party: old.party,
-    subCategory: old.subCategory,
-    bankAccount: old.bankAccount,
-    debit: old.debit,
-    credit: old.credit,
-    status: old.status,
-    notes: old.notes,
+    periodId: txn.periodId,
+    date: txn.date,
+    description: txn.description,
+    category: txn.category,
+    party: txn.party,
+    subCategory: txn.subCategory,
+    bankAccount: txn.bankAccount,
+    debit: txn.debit,
+    credit: txn.credit,
+    status: txn.status,
+    notes: txn.notes,
     sign: -1,
-  });
-  const links = await prisma.transactionLink.findMany({
-    where: { transactionId: id },
-  });
-  for (const link of links) await reverseLink(link);
-  await prisma.transactionLink.deleteMany({ where: { transactionId: id } });
+    legacyCreatedAt: links.some((link) => link.entityType === "bank_txn") ? undefined : txn.createdAt,
+  }, db);
+  await db.transactionLink.deleteMany({ where: { transactionId: txn.id } });
+}
 
-  await prisma.clientLedger.deleteMany({
-    where: {
-      clientName: old.party || undefined,
-      notes: { startsWith: "Auto-posted from transaction" },
-      tourDate: old.date,
-    },
-  });
+export async function updateTransaction(
+  id: string,
+  input: Partial<TxnInput>,
+  options: {
+    expectedUpdatedAt?: string;
+    validate?: (next: TxnInput, db: Prisma.TransactionClient) => Promise<void>;
+  } = {},
+  db?: Prisma.TransactionClient,
+): Promise<Transaction | null> {
+  if (!db) return runTransactionMutation((tx) => updateTransaction(id, input, options, tx));
+  const old = await db.transaction.findUnique({ where: { id } });
+  if (!old) return null;
+  if (options.expectedUpdatedAt && old.updatedAt.toISOString() !== options.expectedUpdatedAt) {
+    throw new StaleTransactionError();
+  }
 
-  const updated = await prisma.transaction.update({
+  await reverseTransactionEffects(old, db);
+  const updated = await db.transaction.update({
     where: { id },
     data: {
       date: input.date ? new Date(input.date) : undefined,
@@ -1115,171 +1148,10 @@ export async function updateTransaction(id: string, input: Partial<TxnInput>) {
     },
   });
 
-  await applyBankEffect({
-    periodId: updated.periodId,
-    date: updated.date,
-    description: updated.description,
-    category: updated.category,
-    party: updated.party,
-    subCategory: updated.subCategory,
-    bankAccount: updated.bankAccount,
-    debit: updated.debit,
-    credit: updated.credit,
-    status: updated.status,
-    notes: updated.notes,
-    sign: 1,
-  });
-
-  let newLinks: AppliedLink[] = [];
-
-  if (isBankTransferCategory(updated.category)) {
-    newLinks = [];
-  } else if (isAssetCategory(updated.category)) {
-    const amount =
-      Math.abs(updated.credit || 0) || Math.abs(updated.debit || 0);
-    if (amount > 0) {
-      const assetId = await createAssetFromTransaction({
-        periodId: updated.periodId,
-        date: new Date(updated.date),
-        description: updated.description,
-        category: input.assetCategory || updated.subCategory || "Other",
-        cost: amount,
-        notes: updated.notes || null,
-      });
-      if (assetId) {
-        newLinks = [
-          {
-            entityType: "asset",
-            entityId: assetId,
-            appliedAmount: amount,
-          },
-        ];
-      }
-    }
-  } else if (isDrawingCategory(updated.category)) {
-    newLinks = [];
-  } else {
-    newLinks = await resolveLinks({
-      periodId: updated.periodId,
-      date: updated.date.toISOString(),
-      description: updated.description,
-      category: updated.category,
-      subCategory: updated.subCategory,
-      party: updated.party,
-      tripRef: updated.tripRef,
-      debit: updated.debit,
-      credit: updated.credit,
-      hotelAgreedCost: input.hotelAgreedCost,
-      transportAgreedCost: input.transportAgreedCost,
-    });
-  }
-
-  for (const link of newLinks) {
-    await prisma.transactionLink.create({
-      data: {
-        transactionId: updated.id,
-        periodId: updated.periodId,
-        entityType: link.entityType,
-        entityId: link.entityId,
-        appliedAmount: link.appliedAmount,
-      },
-    });
-  }
-
-  const cat = (updated.category || "").toLowerCase();
-  const isClientSide =
-    cat.includes("receipt") ||
-    cat.includes("client receipt") ||
-    cat.includes("revenue");
-
-  if (isClientSide && updated.party) {
-    const client = await prisma.client.findFirst({
-      where: { name: updated.party },
-    });
-    if (client) {
-      const paidNow = updated.debit > 0 ? updated.debit : 0;
-      const creditedNow = updated.credit > 0 ? Math.abs(updated.credit) : 0;
-
-      const recv = await prisma.receivable.findFirst({
-        where: {
-          periodId: updated.periodId,
-          OR: [{ clientId: client.id }, { clientName: client.name }],
-          status: { in: ["Open", "Partial", "Overdue"] },
-        },
-        orderBy: { createdAt: "asc" },
-      });
-
-      if (recv) {
-        let newReceived = recv.amountReceived;
-        if (paidNow > 0) newReceived += paidNow;
-        if (creditedNow > 0) newReceived -= creditedNow;
-        newReceived = Math.max(0, Math.min(recv.totalPackage, newReceived));
-        const newRemaining = Math.max(0, recv.totalPackage - newReceived);
-
-        await prisma.receivable.update({
-          where: { id: recv.id },
-          data: {
-            amountReceived: newReceived,
-            remainingAmount: newRemaining,
-            status:
-              newRemaining <= 0 && newReceived > 0
-                ? "Settled"
-                : newReceived > 0
-                  ? "Partial"
-                  : "Open",
-          },
-        });
-
-        await prisma.transactionLink.create({
-          data: {
-            transactionId: updated.id,
-            periodId: updated.periodId,
-            entityType: "receivable",
-            entityId: recv.id,
-            appliedAmount: paidNow - creditedNow,
-          },
-        });
-      }
-
-      if (paidNow > 0) {
-        await prisma.clientLedger.create({
-          data: {
-            clientId: client.id,
-            clientName: client.name,
-            tourDate: new Date(updated.date),
-            description: updated.description || "Client receipt",
-            category: updated.category,
-            hotel: "Payment",
-            debit: paidNow,
-            credit: 0,
-            status: "Received",
-            enteredBy: updated.enteredBy || null,
-            notes: "Auto-posted from transaction",
-          },
-        });
-      }
-
-      if (creditedNow > 0) {
-        await prisma.clientLedger.create({
-          data: {
-            clientId: client.id,
-            clientName: client.name,
-            tourDate: new Date(updated.date),
-            description:
-              updated.description || "Credit / amount returned to client",
-            category: updated.category,
-            hotel: "Credit",
-            debit: 0,
-            credit: creditedNow,
-            status: "Credited",
-            enteredBy: updated.enteredBy || null,
-            notes:
-              "Auto-posted from transaction (money returned to client - reduces amount received)",
-          },
-        });
-      }
-    }
-  }
-
+  const next = { ...input, ...updated, date: updated.date.toISOString() };
+  await options.validate?.(next, db);
+  await applyTransactionEffects(updated, next, db);
   return updated;
 }
+
+export class StaleTransactionError extends Error {}
