@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkspaceTable } from "@/components/WorkspaceTable";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus, X, Check, Loader2 } from "lucide-react";
@@ -339,7 +341,7 @@ export function BankMovementsPanel({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b">
                 {[
@@ -411,7 +413,7 @@ export function BankMovementsPanel({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
     </div>

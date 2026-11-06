@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkspaceTable } from "@/components/WorkspaceTable";
+
 import { useState, useEffect, useRef } from "react";
 import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
@@ -1089,7 +1091,7 @@ export function TransactionManager({
       ) : (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b">
                   {[
@@ -1138,6 +1140,7 @@ export function TransactionManager({
                     <td className="px-3 py-2">{t.status}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button
+                        aria-label="Edit transaction"
                         onClick={() => openEdit(t)}
                         disabled={loading}
                         className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-40"
@@ -1145,6 +1148,7 @@ export function TransactionManager({
                         <Pencil size={15} />
                       </button>
                       <button
+                        aria-label="Delete transaction"
                         onClick={() => remove(t.id)}
                         disabled={loading}
                         className="p-1.5 text-red-600 hover:bg-red-50 rounded ml-1 disabled:opacity-40"
@@ -1155,7 +1159,7 @@ export function TransactionManager({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </div>
       )}

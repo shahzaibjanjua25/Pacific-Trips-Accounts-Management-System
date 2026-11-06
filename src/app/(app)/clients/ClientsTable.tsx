@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkspaceTable } from "@/components/WorkspaceTable";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -421,7 +423,7 @@ export function ClientsTable({
       ) : (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b">
                   {[
@@ -541,7 +543,7 @@ export function ClientsTable({
                   );
                 })}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </div>
       )}

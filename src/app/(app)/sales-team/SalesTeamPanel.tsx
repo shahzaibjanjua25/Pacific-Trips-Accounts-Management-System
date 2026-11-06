@@ -1,6 +1,7 @@
 
 "use client";
 
+import { WorkspaceTable } from "@/components/WorkspaceTable";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Plus, X, Trash2, Search, Pencil, Loader2 } from "lucide-react";
@@ -746,7 +747,7 @@ export function SalesTeamPanel({
 
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b">
                     {[
@@ -865,7 +866,7 @@ export function SalesTeamPanel({
                     ))
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </div>
 
@@ -876,7 +877,7 @@ export function SalesTeamPanel({
               </h3>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <WorkspaceTable className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50/60 border-b">
                     {[
@@ -952,7 +953,7 @@ export function SalesTeamPanel({
                     ))
                   )}
                 </tbody>
-              </table>
+              </WorkspaceTable>
             </div>
           </div>
         </>

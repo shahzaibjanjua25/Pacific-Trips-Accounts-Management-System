@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { WorkspaceTable } from "@/components/WorkspaceTable";
+
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatPKR } from "@/lib/utils";
 import { Pencil, Trash2, Plus, X, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
@@ -317,7 +319,7 @@ export function CrudPanel({
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
                   {linkedEntityType && <th className="w-8 px-2 py-2.5"></th>}
@@ -352,24 +354,16 @@ export function CrudPanel({
                       ? "payable"
                       : linkedEntityType;
 
-                  return (
-                    <FragmentRow
-                      key={row.id}
-                      row={row}
-                      tableFields={tableFields}
-                      linkedEntityType={linkedEntityType}
-                      isExpanded={isExpanded}
-                      linkId={linkId}
-                      linkType={linkType}
-                      onToggle={() => toggleExpand(row.id)}
-                      onEdit={() => openEdit(row)}
-                      onRemove={() => remove(row.id)}
-                      disabled={loading}
-                    />
-                  );
+                  return renderFragmentRow({
+                    row, tableFields, linkedEntityType, isExpanded, linkId, linkType,
+                    onToggle: () => toggleExpand(row.id),
+                    onEdit: () => openEdit(row),
+                    onRemove: () => remove(row.id),
+                    disabled: loading,
+                  });
                 })}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </div>
       )}
@@ -377,7 +371,7 @@ export function CrudPanel({
   );
 }
 
-function FragmentRow({
+function renderFragmentRow({
   row,
   tableFields,
   linkedEntityType,
@@ -401,7 +395,7 @@ function FragmentRow({
   disabled?: boolean;
 }) {
   return (
-    <>
+    <Fragment key={row.id}>
       <tr className="border-b border-slate-100 hover:bg-slate-50/80">
         {linkedEntityType && (
           <td className="px-2 py-2">
@@ -469,6 +463,6 @@ function FragmentRow({
           </td>
         </tr>
       )}
-    </>
+    </Fragment>
   );
 }

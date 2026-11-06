@@ -1,3 +1,5 @@
+
+import { WorkspaceTable } from "@/components/WorkspaceTable";
 import { NoAccountingMonth } from "@/components/NoAccountingMonth";
 import { resolveActivePeriod } from "@/lib/period";
 import { getDashboardData, trendSeries } from "@/lib/dashboard";
@@ -796,7 +798,7 @@ function CompactTable({
       {rows.length === 0 ? (
         <div className="px-4 py-8 text-center text-xs text-slate-400">{emptyText}</div>
       ) : (
-        <table className="w-full text-xs">
+        <WorkspaceTable className="w-full text-xs">
           <thead>
             <tr className="border-b border-slate-100 text-slate-500">
               {headers.map((h, i) => (
@@ -827,7 +829,7 @@ function CompactTable({
               </tr>
             ))}
           </tbody>
-        </table>
+        </WorkspaceTable>
       )}
     </div>
   );

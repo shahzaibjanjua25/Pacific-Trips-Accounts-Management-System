@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkspaceTable } from "@/components/WorkspaceTable";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
@@ -303,7 +305,7 @@ export function RefundsPanel({
       ) : (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <WorkspaceTable className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b">
                   {[
@@ -376,7 +378,7 @@ export function RefundsPanel({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </WorkspaceTable>
           </div>
         </div>
       )}

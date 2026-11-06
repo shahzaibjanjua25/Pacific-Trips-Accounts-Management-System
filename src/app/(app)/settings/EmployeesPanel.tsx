@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkspaceTable } from "@/components/WorkspaceTable";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
@@ -538,7 +540,7 @@ function EmployeeTable({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b">
                 <th className="px-3 py-2 font-medium">Name</th>
@@ -617,7 +619,7 @@ function EmployeeTable({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       )}
       {/* keep periodId referenced for linters */}

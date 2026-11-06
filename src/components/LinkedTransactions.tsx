@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkspaceTable } from "@/components/WorkspaceTable";
+
 import { useEffect, useState } from "react";
 import { formatPKR } from "@/lib/utils";
 import { Receipt } from "lucide-react";
@@ -79,7 +81,7 @@ export function LinkedTransactions({
           Applied: {formatPKR(total)}
         </span>
       </div>
-      <table className="w-full text-xs">
+      <WorkspaceTable className="w-full text-xs">
         <thead>
           <tr className="text-left text-[10px] text-slate-500 uppercase border-b">
             <th className="px-3 py-1.5">Date</th>
@@ -106,7 +108,7 @@ export function LinkedTransactions({
             </tr>
           ))}
         </tbody>
-      </table>
+      </WorkspaceTable>
     </div>
   );
 }

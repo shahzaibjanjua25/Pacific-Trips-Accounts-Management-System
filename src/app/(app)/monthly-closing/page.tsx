@@ -1,3 +1,5 @@
+
+import { WorkspaceTable } from "@/components/WorkspaceTable";
 import { NoAccountingMonth } from "@/components/NoAccountingMonth";
 import { prisma } from "@/lib/prisma";
 import { canCloseMonth, resolveActivePeriod } from "@/lib/period";
@@ -296,7 +298,7 @@ export default async function MonthlyClosingPage({
           )}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <WorkspaceTable className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b text-xs text-slate-500 uppercase">
                 <th className="px-4 py-2 text-left font-semibold">Line</th>
@@ -307,72 +309,66 @@ export default async function MonthlyClosingPage({
               </tr>
             </thead>
             <tbody>
-              <ComparisonRow
-                label="Revenue"
-                current={revenue}
-                prev={lastMonth?.profitability.revenue}
-                delta={delta(revenue, lastMonth?.profitability.revenue)}
-                positiveIsGood
-              />
-              <ComparisonRow
-                label="Direct trip costs"
-                current={directCosts}
-                prev={lastMonth?.profitability.directCosts}
-                delta={delta(directCosts, lastMonth?.profitability.directCosts)}
-                positiveIsGood={false}
-              />
-              <ComparisonRow
-                label="Gross profit"
-                current={grossProfit}
-                prev={lastMonth?.profitability.grossProfit}
-                delta={delta(grossProfit, lastMonth?.profitability.grossProfit)}
-                positiveIsGood
-                bold
-              />
-              <ComparisonRow
-                label="Operating expenses"
-                current={operating}
-                prev={lastMonth?.profitability.operatingExpenses}
-                delta={delta(operating, lastMonth?.profitability.operatingExpenses)}
-                positiveIsGood={false}
-              />
-              <ComparisonRow
-                label="Net profit / (loss)"
-                current={netProfit}
-                prev={lastMonth?.profitability.netProfit}
-                delta={delta(netProfit, lastMonth?.profitability.netProfit)}
-                positiveIsGood
-                bold
-              />
-              <ComparisonRow
-                label="Cash in banks"
-                current={bankNow}
-                prev={lastMonth?.cash.totalBank}
-                delta={delta(bankNow, lastMonth?.cash.totalBank)}
-                positiveIsGood
-              />
-              <ComparisonRow
-                label="Clients owe us"
-                current={d.receivables.clientOutstanding}
-                prev={lastMonth?.receivables.clientOutstanding}
-                delta={delta(
-                  d.receivables.clientOutstanding,
-                  lastMonth?.receivables.clientOutstanding
-                )}
-                positiveIsGood={false}
-              />
-              <ComparisonRow
-                label="We owe suppliers"
-                current={d.payables.supplierRemaining}
-                prev={lastMonth?.payables.supplierRemaining}
-                delta={delta(
-                  d.payables.supplierRemaining,
-                  lastMonth?.payables.supplierRemaining
-                )}
-                positiveIsGood={false}
-              />
+              {renderComparisonRow({
+                label: "Revenue",
+                current: revenue,
+                prev: lastMonth?.profitability.revenue,
+                delta: delta(revenue, lastMonth?.profitability.revenue),
+                positiveIsGood: true,
+              })}
+              {renderComparisonRow({
+                label: "Direct trip costs",
+                current: directCosts,
+                prev: lastMonth?.profitability.directCosts,
+                delta: delta(directCosts, lastMonth?.profitability.directCosts),
+                positiveIsGood: false,
+              })}
+              {renderComparisonRow({
+                label: "Gross profit",
+                current: grossProfit,
+                prev: lastMonth?.profitability.grossProfit,
+                delta: delta(grossProfit, lastMonth?.profitability.grossProfit),
+                positiveIsGood: true,
+                bold: true,
+              })}
+              {renderComparisonRow({
+                label: "Operating expenses",
+                current: operating,
+                prev: lastMonth?.profitability.operatingExpenses,
+                delta: delta(operating, lastMonth?.profitability.operatingExpenses),
+                positiveIsGood: false,
+              })}
+              {renderComparisonRow({
+                label: "Net profit / (loss)",
+                current: netProfit,
+                prev: lastMonth?.profitability.netProfit,
+                delta: delta(netProfit, lastMonth?.profitability.netProfit),
+                positiveIsGood: true,
+                bold: true,
+              })}
+              {renderComparisonRow({
+                label: "Cash in banks",
+                current: bankNow,
+                prev: lastMonth?.cash.totalBank,
+                delta: delta(bankNow, lastMonth?.cash.totalBank),
+                positiveIsGood: true,
+              })}
+              {renderComparisonRow({
+                label: "Clients owe us",
+                current: d.receivables.clientOutstanding,
+                prev: lastMonth?.receivables.clientOutstanding,
+                delta: delta(d.receivables.clientOutstanding, lastMonth?.receivables.clientOutstanding),
+                positiveIsGood: false,
+              })}
+              {renderComparisonRow({
+                label: "We owe suppliers",
+                current: d.payables.supplierRemaining,
+                prev: lastMonth?.payables.supplierRemaining,
+                delta: delta(d.payables.supplierRemaining, lastMonth?.payables.supplierRemaining),
+                positiveIsGood: false,
+              })}
             </tbody>
-          </table>
+          </WorkspaceTable>
         </div>
       </section>
 
@@ -518,7 +514,7 @@ function MicroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ComparisonRow({
+function renderComparisonRow({
   label,
   current,
   prev,
@@ -545,7 +541,7 @@ function ComparisonRow({
         ? "text-emerald-600"
         : "text-red-600";
   return (
-    <tr className={`border-b border-slate-100 ${bold ? "bg-slate-50/50" : ""}`}>
+    <tr key={label} className={`border-b border-slate-100 ${bold ? "bg-slate-50/50" : ""}`}>
       <td className={`px-4 py-2 ${bold ? "font-bold text-slate-900" : "text-slate-700"}`}>
         {label}
       </td>
