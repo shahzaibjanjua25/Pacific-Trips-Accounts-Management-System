@@ -721,7 +721,7 @@ export function TransactionManager({
         <form
           aria-busy={loading}
           onSubmit={save}
-          className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3"
+          className="finance-surface space-y-4 p-4 sm:p-6"
         >
           <div className="flex justify-between items-center">
             <h3 className="font-semibold text-slate-800">
@@ -754,7 +754,7 @@ export function TransactionManager({
               required
             />
             <label className="block text-xs">
-              <span className="text-slate-600 font-medium">Category</span>
+              <span className="font-medium text-slate-700">Category</span>
               <select
                 value={form.category}
                 onChange={(e) => {
@@ -766,7 +766,7 @@ export function TransactionManager({
                   });
                   setShowOther(false);
                 }}
-                className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
                 {!CATEGORIES.some((category) => category === form.category) && (
                   <option value={form.category}>{form.category}</option>
@@ -781,7 +781,7 @@ export function TransactionManager({
 
             {isBankTransfer ? (
               <label className="block text-xs">
-                <span className="text-slate-600 font-medium">
+                <span className="font-medium text-slate-700">
                   To Account (transfer into)
                 </span>
                 <select
@@ -801,7 +801,7 @@ export function TransactionManager({
                       }));
                     }
                   }}
-                  className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   required
                 >
                   <option value="">Select destination account…</option>
@@ -821,13 +821,13 @@ export function TransactionManager({
               </label>
             ) : isAssetCategory ? (
               <label className="block text-xs">
-                <span className="text-slate-600 font-medium">Asset Category</span>
+                <span className="font-medium text-slate-700">Asset Category</span>
                 <select
                   value={form.assetCategory}
                   onChange={(e) =>
                     setForm({ ...form, assetCategory: e.target.value })
                   }
-                  className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   {ASSET_CATEGORY_OPTIONS.map((o) => (
                     <option key={o} value={o}>
@@ -842,13 +842,13 @@ export function TransactionManager({
               </div>
             ) : (
               <label className="block text-xs">
-                <span className="text-slate-600 font-medium">
+                <span className="font-medium text-slate-700">
                   Party / Sub-Category (from {form.category})
                 </span>
                 <select
                   value={showOther ? "__other__" : form.party || form.subCategory || ""}
                   onChange={(e) => onPartySelect(e.target.value)}
-                  className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="">- Select -</option>
                   {(form.party || form.subCategory) &&
@@ -903,8 +903,8 @@ export function TransactionManager({
                   value={form.clientTotalPackage}
                   onChange={(v) => setForm((f) => ({ ...f, clientTotalPackage: v }))}
                 />
-                <label className="block text-xs col-span-2 md:col-span-1">
-                  <span className="text-slate-600 font-medium">
+                <label className="block text-xs sm:col-span-2 md:col-span-1">
+                  <span className="font-medium text-slate-700">
                     Salesperson (who brought this client)
                   </span>
                   <div className="mt-1">
@@ -916,7 +916,7 @@ export function TransactionManager({
                     />
                   </div>
                 </label>
-                <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
+                <p className="text-xs text-amber-800 col-span-full -mt-1">
                   Total Package = full sale (updates Clients tab). Debit = amount paid now.
                   Selecting a salesperson adds the package amount to their sales
                   and recalculates commission (2.5%, or Team Lead tiered rate).
@@ -946,7 +946,7 @@ export function TransactionManager({
                   value={form.clientNotes}
                   onChange={(v) => setForm({ ...form, clientNotes: v })}
                 />
-                <p className="text-xs text-emerald-800 col-span-2 md:col-span-4 -mt-1">
+                <p className="text-xs text-emerald-800 col-span-full -mt-1">
                   A new Client will be created in the Clients master with these details.
                 </p>
               </>
@@ -960,7 +960,7 @@ export function TransactionManager({
                   value={form.hotelAgreedCost}
                   onChange={(v) => setForm((f) => ({ ...f, hotelAgreedCost: v }))}
                 />
-                <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
+                <p className="text-xs text-amber-800 col-span-full -mt-1">
                   Total agreed amount with the hotel for THIS booking. Credit = amount paid now.
                   Enter the full booking cost here so the hotel&apos;s running payable
                   is raised by the new booking before your payment is applied.
@@ -979,7 +979,7 @@ export function TransactionManager({
                     setForm((f) => ({ ...f, transportAgreedCost: v }))
                   }
                 />
-                <p className="text-xs text-amber-800 col-span-2 md:col-span-4 -mt-1">
+                <p className="text-xs text-amber-800 col-span-full -mt-1">
                   Total agreed amount with the driver/transporter for THIS job. Credit = amount paid now.
                   Enter the full job cost here so the driver&apos;s running payable
                   is raised by the new job before your payment is applied.
@@ -989,7 +989,7 @@ export function TransactionManager({
             )}
 
             {isAssetCategory && (
-              <p className="text-xs text-emerald-800 col-span-2 md:col-span-4 -mt-1">
+              <p className="text-xs text-emerald-800 col-span-full -mt-1">
                 This will create a new Asset row (Company Assets page) with cost
                 equal to the Credit amount, on the transaction date. The chosen
                 bank account will decrease by the same amount.
@@ -997,7 +997,7 @@ export function TransactionManager({
             )}
 
             {isDrawingCategory && (
-              <p className="text-xs text-emerald-800 col-span-2 md:col-span-4 -mt-1">
+              <p className="text-xs text-emerald-800 col-span-full -mt-1">
                 <strong>{form.category}</strong> moves money out of the business
                 and appears ONLY in Transactions and the bank balance. No
                 receivables, payables, expenses, assets or payroll records are
@@ -1006,7 +1006,7 @@ export function TransactionManager({
             )}
 
             <label className="block text-xs sm:col-span-2">
-              <span className="text-slate-600 font-medium">
+              <span className="font-medium text-slate-700">
                 {isBankTransfer
                   ? "From Account (transfer out of)"
                   : "Account (Payment Method)"}
@@ -1016,7 +1016,7 @@ export function TransactionManager({
                 onChange={(e) =>
                   setForm({ ...form, accountMode: e.target.value })
                 }
-                className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
                 <option value="">Select account…</option>
                 {form.accountMode && !["Cash", "Petty Cash", "Cheque", "__other__"].includes(form.accountMode) &&
@@ -1178,7 +1178,7 @@ function Field({
 }) {
   return (
     <label className="block text-xs">
-      <span className="text-slate-600 font-medium">{label}</span>
+      <span className="font-medium text-slate-700">{label}</span>
       <input
         type={type}
         min={type === "number" ? 0 : undefined}
@@ -1186,7 +1186,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
-        className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
       />
     </label>
   );
@@ -1205,11 +1205,11 @@ function Select({
 }) {
   return (
     <label className="block text-xs">
-      <span className="text-slate-600 font-medium">{label}</span>
+      <span className="font-medium text-slate-700">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full border border-amber-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
       >
         {options.map((o) => (
           <option key={o} value={o}>

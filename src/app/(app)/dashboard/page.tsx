@@ -21,6 +21,7 @@ import {
   Sparkles,
   ArrowLeftRight,
   CalendarCheck,
+  ArrowUpRight,
 } from "lucide-react";
 
 export default async function DashboardPage({
@@ -147,7 +148,7 @@ export default async function DashboardPage({
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
 
-  // ── Money Map values (bank → +receivables → −payables → free) ─────────
+  // ── Cash position values (bank → +receivables → −payables → free) ─────────
   const mapIn = moneyInBanks + clientsOweUs;
   const mapOut = weOweOthers;
 
@@ -172,34 +173,43 @@ export default async function DashboardPage({
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <section className="relative isolate overflow-hidden rounded-3xl bg-[#13233b] px-6 py-8 text-white shadow-sm sm:px-9 sm:py-10">
-        <div aria-hidden className="pointer-events-none absolute -right-16 -top-32 -z-10 h-96 w-96 rounded-full bg-teal-400/20 blur-3xl" />
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+    <div className="mx-auto max-w-[1440px] space-y-6">
+      <section className="finance-hero relative isolate overflow-hidden rounded-[1.75rem] px-6 py-7 text-white sm:px-9 sm:py-9">
+        <div className="finance-hero-grid pointer-events-none absolute inset-0 -z-10" aria-hidden />
+        <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_minmax(15rem,21rem)] xl:items-end">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-200">Pacific Trips · Finance workspace</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-5xl">Financial overview</h1>
-            <p className="mt-3 max-w-lg text-sm leading-6 text-slate-300">
-              Review cash, profit and outstanding balances for the selected accounting month.
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200">Pacific Trips / Finance</p>
+            <h1 className="mt-3 text-4xl font-semibold leading-[1.04] tracking-[-0.055em] sm:text-6xl">Financial overview</h1>
+            <p className="mt-4 max-w-md text-sm leading-6 text-emerald-50/75">
+              Cash, profitability and outstanding balances for {currentPeriod.label}.
             </p>
-            <div className="mt-5 flex flex-wrap items-center gap-2 text-xs font-medium">
-              <span className="rounded-full bg-white/10 px-3 py-1.5 text-white">{currentPeriod.label}</span>
-              <span className="rounded-full bg-teal-300/15 px-3 py-1.5 text-teal-100">{currentPeriod.isClosed ? "Closed" : "Open"}</span>
-              <span className="rounded-full bg-white/10 px-3 py-1.5 text-slate-200">PKR</span>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <Link href={monthLink("/transactions")} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#baf4d3] px-4 text-sm font-semibold text-[#10291f] hover:bg-emerald-100">
+                <ArrowLeftRight size={16} aria-hidden /> Transactions
+              </Link>
+              <Link href={monthLink("/monthly-closing")} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/25 px-4 text-sm font-semibold text-white hover:bg-white/10">
+                <CalendarCheck size={16} aria-hidden /> Month review
+              </Link>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href={monthLink("/transactions")} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-200 px-4 text-sm font-semibold text-slate-950 hover:bg-teal-100">
-              <ArrowLeftRight size={16} aria-hidden /> Transactions
-            </Link>
-            <Link href={monthLink("/monthly-closing")} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/25 px-4 text-sm font-semibold text-white hover:bg-white/10">
-              <CalendarCheck size={16} aria-hidden /> Month review
-            </Link>
+          <div className="rounded-2xl border border-white/15 bg-black/15 p-5 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-medium text-emerald-50/80">Cash on hand</span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-white">
+                <span className={currentPeriod.isClosed ? "h-1.5 w-1.5 rounded-full bg-slate-300" : "h-1.5 w-1.5 rounded-full bg-emerald-300"} aria-hidden />
+                {currentPeriod.isClosed ? "Closed month" : "Open month"}
+              </span>
+            </div>
+            <p className="mt-3 break-words text-3xl font-semibold tracking-tight tabular-nums sm:text-4xl">{formatPKR(moneyInBanks)}</p>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3 text-xs text-emerald-50/80">
+              <span>Bank and cash accounts · PKR</span>
+              <Link href={monthLink("/bank")} className="inline-flex items-center gap-1 font-medium text-white hover:underline">Bank accounts <ArrowUpRight size={13} aria-hidden /></Link>
+            </div>
           </div>
         </div>
       </section>
 
-      <section aria-label="Month management" className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+      <section aria-label="Month management" className="flex flex-col gap-3 finance-surface p-4 sm:flex-row sm:items-start sm:justify-between">
         <PeriodSelector key={currentPeriod.id} periods={periods} currentId={currentPeriod.id} allowCreate />
         <div className="shrink-0"><ExportMonthButton periodId={currentPeriod.id} periodLabel={currentPeriod.label} /></div>
       </section>
@@ -207,10 +217,10 @@ export default async function DashboardPage({
       {/* ═══ HERO BAND ═══ */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {/* Health ring */}
-        <div className="lg:col-span-1 bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white flex items-center gap-4 shadow-sm">
+        <div className="lg:col-span-1 finance-surface flex items-center gap-4 p-5 text-slate-900">
           <div className="relative w-24 h-24 shrink-0">
             <svg viewBox="0 0 100 100" className="w-24 h-24 -rotate-90">
-              <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#e8eeea" strokeWidth="8" />
               <circle
                 cx="50"
                 cy="50"
@@ -224,13 +234,13 @@ export default async function DashboardPage({
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-2xl font-bold leading-none">{health}</span>
-              <span className="text-[9px] uppercase tracking-wider opacity-70 mt-1">/ 100</span>
+              <span className="text-[10px] uppercase tracking-wider text-slate-500 mt-1">/ 100</span>
             </div>
           </div>
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-wider opacity-70">Financial Health</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">Financial Health</p>
             <p className="text-xl font-bold mt-0.5">{healthRing.text}</p>
-            <p className="text-[11px] opacity-70 mt-1 leading-snug">
+            <p className="mt-1 text-xs leading-snug text-slate-600">
               Cash · Profit · Net Position
             </p>
           </div>
@@ -269,17 +279,17 @@ export default async function DashboardPage({
       </div>
 
       {/* ═══ MONEY MAP ═══ */}
-      <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <section className="finance-surface overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-100">
-          <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-            Money Map
+          <h2 className="text-base font-semibold tracking-tight text-slate-900">
+            Cash position
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             How cash flows from what you have to what&apos;s truly free
           </p>
         </div>
         <div className="p-5">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center">
+          <div className="grid grid-cols-1 items-center gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr]">
             <FlowNode
               icon={<Wallet size={16} />}
               label="Bank"
@@ -303,12 +313,12 @@ export default async function DashboardPage({
           </div>
           <div className="mt-4 border-t border-dashed border-slate-200 pt-4 flex flex-wrap items-center justify-between gap-3">
             <div className="text-xs text-slate-500">
-              Cash available <strong className="text-slate-800">{formatPKR(mapIn)}</strong>{" "}
+              Cash and receivables <strong className="text-slate-800">{formatPKR(mapIn)}</strong>{" "}
               − obligations <strong className="text-slate-800">{formatPKR(mapOut)}</strong>
             </div>
             <div className="flex items-baseline gap-3">
               <span className="text-xs uppercase font-bold tracking-wider text-slate-500">
-                Free Cash =
+                Free cash
               </span>
               <span
                 className={`text-2xl font-bold tabular-nums ${
@@ -326,8 +336,8 @@ export default async function DashboardPage({
       <section>
         <div className="flex items-end justify-between mb-3">
           <div>
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-              The Four Pillars
+            <h2 className="text-base font-semibold tracking-tight text-slate-900">
+              Account overview
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               Drill into any area that needs a decision
@@ -399,7 +409,7 @@ export default async function DashboardPage({
         <section>
           <div className="flex items-end justify-between mb-3">
             <div>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+              <h2 className="text-base font-semibold tracking-tight text-slate-900">
                 Needs Your Attention
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -563,7 +573,7 @@ function HeroStat({
   return (
     <Link
       href={href}
-      className={`rounded-2xl border p-5 shadow-sm hover:shadow-md transition-all block ${colors.box}`}
+      className={`finance-surface finance-interactive block p-5 ${colors.box}`}
     >
       <div className="flex items-center justify-between">
         <span className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide px-2 py-1 rounded-md ${colors.chip}`}>
@@ -572,7 +582,7 @@ function HeroStat({
         </span>
         {trend}
       </div>
-      <p className={`text-3xl font-bold mt-3 tabular-nums ${colors.num}`}>
+      <p className={`mt-3 break-words text-3xl font-semibold tracking-tight tabular-nums ${colors.num}`}>
         {formatPKR(value)}
       </p>
       <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
@@ -652,7 +662,7 @@ function PillarCard({
   return (
     <Link
       href={href}
-      className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all p-5 block group"
+      className="finance-surface finance-interactive group block p-5"
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -773,7 +783,7 @@ function CompactTable({
   emptyText: string;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="finance-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-slate-500">{icon}</span>

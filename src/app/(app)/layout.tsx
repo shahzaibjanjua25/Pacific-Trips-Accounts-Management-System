@@ -16,11 +16,12 @@ export default async function AppLayout({
 
   return (
     <LoadingProvider>
-      <div className="min-h-screen bg-[#f3f6fa] text-slate-900">
+      <div className="finance-workspace min-h-screen text-slate-900">
         <LoadingOverlay />
         <Sidebar />
-        <main className="min-h-screen lg:pl-64">
-          <div className="mx-auto max-w-[1600px] px-4 pb-8 pt-20 md:px-6 lg:p-8">
+        <a href="#workspace-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2">Skip to content</a>
+        <main id="workspace-content" className="min-h-screen lg:pl-64">
+          <div className="mx-auto max-w-[1600px] px-4 pb-10 pt-20 md:px-6 lg:p-8 xl:px-10">
             {children}
           </div>
         </main>
