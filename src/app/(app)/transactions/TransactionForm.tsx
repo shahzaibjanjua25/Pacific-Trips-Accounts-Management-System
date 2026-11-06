@@ -210,6 +210,7 @@ export function TransactionManager({
     if (!open) return;
     // Asset Purchase, Owner Drawing, Personal Expense, Bank Transfer: no party lookup
     if (isAssetCategory || isDrawingCategory || isBankTransfer) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Clear the previous lookup when this category has no party.
       setOptions([]);
       return;
     }
@@ -234,6 +235,7 @@ export function TransactionManager({
 
   useEffect(() => {
     if (!open || !shouldCheckOutstanding) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Discard the previous lookup when the current selection is ineligible.
       setOutstanding(null);
       return;
     }
@@ -241,6 +243,7 @@ export function TransactionManager({
       ? form.otherName
       : form.party || form.subCategory;
     if (!partyName) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Discard the previous lookup when the current selection is ineligible.
       setOutstanding(null);
       return;
     }

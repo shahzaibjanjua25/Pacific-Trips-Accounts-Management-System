@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { monthLabel } from "./utils";
 
@@ -61,9 +62,8 @@ export async function getOrCreatePeriodWithCarryForward(
   return result;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function carryForwardTx(
-  tx: any,
+  tx: Prisma.TransactionClient,
   fromPeriodId: string,
   toPeriodId: string
 ) {
@@ -200,7 +200,7 @@ async function carryForwardTx(
     });
     for (const loan of loans) {
       const empName = loan.employee?.name || "";
-      let installment = installmentFor(
+      const installment = installmentFor(
         empName,
         loan.monthlyInstallment || 0
       );

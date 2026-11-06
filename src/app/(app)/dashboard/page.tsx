@@ -270,7 +270,7 @@ export default async function DashboardPage({
             Money Map
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            How cash flows from what you have to what's truly free
+            How cash flows from what you have to what&apos;s truly free
           </p>
         </div>
         <div className="p-5">

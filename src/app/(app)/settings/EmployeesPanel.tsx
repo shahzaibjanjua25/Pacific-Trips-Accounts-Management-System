@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus, X, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
@@ -98,9 +98,11 @@ export function EmployeesPanel({
   // Keep local state in sync with the server-provided list so after
   // router.refresh() the panel never shows a stale role.
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
-  useEffect(() => {
+  const [previousEmployees, setPreviousEmployees] = useState(initialEmployees);
+  if (previousEmployees !== initialEmployees) {
+    setPreviousEmployees(initialEmployees);
     setEmployees(initialEmployees);
-  }, [initialEmployees]);
+  }
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Employee | null>(null);

@@ -25,7 +25,6 @@ export function SeedDatabaseButton() {
     const [result, setResult] = useState<string | null>(null);
 
     async function refreshCounts() {
-        setLoadingCounts(true);
         try {
             const res = await fetch("/api/admin/seed");
             const data = await res.json();
@@ -36,7 +35,7 @@ export function SeedDatabaseButton() {
     }
 
     useEffect(() => {
-        refreshCounts();
+        void refreshCounts();
     }, []);
 
     async function runSeed(force: boolean) {
@@ -65,6 +64,7 @@ export function SeedDatabaseButton() {
                     .map(([k, v]) => `  • ${k}: ${v}`)
                     .join("\n")
             );
+            setLoadingCounts(true);
             await refreshCounts();
             router.refresh();
         } catch (e) {

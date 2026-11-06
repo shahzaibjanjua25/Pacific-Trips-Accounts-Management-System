@@ -22,26 +22,30 @@ export function LookupSelect({
   allowOther?: boolean;
 }) {
   const [items, setItems] = useState<LookupItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadedUrl, setLoadedUrl] = useState<string>();
+  const qs = new URLSearchParams({ key: lookupKey });
+  if (periodId) qs.set("periodId", periodId);
+  const url = "/api/lookup?" + qs.toString();
+  const loading = loadedUrl !== url;
   const [showOther, setShowOther] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    const qs = new URLSearchParams({ key: lookupKey });
-    if (periodId) qs.set("periodId", periodId);
-    fetch(`/api/lookup?${qs.toString()}`)
+    fetch(url)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
         if (!cancelled) setItems(Array.isArray(data) ? data : []);
       })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadedUrl(url);
       });
     return () => {
       cancelled = true;
     };
-  }, [lookupKey, periodId]);
+  }, [url]);
 
   // If the value isn't in the list, keep it as the current selection
   const hasValue = items.some((i) => i.value === value);

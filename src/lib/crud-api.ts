@@ -171,7 +171,7 @@ export function makeCrudHandlers(modelName: ModelName, opts?: { periodScoped?: b
       const model = getModel(modelName);
       const body = await req.json();
       const cleaned = pickAllowed(modelName, body);
-      let data = cleanData(modelName, cleaned);
+      const data = cleanData(modelName, cleaned);
       delete data.id;
       delete data.team;
       if (!periodScoped) delete data.periodId;
@@ -209,7 +209,7 @@ export function makeCrudHandlers(modelName: ModelName, opts?: { periodScoped?: b
       if (!oldRecord) return NextResponse.json({ error: "Record not found" }, { status: 404 });
 
       const cleaned = pickAllowed(modelName, body);
-      let data = cleanData(modelName, cleaned);
+      const data = cleanData(modelName, cleaned);
       delete data.id;
       delete data.team;
       delete data.createdAt;

@@ -30,9 +30,11 @@ export function LoadingProvider({ children }: { children: React.ReactNode }) {
 
   // ⭐ Auto-clear loading screen when route successfully changes
   useEffect(() => {
-    // Whenever the URL changes, we force the loading state off
+    // Reset pending navigation state when Next.js commits the new URL.
+    /* eslint-disable react-hooks/set-state-in-effect -- Synchronize with the committed route. */
     setCount(0);
     setLabel("");
+    /* eslint-enable react-hooks/set-state-in-effect */
     labelStack.current = [];
   }, [pathname, searchParams]);
 
