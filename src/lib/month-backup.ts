@@ -12,6 +12,7 @@ export async function readMonthBackup(db: Prisma.TransactionClient, periodId: st
       officeExpenses: true, marketingExpenses: true, pettyCashTxns: true, bankTxns: true,
       cashFlowSnapshots: true, assets: true, liabilities: true, ownerTxns: true, vadets: true,
       monthlyClosings: true, salesPerformance: true, salesTarget: true, balanceSheetLines: true,
+      clientReceiptReopenings: true,
     },
   });
   if (!period) return null;

@@ -50,8 +50,21 @@ model Period {
   salesPerformance  SalesPerformance[]
   salesTarget       SalesTarget?                    // â† ADD
   balanceSheetLines BalanceSheetLine[]
+  clientReceiptReopenings ClientReceiptReopening[]
 
   @@unique([year, month])
+}
+
+model ClientReceiptReopening {
+  id               String   @id @default(cuid())
+  periodId         String
+  period           Period   @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  clientName       String
+  balanceSignature String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([periodId, clientName])
 }
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // SALES TARGET (drives Team Lead commission tier)

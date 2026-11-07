@@ -1,3 +1,4 @@
+import { clientReceiptGroups } from "@/lib/client-receipts";
 import { NoAccountingMonth } from "@/components/NoAccountingMonth";
 import { prisma } from "@/lib/prisma";
 import { resolveActivePeriod } from "@/lib/period";
@@ -220,6 +221,37 @@ export default async function ClientsPage({
     });
   }
 
+  const receiptGroups = await clientReceiptGroups(current.id);
+  for (const group of receiptGroups.values()) {
+    if (rows.some((row) => row.name === group.name)) continue;
+    rows.push({
+      id: "recv-" + group.id, name: group.name,
+      phone: null, contact: null, email: null, notes: null,
+      totalPackage: group.totalPackage, amountPaid: group.amountPaid, amountDue: group.amountDue,
+      status: group.completed ? "Completed" : group.amountPaid > 0 ? "Partial" : "Open",
+      tripInfo: "-", salesperson: null, bankAccount: null,
+      bookingDate: null, dueDate: null, tripStart: null, tripDates: null, destination: null,
+      discounts: 0, additionalCharges: 0, finalSettlement: null, receivableNotes: null,
+    });
+  }
+  const classified = rows.map((row) => {
+    const group = receiptGroups.get(row.name);
+    return {
+      ...row,
+      totalPackage: group?.totalPackage ?? row.totalPackage,
+      amountPaid: group?.amountPaid ?? row.amountPaid,
+      amountDue: group?.amountDue ?? row.amountDue,
+      status: group?.reopened ? "Reopened" : group?.completed ? "Completed" :
+        group && group.amountDue > 0 ? (group.amountPaid > 0 ? "Partial" : "Open") : row.status,
+      receiptCompleted: group?.completed ?? false,
+      receiptReopened: group?.reopened ?? false,
+      hasCurrentReceivable: receivables.some((invoice) =>
+        invoice.clientId === row.id || invoice.clientName === row.name),
+    };
+  });
+  const ongoing = classified.filter((row) => !row.receiptCompleted);
+  const completed = classified.filter((row) => row.receiptCompleted);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -233,7 +265,20 @@ export default async function ClientsPage({
         <PeriodSelector periods={periods} currentId={current.id} />
       </div>
 
-      <ClientsTable rows={rows} periodId={current.id} />
+      <section className="space-y-3" aria-labelledby="ongoing-clients">
+        <div>
+          <h2 id="ongoing-clients" className="text-lg font-semibold text-slate-900">Ongoing clients ({ongoing.length})</h2>
+          <p className="text-sm text-slate-600">Available for client receipts in this accounting month.</p>
+        </div>
+        <ClientsTable rows={ongoing} periodId={current.id} />
+      </section>
+      <section className="space-y-3" aria-labelledby="completed-clients">
+        <div>
+          <h2 id="completed-clients" className="text-lg font-semibold text-slate-900">Completed clients ({completed.length})</h2>
+          <p className="text-sm text-slate-600">Fully paid clients. Restore a client to ongoing when you need them in the receipt form again.</p>
+        </div>
+        <ClientsTable rows={completed} periodId={current.id} completedView />
+      </section>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
+import { clientReceiptGroups } from "@/lib/client-receipts";
 
 type Option = {
   label: string;
@@ -99,34 +100,19 @@ export async function GET(req: NextRequest) {
       category.includes("revenue") ||
       category.includes("client receipt")
     ) {
-      const recv = await prisma.receivable.findMany({
-        where: periodId ? { periodId } : {},
-        orderBy: [{ remainingAmount: "desc" }, { clientName: "asc" }],
-      });
-      const options: Option[] = recv.map((r) => ({
-        label: `${r.clientName} ${r.remainingAmount > 0
-            ? `(due ${r.remainingAmount.toLocaleString()})`
-            : "(fully paid)"
-          }`,
-        value: r.clientName,
-        remaining: r.remainingAmount,
-        id: r.id,
-        entityType: "receivable",
-      }));
-
-      const clients = await prisma.client.findMany({ orderBy: { name: "asc" } });
-      const have = new Set(options.map((o) => o.value));
-      for (const c of clients) {
-        if (!have.has(c.name)) {
-          options.push({
-            label: c.name,
-            value: c.name,
-            remaining: 0,
-            id: c.id,
-            entityType: "client",
-          });
-        }
-      }
+      if (!periodId) return NextResponse.json({ error: "Choose an accounting month." }, { status: 400 });
+      const groups = await clientReceiptGroups(periodId);
+      const options: Option[] = [...groups.values()]
+        .filter((client) => !client.completed)
+        .sort((a, b) => b.amountDue - a.amountDue || a.name.localeCompare(b.name))
+        .map((client) => ({
+          label: client.reopened ? client.name + " (reopened)" : client.amountDue > 0
+            ? client.name + " (due " + client.amountDue.toLocaleString() + ")" : client.name,
+          value: client.name,
+          remaining: client.amountDue,
+          id: client.id,
+          entityType: client.entityType,
+        }));
       options.push({ label: "Other...", value: "__other__", remaining: 0 });
       return NextResponse.json(options);
     }

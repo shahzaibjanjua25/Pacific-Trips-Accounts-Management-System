@@ -3,7 +3,6 @@
 import { WorkspaceTable } from "@/components/WorkspaceTable";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChevronRight, Pencil, Trash2, X, Plus, Loader2 } from "lucide-react";
 import { formatPKR } from "@/lib/utils";
@@ -12,6 +11,9 @@ import { useMutate } from "@/components/useMutate";
 
 type Row = {
   id: string;
+  receiptCompleted: boolean;
+  receiptReopened: boolean;
+  hasCurrentReceivable: boolean;
   name: string;
   phone: string | null;
   contact: string | null;
@@ -60,16 +62,39 @@ const emptyForm = {
 export function ClientsTable({
   rows,
   periodId,
+  completedView = false,
 }: {
   rows: Row[];
   periodId: string;
+  completedView?: boolean;
 }) {
-  const router = useRouter();
   const mutate = useMutate();
   const [editing, setEditing] = useState<Row | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [statusError, setStatusError] = useState("");
+
+  async function changeReceiptStatus(row: Row, action: "reopen" | "complete") {
+    if (loading) return;
+    setLoading(true);
+    setStatusError("");
+    try {
+      await mutate(action === "reopen" ? "Restoring client…" : "Completing client…", async () => {
+        const response = await fetch("/api/clients/receipt-status", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ periodId, clientName: row.name, action }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not update client status.");
+      });
+    } catch (error) {
+      setStatusError(error instanceof Error ? error.message : "Could not update client status.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function openAdd() {
     setEditing(null);
@@ -86,8 +111,8 @@ export function ClientsTable({
       contact: r.contact || "",
       email: r.email || "",
       notes: r.notes || "",
-      totalPackage: String(r.totalPackage || 0),
-      amountPaid: String(r.amountPaid || 0),
+      totalPackage: r.hasCurrentReceivable ? String(r.totalPackage || 0) : "",
+      amountPaid: r.hasCurrentReceivable ? String(r.amountPaid || 0) : "",
       bankAccount: r.bankAccount || "Faysal Bank",
       salesperson: r.salesperson || "",
       bookingDate: r.bookingDate ? r.bookingDate.slice(0, 10) : "",
@@ -194,6 +219,7 @@ export function ClientsTable({
 
   return (
     <div className="space-y-4">
+      {!completedView && rows.some((row) => row.receiptReopened) && <p className="text-sm text-slate-600">Restored clients are available in the receipt form. Update the package or amount due before recording an additional payment.</p>}
       {(editing || adding) && (
         <form
           onSubmit={save}
@@ -207,6 +233,11 @@ export function ClientsTable({
               <X size={18} />
             </button>
           </div>
+          {editing && !editing.hasCurrentReceivable && (
+            <p className="text-sm text-slate-600">
+              This client has no booking in the selected month. Enter a new package and payment for this month when starting new work.
+            </p>
+          )}
 
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -404,7 +435,7 @@ export function ClientsTable({
         </form>
       )}
 
-      <div className="flex justify-end">
+      {!completedView && <div className="flex justify-end">
         <button
           type="button"
           onClick={openAdd}
@@ -413,12 +444,12 @@ export function ClientsTable({
         >
           <Plus size={16} /> Add Client
         </button>
-      </div>
+      </div>}
+      {statusError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{statusError}</p>}
 
       {rows.length === 0 ? (
         <div className="bg-white rounded-xl border p-10 text-center text-slate-500 text-sm">
-          No clients yet. Click <strong>Add Client</strong> or post a Client
-          Receipt in Transactions.
+          {completedView ? "No completed clients in this month." : "No ongoing clients in this month. Add a client or restore one from the completed table."}
         </div>
       ) : (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
@@ -512,6 +543,13 @@ export function ClientsTable({
                         </span>
                       </td>
                       <td className="px-3 py-3 text-right whitespace-nowrap">
+                        {(completedView || r.receiptReopened) && (
+                          <button type="button" disabled={loading}
+                            onClick={() => changeReceiptStatus(r, completedView ? "reopen" : "complete")}
+                            className="mr-2 rounded-lg border border-teal-200 px-3 py-1.5 text-xs font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50">
+                            {completedView ? "Restore to ongoing" : "Move to completed"}
+                          </button>
+                        )}
                         {editable && (
                           <>
                             <button
