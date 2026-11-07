@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/auth";
 import { CarryForwardError } from "@/lib/carry-forward";
 import { deleteBackedUpMonth, matchesMonthBackup, readMonthBackup } from "@/lib/month-backup";
 import { prisma } from "@/lib/prisma";
+import { ensureClientReceiptStorage } from "@/lib/client-receipt-storage";
 
 export async function GET() {
   const uid = await getSessionUserId();
@@ -59,6 +60,7 @@ export async function DELETE(req: NextRequest) {
     if (typeof id !== "string" || typeof proof !== "string") {
       return NextResponse.json({ error: "Download a backup before deleting this month." }, { status: 400 });
     }
+    await ensureClientReceiptStorage();
     const result = await prisma.$transaction(async (db) => {
       const snapshot = await readMonthBackup(db, id);
       if (!snapshot) return "missing";

@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/auth";
 import { clientReceiptGroups } from "@/lib/client-receipts";
 import { prisma } from "@/lib/prisma";
+import { ensureClientReceiptStorage } from "@/lib/client-receipt-storage";
 
 export async function PATCH(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
+    await ensureClientReceiptStorage();
     const { periodId, clientName, action } = await req.json();
     if (typeof periodId !== "string" || typeof clientName !== "string" ||
         !["reopen", "complete"].includes(action)) {

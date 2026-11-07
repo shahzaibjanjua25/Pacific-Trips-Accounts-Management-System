@@ -8,6 +8,7 @@ import {
 import { issueMonthBackupProof, readMonthBackup } from "@/lib/month-backup";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
+import { ensureClientReceiptStorage } from "@/lib/client-receipt-storage";
 
 export async function GET(req: NextRequest) {
   const uid = await getSessionUserId();
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
     }
 
     const forDeletion = req.nextUrl.searchParams.get("forDeletion") === "1";
+    if (forDeletion) await ensureClientReceiptStorage();
     const result = await prisma.$transaction(async (db) => {
       const period = await db.period.findUnique({ where: { id: periodId } });
       if (!period) return null;

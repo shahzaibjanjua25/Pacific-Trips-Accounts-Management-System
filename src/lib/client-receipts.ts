@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { isClientReceiptCategory } from "./transaction-categories";
+import { ensureClientReceiptStorage } from "./client-receipt-storage";
 
 type ClientReceiptGroup = {
   name: string;
@@ -17,6 +18,7 @@ type ClientReceiptGroup = {
 };
 
 export async function clientReceiptGroups(periodId: string, db: Prisma.TransactionClient = prisma) {
+  await ensureClientReceiptStorage();
   const selectedPeriod = await db.period.findUnique({ where: { id: periodId } });
   if (!selectedPeriod) return new Map<string, ClientReceiptGroup>();
   const [clients, receivables, ledgers, reopenings] = await Promise.all([
