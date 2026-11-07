@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { isClientReceiptCategory } from "./transaction-categories";
 
 type ClientReceiptGroup = {
   name: string;
@@ -66,4 +67,20 @@ export async function clientReceiptGroups(periodId: string, db: Prisma.Transacti
     });
   }
   return groups;
+}
+
+export function withReceiptPaymentStatus<T extends {
+  category: string; party?: string | null; subCategory?: string | null; status: string;
+}>(transactions: T[], groups: Awaited<ReturnType<typeof clientReceiptGroups>>) {
+  return transactions.map((transaction) => {
+    if (!isClientReceiptCategory(transaction.category) ||
+        !["completed", "paid", "settled"].includes(transaction.status.toLowerCase())) {
+      return { ...transaction, receiptPaymentStatus: undefined };
+    }
+    const client = groups.get(transaction.party || transaction.subCategory || "");
+    return {
+      ...transaction,
+      receiptPaymentStatus: client?.completed ? "Completed" : "Pending",
+    };
+  });
 }

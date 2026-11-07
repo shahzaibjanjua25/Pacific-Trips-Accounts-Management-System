@@ -63,12 +63,31 @@ async function main() {
   const draft = await post({ ...input, description: "Draft receipt", status: "Pending" });
   assert.equal(draft.status, 200, await draft.clone().text());
   const draftId = (await draft.json()).id;
-  await state(5, 1);
+  await state(85, 2);
   const completed = await put({ id: draftId, status: "Completed" });
   assert.equal(completed.status, 200, await completed.clone().text());
   await state(85, 2);
   const cancelled = await put({ id: draftId, status: "Cancelled" });
   assert.equal(cancelled.status, 200, await cancelled.clone().text());
+  await state(85, 2);
+  assert.equal((await remove(draftId)).status, 200);
+  await state(5, 1);
+
+  const nonReceiptDraft = await post({ ...input, category: "Other", status: "Pending" });
+  assert.equal(nonReceiptDraft.status, 200, await nonReceiptDraft.clone().text());
+  const otherId = (await nonReceiptDraft.json()).id;
+  await state(5, 1);
+  assert.equal((await put({ id: otherId, status: "Completed" })).status, 200);
+  assert.equal((await prisma.bankBalance.findFirstOrThrow({ where: { accountName: bankAccount } })).balance, 85);
+  assert.equal((await put({ id: otherId, status: "Cancelled" })).status, 200);
+  await state(5, 1);
+
+  const legacy = await prisma.transaction.create({
+    data: { ...input, date: new Date(input.date), description: "Legacy cancelled receipt", status: "Cancelled" },
+  });
+  const legacyEdit = await put({ id: legacy.id, description: "Corrected legacy note" });
+  assert.equal(legacyEdit.status, 200, await legacyEdit.clone().text());
+  assert.equal((await legacyEdit.json()).status, "Cancelled");
   await state(5, 1);
 
   const excessiveRefund = await post({ ...input, category: "Refund", debit: 0, credit: 6 });

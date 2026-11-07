@@ -69,9 +69,8 @@ export async function GET(req: NextRequest) {
         reason: "no-receivables-in-period",
       });
     }
-    const r =
-      rows.find((row) => nameMatch(row.clientName, party)) ??
-      rows.find((row) => lastNameMatch(row.clientName, party));
+    const matching = rows.filter((row) => norm(row.clientName) === norm(party));
+    const r = matching.find((row) => row.remainingAmount > 0) ?? matching[0];
 
     if (r) {
       return NextResponse.json({
@@ -84,9 +83,7 @@ export async function GET(req: NextRequest) {
 
     // No name match - check if the client master exists
     const clients = await prisma.client.findMany();
-    const c =
-      clients.find((row) => nameMatch(row.name, party)) ??
-      clients.find((row) => lastNameMatch(row.name, party));
+    const c = clients.find((row) => norm(row.name) === norm(party));
     if (c) {
       return NextResponse.json({
         outstanding: 0,
@@ -95,16 +92,10 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Fallback: return the SUM of all remaining receivables so that
-    // any amount larger than the total outstanding is still blocked.
-    const totalRemaining = rows.reduce(
-      (s, row) => s + row.remainingAmount,
-      0
-    );
     return NextResponse.json({
-      outstanding: totalRemaining,
-      exists: true,
-      reason: "no-name-match",
+      outstanding: 0,
+      exists: false,
+      reason: "new-client",
     });
   }
 

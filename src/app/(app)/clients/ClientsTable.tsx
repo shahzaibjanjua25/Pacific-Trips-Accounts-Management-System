@@ -534,7 +534,7 @@ export function ClientsTable({
                             r.status === "Settled" ||
                             r.status === "Completed"
                               ? "bg-emerald-100 text-emerald-800"
-                              : r.status === "Partial"
+                              : r.status === "Partial" || r.status === "Pending"
                                 ? "bg-amber-100 text-amber-800"
                                 : "bg-slate-100 text-slate-600"
                           }`}

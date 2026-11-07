@@ -22,6 +22,7 @@ type Txn = {
   paymentMethod?: string | null;
   bankAccount?: string | null;
   status: string;
+  receiptPaymentStatus?: string;
   enteredBy?: string | null;
   notes?: string | null;
   salesperson?: string | null;
@@ -611,6 +612,7 @@ export function TransactionManager({
 
       const payload = {
         ...form,
+        status: isClientCategory ? "Completed" : form.status,
         periodId,
         party,
         subCategory,
@@ -904,6 +906,7 @@ export function TransactionManager({
                   type="number"
                   value={form.clientTotalPackage}
                   onChange={(v) => setForm((f) => ({ ...f, clientTotalPackage: v }))}
+                  required={showOther && !editing}
                 />
                 <label className="block text-xs sm:col-span-2 md:col-span-1">
                   <span className="font-medium text-slate-700">
@@ -1056,12 +1059,17 @@ export function TransactionManager({
               />
             )}
 
-            <Select
+            {!isClientCategory && <Select
               label="Status"
               value={form.status}
               onChange={(v) => setForm({ ...form, status: v })}
               options={["Pending", "Completed", "Cancelled"]}
-            />
+            />}
+            {isClientCategory && (
+              <p className="col-span-full text-xs text-slate-600">
+                Payment status is automatic. The client stays Pending until the agreed package is fully received, then moves to Completed.
+              </p>
+            )}
             <Field
               label="Entered By"
               value={form.enteredBy}
@@ -1137,7 +1145,7 @@ export function TransactionManager({
                       {t.credit ? formatPKR(t.credit) : "-"}
                     </td>
                     <td className="px-3 py-2">{t.bankAccount || "-"}</td>
-                    <td className="px-3 py-2">{t.status}</td>
+                    <td className="px-3 py-2">{t.receiptPaymentStatus ?? t.status}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button
                         aria-label="Edit transaction"

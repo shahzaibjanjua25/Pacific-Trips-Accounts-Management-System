@@ -1,5 +1,6 @@
 import type { Prisma, Transaction } from "@prisma/client";
 import { prisma } from "./prisma";
+import { isClientReceiptCategory } from "./transaction-categories";
 import {
   applyPaymentToPayables,
   applyPayrollPayment,
@@ -516,6 +517,10 @@ export function runTransactionMutation<T>(operation: (db: Prisma.TransactionClie
 
 export async function postTransaction(input: TxnInput, db?: Prisma.TransactionClient): Promise<Transaction> {
   if (!db) return runTransactionMutation((tx) => postTransaction(input, tx));
+  if (isClientReceiptCategory(input.category)) {
+    // Receipt money is posted immediately. Payment completion comes from the client balance.
+    input = { ...input, status: "Completed" };
+  }
   const txn = await db.transaction.create({
     data: {
       periodId: input.periodId,
@@ -563,7 +568,7 @@ async function applyTransactionEffects(txn: Transaction, input: TxnInput, db: Pr
     bankAccount: input.bankAccount,
     debit: input.debit || 0,
     credit: input.credit || 0,
-    status: input.status || "Completed",
+    status: txn.status,
     notes: input.notes,
     sign: 1,
   }, db);
@@ -678,12 +683,7 @@ async function applyTransactionEffects(txn: Transaction, input: TxnInput, db: Pr
       }
     }
 
-    const paidNow =
-      input.clientAmountPaid && input.clientAmountPaid > 0
-        ? input.clientAmountPaid
-        : input.debit > 0
-          ? input.debit
-          : 0;
+    const paidNow = Math.max(0, input.debit || 0);
 
     const creditedNow = (input.credit || 0) > 0 ? Math.abs(input.credit) : 0;
 
@@ -709,6 +709,9 @@ async function applyTransactionEffects(txn: Transaction, input: TxnInput, db: Pr
       orderBy: { createdAt: "asc" },
     });
     if (openRecv) recv = openRecv;
+    if (!recv && explicitPackage <= 0) {
+      throw new TransactionInputError("Enter the agreed total package before recording the first client receipt.");
+    }
 
     let isNewReceivable = false;
 
@@ -1127,6 +1130,10 @@ export async function updateTransaction(
   if (options.expectedUpdatedAt && old.updatedAt.toISOString() !== options.expectedUpdatedAt) {
     throw new StaleTransactionError();
   }
+  if (isClientReceiptCategory(input.category ?? old.category)) {
+    const legacyUnposted = isClientReceiptCategory(old.category) && !isCompletedStatus(old.status);
+    input = { ...input, status: legacyUnposted ? old.status : "Completed" };
+  }
 
   await reverseTransactionEffects(old, db);
   const updated = await db.transaction.update({
@@ -1155,3 +1162,4 @@ export async function updateTransaction(
 }
 
 export class StaleTransactionError extends Error {}
+export class TransactionInputError extends Error {}

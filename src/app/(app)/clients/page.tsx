@@ -242,7 +242,7 @@ export default async function ClientsPage({
       amountPaid: group?.amountPaid ?? row.amountPaid,
       amountDue: group?.amountDue ?? row.amountDue,
       status: group?.reopened ? "Reopened" : group?.completed ? "Completed" :
-        group && group.amountDue > 0 ? (group.amountPaid > 0 ? "Partial" : "Open") : row.status,
+        group && group.amountDue > 0 ? "Pending" : row.status,
       receiptCompleted: group?.completed ?? false,
       receiptReopened: group?.reopened ?? false,
       hasCurrentReceivable: receivables.some((invoice) =>

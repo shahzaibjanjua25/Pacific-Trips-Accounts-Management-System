@@ -5,10 +5,13 @@ import {
   postTransaction,
   runTransactionMutation,
   StaleTransactionError,
+  TransactionInputError,
   isCompletedStatus,
   deleteTransaction,
   updateTransaction,
 } from "@/lib/transaction-service";
+import { isClientReceiptCategory } from "@/lib/transaction-categories";
+import { clientReceiptGroups, withReceiptPaymentStatus } from "@/lib/client-receipts";
 
 export async function GET(req: NextRequest) {
   const periodId = req.nextUrl.searchParams.get("periodId");
@@ -17,7 +20,7 @@ export async function GET(req: NextRequest) {
     where: { periodId },
     orderBy: { date: "desc" },
   });
-  return NextResponse.json(txns);
+  return NextResponse.json(withReceiptPaymentStatus(txns, await clientReceiptGroups(periodId)));
 }
 
 function isDrawingCategory(category: string): boolean {
@@ -54,7 +57,7 @@ export async function POST(req: NextRequest) {
       credit,
       paymentMethod: body.paymentMethod,
       bankAccount: body.bankAccount,
-      status: body.status || "Completed",
+      status: isClientReceiptCategory(body.category) ? "Completed" : body.status || "Completed",
       enteredBy: body.enteredBy,
       notes: body.notes,
       relatedReceivableId: body.relatedReceivableId,
@@ -150,7 +153,7 @@ function mutationError(error: unknown) {
   if (error instanceof StaleTransactionError) {
     return NextResponse.json({ error: "This transaction changed while you were editing. Refresh and reopen it before saving." }, { status: 409 });
   }
-  if (error instanceof TransactionValidationError ||
+  if (error instanceof TransactionValidationError || error instanceof TransactionInputError ||
       (error instanceof Error && error.message.startsWith("Overpayment blocked:"))) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
@@ -235,8 +238,8 @@ async function lookupOutstanding(
       where: { periodId },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
-    const r = find(rows.filter((row) => row.remainingAmount > 0), "clientName") ??
-      find(rows, "clientName");
+    const matching = rows.filter((row) => norm(row.clientName) === norm(party));
+    const r = matching.find((row) => row.remainingAmount > 0) ?? matching[0];
     return Math.max(0, Math.max(r?.totalPackage ?? 0, opts.clientTotalPackage ?? 0) - (r?.amountReceived ?? 0));
   }
 
