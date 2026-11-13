@@ -36,6 +36,7 @@ const nav = [
     { href: "/balance-sheet", label: "Balance Sheet", icon: BookOpen },
   ] },
   { title: "Money", items: [
+    { href: "/personal-payments", label: "Personal/Family Payments", icon: CreditCard },
     { href: "/bank", label: "Bank Accounts", icon: Landmark },
     { href: "/receivables", label: "Receivables", icon: FileText },
     { href: "/payables", label: "Payables", icon: CreditCard },

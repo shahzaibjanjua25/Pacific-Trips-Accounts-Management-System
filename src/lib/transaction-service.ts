@@ -1,6 +1,6 @@
 import type { Prisma, Transaction } from "@prisma/client";
 import { prisma } from "./prisma";
-import { isClientReceiptCategory } from "./transaction-categories";
+import { isClientReceiptCategory, transactionCategoryBehavior, isStandalonePaymentCategory } from "./transaction-categories";
 import {
   applyPaymentToPayables,
   applyPayrollPayment,
@@ -71,7 +71,7 @@ export type TxnInput = {
 /* ------ CATEGORY HELPERS ------ */
 
 function isDrawingCategory(category?: string | null): boolean {
-  const c = (category || "").toLowerCase().trim();
+  const c = transactionCategoryBehavior(category).toLowerCase().trim();
   return (
     c.includes("owner drawing") ||
     c.includes("personal expense") ||
@@ -81,7 +81,7 @@ function isDrawingCategory(category?: string | null): boolean {
 }
 
 function isAssetCategory(category?: string | null): boolean {
-  return (category || "").toLowerCase().includes("asset");
+  return transactionCategoryBehavior(category).toLowerCase().includes("asset");
 }
 
 /* ------ BANK ------ */
@@ -93,7 +93,7 @@ export function isCompletedStatus(status?: string | null): boolean {
 }
 
 function isBankTransferCategory(category?: string | null): boolean {
-  return (category || "").toLowerCase().includes("bank transfer");
+  return transactionCategoryBehavior(category).toLowerCase().includes("bank transfer");
 }
 
 async function adjustBank(accountName: string | null | undefined, delta: number, db: Prisma.TransactionClient) {
@@ -332,12 +332,12 @@ async function createRefundFromTransaction(opts: {
 
 /* ------ LINK RESOLUTION ------ */
 async function resolveLinks(input: TxnInput, db: Prisma.TransactionClient): Promise<AppliedLink[]> {
-  const cat = (input.category || "").toLowerCase();
+  const cat = transactionCategoryBehavior(input.category).toLowerCase();
   const party = input.party || input.subCategory || "";
   const periodId = input.periodId;
 
   // Pure cash-out categories â€” no operational linkage, no ceiling.
-  if (isDrawingCategory(input.category) || isAssetCategory(input.category)) {
+  if (isStandalonePaymentCategory(input.category) || isDrawingCategory(input.category) || isAssetCategory(input.category)) {
     return [];
   }
 
@@ -599,7 +599,7 @@ async function applyTransactionEffects(txn: Transaction, input: TxnInput, db: Pr
         ];
       }
     }
-  } else if (isDrawingCategory(input.category)) {
+  } else if (isStandalonePaymentCategory(input.category) || isDrawingCategory(input.category)) {
     // Drawing / personal: cash moves, no other record anywhere.
     links = [];
   } else {
@@ -617,7 +617,7 @@ async function applyTransactionEffects(txn: Transaction, input: TxnInput, db: Pr
     });
   }
 
-  const cat = (input.category || "").toLowerCase();
+  const cat = transactionCategoryBehavior(input.category).toLowerCase();
   const party = input.party || input.subCategory || "";
   const amount = Math.abs(input.credit || 0) || Math.abs(input.debit || 0);
 
@@ -1080,7 +1080,7 @@ async function reverseTransactionEffects(txn: Transaction, db: Prisma.Transactio
     where: { transactionId: txn.id },
   });
   if (!links.some((link) => link.entityType === "client_ledger") && txn.party &&
-      /receipt|revenue/i.test(txn.category)) {
+      isClientReceiptCategory(txn.category)) {
     // Older receipts lacked row IDs. Only remove a uniquely identifiable generated row.
     const candidates = await db.clientLedger.findMany({
       where: {

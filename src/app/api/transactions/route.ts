@@ -10,7 +10,7 @@ import {
   deleteTransaction,
   updateTransaction,
 } from "@/lib/transaction-service";
-import { isClientReceiptCategory } from "@/lib/transaction-categories";
+import { isClientReceiptCategory, transactionCategoryBehavior, isStandalonePaymentCategory } from "@/lib/transaction-categories";
 import { clientReceiptGroups, withReceiptPaymentStatus } from "@/lib/client-receipts";
 
 export async function GET(req: NextRequest) {
@@ -170,7 +170,7 @@ async function validateTransaction(
 ) {
   const debit = input.debit ?? 0;
   const credit = input.credit ?? 0;
-  const category = input.category.toLowerCase();
+  const category = transactionCategoryBehavior(input.category).toLowerCase();
   const party = (input.party || input.subCategory || "").trim();
 
   if (!input.periodId || !input.date || !Number.isFinite(new Date(input.date).getTime()) || !input.description?.trim()) {
@@ -178,6 +178,9 @@ async function validateTransaction(
   }
   if ((debit > 0) === (credit > 0)) {
     throw new TransactionValidationError("Enter a positive amount in either Debit or Credit.");
+  }
+  if (isStandalonePaymentCategory(input.category) && (debit > 0 || !input.bankAccount?.trim())) {
+    throw new TransactionValidationError("Choose an account and enter the payment in Credit (money out).");
   }
   if (category.includes("bank transfer")) {
     const from = input.bankAccount?.trim();

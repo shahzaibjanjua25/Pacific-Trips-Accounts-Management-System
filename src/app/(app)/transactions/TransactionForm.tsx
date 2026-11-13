@@ -1,5 +1,6 @@
 "use client";
 
+import { TRANSACTION_CATEGORIES, isStandalonePaymentCategory } from "@/lib/transaction-categories";
 import { WorkspaceTable } from "@/components/WorkspaceTable";
 
 import { useState, useEffect, useRef } from "react";
@@ -45,25 +46,7 @@ type ClientPaidMap = Record<
   { paid: number; refunded: number; refundable: number }
 >;
 
-const CATEGORIES = [
-  "Client Receipt",
-  "Revenue",
-  "Supplier Payment",
-  "Hotel Payment",
-  "Transport Payment",
-  "Ticketing Payment",
-  "Salary Payment",
-  "Commission Payment",
-  "Refund to Client",
-  "Employee Loan",
-  "Office Expense",
-  "Marketing Expense",
-  "Bank Transfer",
-  "Asset Purchase",
-  "Owner Drawing",
-  "Personal Expense",
-  "Other",
-];
+const CATEGORIES = TRANSACTION_CATEGORIES;
 
 const OUTBOUND_CHECK_CATEGORIES = [
   "Salary Payment",
@@ -131,9 +114,11 @@ const empty = {
 export function TransactionManager({
   periodId,
   txns,
+  initialCategory = "Client Receipt",
 }: {
   periodId: string;
   txns: Txn[];
+  initialCategory?: string;
 }) {
   const mutate = useMutate();
   const [open, setOpen] = useState(false);
@@ -143,6 +128,11 @@ export function TransactionManager({
   const [notice, setNotice] = useState("");
   const submitting = useRef(false);
   const [form, setForm] = useState(empty);
+  const [categories, setCategories] = useState(CATEGORIES);
+  const [categoryName, setCategoryName] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
   const [options, setOptions] = useState<Option[]>([]);
   const [showOther, setShowOther] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -155,11 +145,10 @@ export function TransactionManager({
   const isRefundCategory = form.category === "Refund to Client";
   const isAssetCategory = form.category === "Asset Purchase";
   const isDrawingCategory =
-    form.category === "Owner Drawing" || form.category === "Personal Expense";
+    form.category === "Owner Drawing" || form.category === "Personal Expense" ||
+    isStandalonePaymentCategory(form.category);
   const isEmployeeLoan =
-    form.category === "Employee Loan" ||
-    form.category.toLowerCase().includes("employee loan") ||
-    form.category.toLowerCase().includes("staff advance");
+    ["Employee Loan", "Staff Advance"].includes(form.category);
   const isOutboundCategory = OUTBOUND_CHECK_CATEGORIES.includes(form.category);
   const isBankTransfer = form.category === "Bank Transfer";
   const shouldCheckOutstanding =
@@ -169,6 +158,38 @@ export function TransactionManager({
     (isClientCategory ||
       (isOutboundCategory && !isEmployeeLoan) ||
       (isEmployeeLoan && (parseFloat(form.debit) || 0) > 0));
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/transaction-categories", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load saved categories. Reload to retry.");
+        setCategories(await response.json());
+      })
+      .catch((error) => { if (!controller.signal.aborted) setCategoryError(error.message); });
+    return () => controller.abort();
+  }, []);
+
+  async function addCategory() {
+    if (savingCategory) return;
+    setSavingCategory(true);
+    setCategoryError("");
+    try {
+      const response = await fetch("/api/transaction-categories", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: categoryName }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not create category.");
+      setCategories((current) => [...new Set([...current, result.name])]);
+      setForm((current) => ({ ...current, category: result.name, party: "", subCategory: "", otherName: "" }));
+      setShowOther(false);
+      setAddingCategory(false);
+      setCategoryName("");
+    } catch (error) {
+      setCategoryError(error instanceof Error ? error.message : "Could not create category.");
+    } finally { setSavingCategory(false); }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -304,7 +325,7 @@ export function TransactionManager({
     setError("");
     setNotice("");
     setEditing(null);
-    setForm({ ...empty, date: new Date().toISOString().slice(0, 10) });
+    setForm({ ...empty, category: initialCategory, date: new Date().toISOString().slice(0, 10) });
     setShowOther(false);
     setOpen(true);
   }
@@ -772,16 +793,35 @@ export function TransactionManager({
                 }}
                 className="mt-1 w-full border border-slate-300 bg-white rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                {!CATEGORIES.some((category) => category === form.category) && (
+                {!categories.some((category) => category === form.category) && (
                   <option value={form.category}>{form.category}</option>
                 )}
-                {CATEGORIES.map((o) => (
+                {categories.map((o) => (
                   <option key={o} value={o}>
                     {o}
                   </option>
                 ))}
               </select>
             </label>
+
+            <div className="flex items-end pb-1">
+              <button type="button" onClick={() => setAddingCategory((value) => !value)}
+                className="rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-800">
+                {addingCategory ? "Cancel category" : "+ Create category"}
+              </button>
+            </div>
+            {addingCategory && <div className="col-span-full rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <label className="block text-sm font-medium">New category name
+                <input value={categoryName} maxLength={80} onChange={(event) => setCategoryName(event.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2" />
+              </label>
+              <p className="my-2 text-xs text-slate-600">Custom categories record account movements. Use the existing payment categories to settle clients, suppliers or staff.</p>
+              <button type="button" disabled={savingCategory || !categoryName.trim()} onClick={addCategory}
+                className="rounded-lg bg-emerald-700 px-3 py-2 text-sm text-white disabled:opacity-50">
+                {savingCategory ? "Saving category…" : "Save category"}
+              </button>
+            </div>}
+            {categoryError && <p role="alert" className="col-span-full text-sm text-red-700">{categoryError}</p>}
 
             {isBankTransfer ? (
               <label className="block text-xs">
@@ -1003,10 +1043,8 @@ export function TransactionManager({
 
             {isDrawingCategory && (
               <p className="text-xs text-emerald-800 col-span-full -mt-1">
-                <strong>{form.category}</strong> moves money out of the business
-                and appears ONLY in Transactions and the bank balance. No
-                receivables, payables, expenses, assets or payroll records are
-                touched. Perfect for owner withdrawals and personal spend.
+                Enter the payment in Credit to deduct it from the selected account.
+                Personal spending also appears in Personal/Family Payments.
               </p>
             )}
 

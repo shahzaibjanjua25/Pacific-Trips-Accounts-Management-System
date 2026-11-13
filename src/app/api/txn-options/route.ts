@@ -1,3 +1,4 @@
+import { transactionCategoryBehavior } from "@/lib/transaction-categories";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth";
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
   const uid = await getSessionUserId();
   if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const category = (req.nextUrl.searchParams.get("category") || "").toLowerCase();
+  const category = transactionCategoryBehavior(req.nextUrl.searchParams.get("category")).toLowerCase();
   const periodId = req.nextUrl.searchParams.get("periodId");
 
   try {
