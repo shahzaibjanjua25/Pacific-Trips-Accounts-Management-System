@@ -39,7 +39,7 @@ All figures in **PKR**. Full monthly isolation + historical drill-down.
 
 ## Quick Start
 
-Use Node.js 20.9 or later and a local PostgreSQL database. Create an empty application database and a separate shadow database, then copy .env.example to .env. Set the database URLs, generate a unique AUTH_SECRET, and set a unique DEFAULT_ADMIN_PASSWORD of at least 10 characters.
+Use Node.js 20.9 or later and a local PostgreSQL database. Create an empty application database and a separate shadow database, then create a local .env file. Set DATABASE_URL, DIRECT_URL and SHADOW_DATABASE_URL for those databases. Generate a unique AUTH_SECRET and set DEFAULT_ADMIN_USERNAME and a unique DEFAULT_ADMIN_PASSWORD of at least 10 characters.
 
     npm ci
     npm run db:generate
