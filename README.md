@@ -46,7 +46,7 @@ Use Node.js 20.9 or later and a local PostgreSQL database. Create an empty appli
     npm run db:push
     npm run dev
 
-Open http://localhost:3000 and sign in with the initial administrator credentials. To populate a disposable development database with sample data, run npm run db:seed.
+Open http://localhost:3000 and sign in with the initial administrator credentials. To populate a disposable development database with synthetic demo data, run npm run db:seed. The repository seed contains demonstration records only.
 
 ## Tech Stack
 - Next.js 16 (App Router) + TypeScript

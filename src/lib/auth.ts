@@ -80,9 +80,9 @@ export async function ensureDefaultUser() {
     data: {
       username,
       passwordHash: hashPassword(password),
-      securityQ1: "What city is Pacific Trips based in?",
+      securityQ1: "Configure your first recovery question in Security settings.",
       securityA1Hash: hashAnswer(randomBytes(32).toString("hex")),
-      securityQ2: "What is the company currency code?",
+      securityQ2: "Configure your second recovery question in Security settings.",
       securityA2Hash: hashAnswer(randomBytes(32).toString("hex")),
     },
   });

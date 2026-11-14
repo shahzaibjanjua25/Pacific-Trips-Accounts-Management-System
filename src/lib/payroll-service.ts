@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 /**
  * Sales team payroll rules (Pacific Trips policy):
  * - Each sales member: Basic 40,000 PKR + 2.5% commission on THEIR individual sales
- * - Team Lead "Demo staff member" OR any employee with role "Team Lead-Sales":
+ * - Employees with role "Team Lead-Sales":
  *     team sales < commission base        -> fixed 55,000 only
  *     commission base <= sales < target   -> 1.0% of team sales
  *     sales >= monthly target             -> 2.5% of team sales

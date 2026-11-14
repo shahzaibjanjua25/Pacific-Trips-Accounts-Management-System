@@ -99,7 +99,7 @@ function LoginInner() {
         <div className="text-center">
           <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-white border border-slate-200 overflow-hidden mb-3">
             <img
-              src="logo.jpg"
+              src="/logo.jpg"
               alt="Pacific Trips"
               className="w-full h-full object-contain p-2"
             />

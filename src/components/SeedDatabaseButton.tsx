@@ -40,7 +40,7 @@ export function SeedDatabaseButton() {
 
     async function runSeed(force: boolean) {
         const msg = force
-            ? "⚠️ This will DELETE ALL existing data and reseed from the Excel workbook.\n\nType OK to confirm."
+            ? "⚠️ This will DELETE ALL existing accounting data and replace it with synthetic demo records.\n\nType OK to confirm."
             : "Run seed? It will only work if the database is empty.";
         const typed = force ? prompt(msg) : "OK";
         if (force && typed !== "OK") return;
@@ -86,7 +86,7 @@ export function SeedDatabaseButton() {
                     <div>
                         <h3 className="font-semibold text-slate-800">Database Status</h3>
                         <p className="text-xs text-slate-500 mt-0.5">
-                            Seed / restore the Pacific Trips workbook data.
+                            Create synthetic demo records for development.
                         </p>
 
                         {loadingCounts ? (

@@ -1413,11 +1413,9 @@ export async function buildSalesTeamWorkbook(periodId: string, db: Prisma.Transa
   policy.getCell("A3").value =
     "Sales team members: Basic 40,000 PKR + 2.5% of their individual sales";
   policy.getCell("A4").value =
-    "Team Lead (Demo staff member): NO basic salary; 2.5% of ALL sales team sales";
+    "Team lead commissions follow the configured sales targets and payroll rules.";
   policy.getCell("A6").value = "Monthly loan installments deducted from salary:";
-  policy.getCell("A7").value = "• Demo staff member: 30,000 PKR / month";
-  policy.getCell("A8").value = "• Demo staff member (Demo staff member): 20,000 PKR / month";
-  policy.getCell("A9").value = "• Demo staff member: 20,000 PKR / month";
+  policy.getCell("A7").value = "Installments use each employee's saved loan and payroll records.";
   policy.getColumn(1).width = 80;
 
   for (const emp of employees) {
